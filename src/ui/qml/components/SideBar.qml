@@ -1,0 +1,125 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import ReolinkApp
+import ReolinkApp.Core
+
+Rectangle {
+    id: root
+    width: Theme.sidebarWidth
+    color: Theme.surface
+
+    signal addRequested()
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.margins: Theme.spacing
+            Text {
+                text: qsTr("Devices")
+                color: Theme.text
+                font.pixelSize: 14
+                font.bold: true
+            }
+            Item { Layout.fillWidth: true }
+            Rectangle {
+                width: 26
+                height: 26
+                radius: Theme.radius
+                color: addArea.containsMouse ? Theme.accentDim : Theme.surfaceAlt
+                Text {
+                    anchors.centerIn: parent
+                    text: "+"
+                    color: Theme.text
+                    font.pixelSize: 16
+                }
+                MouseArea {
+                    id: addArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.addRequested()
+                }
+            }
+        }
+
+        ListView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            model: Devices
+            clip: true
+            spacing: 2
+
+            delegate: Rectangle {
+                required property int index
+                required property string name
+                required property string status
+                required property string model
+                required property bool online
+
+                width: ListView.view.width
+                height: 52
+                color: delegateArea.containsMouse ? Theme.surfaceAlt : "transparent"
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: Theme.spacing
+                    spacing: Theme.spacing
+
+                    Rectangle { // online dot
+                        width: 8
+                        height: 8
+                        radius: 4
+                        color: online ? Theme.online : Theme.textMuted
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text {
+                            Layout.fillWidth: true
+                            text: name
+                            color: Theme.text
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: model.length > 0 ? model + " · " + status : status
+                            color: Theme.textMuted
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                MouseArea {
+                    id: delegateArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.RightButton
+                    onClicked: contextMenu.popup()
+                }
+
+                Menu {
+                    id: contextMenu
+                    MenuItem {
+                        text: qsTr("Remove device")
+                        onTriggered: Devices.removeDevice(index)
+                    }
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: Devices.count === 0
+                text: qsTr("No devices yet.\nClick + to add one.")
+                color: Theme.textMuted
+                font.pixelSize: 12
+                horizontalAlignment: Text.AlignHCenter
+            }
+        }
+    }
+}
