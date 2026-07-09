@@ -35,9 +35,48 @@ int main(int argc, char *argv[])
     QCommandLineOption smokeDelayOption(QStringLiteral("smoke-delay"),
                                         QStringLiteral("Delay before capture (ms)."),
                                         QStringLiteral("ms"), QStringLiteral("3000"));
+    // Headless recording verification: --record <source> --record-out <file>.
+    QCommandLineOption recordOption(QStringLiteral("record"),
+                                    QStringLiteral("Record a source then exit (no UI)."),
+                                    QStringLiteral("source-url"));
+    QCommandLineOption recordOutOption(QStringLiteral("record-out"),
+                                       QStringLiteral("Output MP4 path for --record."),
+                                       QStringLiteral("path"));
+    QCommandLineOption recordSecsOption(QStringLiteral("record-secs"),
+                                        QStringLiteral("Seconds to record."),
+                                        QStringLiteral("s"), QStringLiteral("4"));
     parser.addOption(smokeOption);
     parser.addOption(smokeDelayOption);
+    parser.addOption(recordOption);
+    parser.addOption(recordOutOption);
+    parser.addOption(recordSecsOption);
     parser.process(app);
+
+    if (parser.isSet(recordOption)) {
+        auto *player = new rl::StreamPlayer(&app);
+        const QString out = parser.value(recordOutOption);
+        const int secs = parser.value(recordSecsOption).toInt();
+        QObject::connect(player, &rl::StreamPlayer::stateChanged, &app, [player, out] {
+            if (player->state() == rl::StreamPlayer::State::Streaming && !player->recording())
+                player->startRecording(out);
+        });
+        QObject::connect(player, &rl::StreamPlayer::recordingSaved, &app, [](const QString &p) {
+            qCInfo(lcUi) << "Recording saved:" << p;
+            QCoreApplication::exit(0);
+        });
+        QObject::connect(player, &rl::StreamPlayer::recordingFailed, &app, [](const QString &e) {
+            qCCritical(lcUi) << "Recording failed:" << e;
+            QCoreApplication::exit(1);
+        });
+        player->setSource(parser.value(recordOption));
+        player->start();
+        QTimer::singleShot(secs * 1000, player, [player] { player->stopRecording(); });
+        QTimer::singleShot((secs + 15) * 1000, &app, [] {
+            qCCritical(lcUi) << "Recording timed out";
+            QCoreApplication::exit(2);
+        });
+        return app.exec();
+    }
 
     rl::Database database(rl::Paths::databaseFile());
     if (!database.open()) {

@@ -246,6 +246,11 @@ Rectangle {
                 glyph: "◉"; enabledTool: true
                 onActivated: Devices.snapshot(root.deviceRow)
             }
+            // Manual record: taps the displayed stream, no second connection.
+            ToolButton {
+                glyph: "⏺"; active: player.recording
+                onActivated: player.recording ? player.stopRecording() : player.startRecording()
+            }
             ToolButton {
                 glyph: "⊕"; active: root.zoom > 1.01
                 onActivated: { if (root.zoom > 1.01) { root.zoom = 1; root.panX = 0; root.panY = 0; }

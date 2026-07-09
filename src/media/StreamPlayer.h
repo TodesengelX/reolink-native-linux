@@ -33,6 +33,7 @@ class StreamPlayer : public QObject
     Q_PROPERTY(QString errorString READ errorString NOTIFY errorStringChanged)
     Q_PROPERTY(qint64 framesDecoded READ framesDecoded NOTIFY framesDecodedChanged)
     Q_PROPERTY(bool loop READ loop WRITE setLoop NOTIFY loopChanged)
+    Q_PROPERTY(bool recording READ recording NOTIFY recordingChanged)
 
 public:
     enum class State { Idle, Connecting, Streaming, Error, Stopped };
@@ -44,6 +45,12 @@ public:
         std::atomic<bool> loop{false};
         std::atomic<qint64> framesDecoded{0};
         QString source;
+
+        // Recording taps this same demux session (DESIGN §5.5): no second stream.
+        std::atomic<bool> recordRequested{false};
+        std::atomic<bool> recording{false};
+        QMutex recMutex;
+        QString recPath;
 
         // Frame/state callbacks marshal to the GUI thread only while the player
         // is alive. backMutex guards `player`; the StreamPlayer destructor nulls
@@ -75,9 +82,16 @@ public:
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
 
+    bool recording() const;
+    // Begin/stop stream-copy recording of the live session to an MP4. An empty
+    // path auto-names a file in the recordings dir. Returns false if not streaming.
+    Q_INVOKABLE bool startRecording(const QString &path = QString());
+    Q_INVOKABLE void stopRecording();
+
     // Called on the GUI thread by the worker (via QMetaObject::invokeMethod).
     // Public so the worker helpers can reach it; not part of the QML API.
     void applyStateFromWorker(State state, const QString &error);
+    void applyRecordingState(bool recording, const QString &path, const QString &error);
 
 signals:
     void sourceChanged();
@@ -86,6 +100,9 @@ signals:
     void errorStringChanged();
     void framesDecodedChanged();
     void loopChanged();
+    void recordingChanged();
+    void recordingSaved(const QString &path);
+    void recordingFailed(const QString &error);
 
 private:
     void applyState(State state, const QString &error);
@@ -95,6 +112,7 @@ private:
 
     State m_state = State::Idle;
     QString m_errorString;
+    bool m_recording = false;
 
     // Set via QML before start(); copied into each new Session. Survives stop().
     QPointer<QVideoSink> m_pendingSink;

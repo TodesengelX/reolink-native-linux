@@ -1,7 +1,9 @@
 #include "StreamPlayer.h"
 
 #include "core/Log.h"
+#include "core/Paths.h"
 
+#include <QDateTime>
 #include <QDeadlineTimer>
 #include <QThread>
 #include <QUrl>
@@ -98,6 +100,104 @@ void deliverFrame(const std::shared_ptr<Session> &s, const QVideoFrame &frame)
         },
         Qt::QueuedConnection);
 }
+
+void postRecording(const std::shared_ptr<Session> &s, bool recording, const QString &path,
+                   const QString &error)
+{
+    QMutexLocker lock(&s->backMutex);
+    if (!s->player)
+        return;
+    StreamPlayer *p = s->player;
+    QMetaObject::invokeMethod(
+        p, [p, recording, path, error] { p->applyRecordingState(recording, path, error); },
+        Qt::QueuedConnection);
+}
+
+// Stream-copy recorder: taps the live demux, muxing video packets into an MP4
+// without re-encoding (DESIGN §5.5). Starts on the next keyframe and rebases
+// timestamps so the file begins at t=0.
+struct Recorder {
+    AVFormatContext *oc = nullptr;
+    int outIndex = -1;
+    int inIndex = -1;
+    AVRational inTb{};
+    bool waitingKey = true;
+    qint64 startTs = AV_NOPTS_VALUE;
+    QString path;
+
+    bool active() const { return oc != nullptr; }
+
+    bool open(const QString &outPath, const AVStream *in)
+    {
+        path = outPath;
+        inIndex = in->index;
+        inTb = in->time_base;
+        const QByteArray p = outPath.toUtf8();
+        if (avformat_alloc_output_context2(&oc, nullptr, "mp4", p.constData()) < 0 || !oc)
+            return false;
+        AVStream *out = avformat_new_stream(oc, nullptr);
+        if (!out || avcodec_parameters_copy(out->codecpar, in->codecpar) < 0)
+            return false;
+        out->codecpar->codec_tag = 0; // let the muxer choose (avc1/hvc1)
+        outIndex = out->index;
+        if (!(oc->oformat->flags & AVFMT_NOFILE) &&
+            avio_open(&oc->pb, p.constData(), AVIO_FLAG_WRITE) < 0)
+            return false;
+        AVDictionary *opts = nullptr;
+        av_dict_set(&opts, "movflags", "+faststart", 0);
+        const int rc = avformat_write_header(oc, &opts);
+        av_dict_free(&opts);
+        if (rc < 0)
+            return false;
+        waitingKey = true;
+        startTs = AV_NOPTS_VALUE;
+        return true;
+    }
+
+    void write(const AVPacket *src)
+    {
+        if (src->stream_index != inIndex)
+            return;
+        if (waitingKey) {
+            if (!(src->flags & AV_PKT_FLAG_KEY))
+                return; // start on a keyframe so the file is decodable
+            waitingKey = false;
+            startTs = src->pts != AV_NOPTS_VALUE ? src->pts : src->dts;
+        }
+        AVPacket *pkt = av_packet_clone(src); // original continues to the decoder
+        if (!pkt)
+            return;
+        pkt->stream_index = outIndex;
+        const AVRational outTb = oc->streams[outIndex]->time_base;
+        const qint64 off = startTs == AV_NOPTS_VALUE ? 0 : startTs;
+        const auto rnd = static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX);
+        if (pkt->pts != AV_NOPTS_VALUE)
+            pkt->pts = av_rescale_q_rnd(pkt->pts - off, inTb, outTb, rnd);
+        if (pkt->dts != AV_NOPTS_VALUE)
+            pkt->dts = av_rescale_q_rnd(pkt->dts - off, inTb, outTb, rnd);
+        pkt->duration = av_rescale_q(pkt->duration, inTb, outTb);
+        pkt->pos = -1;
+        av_interleaved_write_frame(oc, pkt); // takes ownership of pkt's contents
+        av_packet_free(&pkt);
+    }
+
+    // Writes the trailer and closes; returns the path (empty on nothing recorded).
+    QString finalize()
+    {
+        if (!oc)
+            return {};
+        QString result;
+        if (!waitingKey) { // at least one frame was written
+            av_write_trailer(oc);
+            result = path;
+        }
+        if (!(oc->oformat->flags & AVFMT_NOFILE) && oc->pb)
+            avio_closep(&oc->pb);
+        avformat_free_context(oc);
+        oc = nullptr;
+        return result;
+    }
+};
 
 struct InterruptContext {
     Session *session = nullptr;
@@ -390,6 +490,44 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         }
     };
 
+    Recorder recorder;
+    // Opens/closes the recorder to match the requested state. Called each packet.
+    auto syncRecording = [&]() {
+        if (s->recordRequested.load() && !recorder.active()) {
+            QString path;
+            {
+                QMutexLocker lock(&s->recMutex);
+                path = s->recPath;
+            }
+            if (recorder.open(path, stream)) {
+                s->recording.store(true);
+                postRecording(s, true, path, QString());
+                qCInfo(lcMedia) << redacted(source) << "recording to" << path;
+            } else {
+                recorder.finalize();
+                s->recordRequested.store(false);
+                postRecording(s, false, QString(), QStringLiteral("could not open recording file"));
+            }
+        } else if (!s->recordRequested.load() && recorder.active()) {
+            const QString saved = recorder.finalize();
+            s->recording.store(false);
+            postRecording(s, false, saved, saved.isEmpty()
+                                               ? QStringLiteral("no frames captured")
+                                               : QString());
+        }
+    };
+    // Finalize on any session exit (EOF, reconnect, stop). Recording does not
+    // survive a reconnect — it saves what it has and disarms.
+    auto finalizeRecording = [&]() {
+        if (!recorder.active())
+            return;
+        const QString saved = recorder.finalize();
+        s->recording.store(false);
+        s->recordRequested.store(false);
+        postRecording(s, false, saved,
+                      saved.isEmpty() ? QStringLiteral("no frames captured") : QString());
+    };
+
     while (!s->abort.load()) {
         interrupt.deadline = QDeadlineTimer(kReadStallTimeoutMs);
         rc = av_read_frame(fmt, packet);
@@ -404,23 +542,29 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
                 }
                 // Non-seekable input can't loop; fall through to a reconnect.
             }
+            finalizeRecording();
             return live;
         }
         if (rc < 0) {
             postState(s, State::Error, QStringLiteral("read error / stalled"));
+            finalizeRecording();
             return live;
         }
         if (packet->stream_index != videoIndex) {
             av_packet_unref(packet);
             continue;
         }
+        syncRecording();
+        if (recorder.active())
+            recorder.write(packet); // stream-copy before the packet is consumed
         rc = avcodec_send_packet(dec, packet);
         av_packet_unref(packet);
         if (rc < 0 && rc != AVERROR(EAGAIN))
             continue; // tolerate bitstream hiccups on live sources
         receiveFrames();
     }
-    return false; // clean stop
+    finalizeRecording(); // clean stop
+    return false;
 }
 
 void runWorker(std::shared_ptr<Session> s)
@@ -450,6 +594,50 @@ void runWorker(std::shared_ptr<Session> s)
 void StreamPlayer::applyStateFromWorker(State state, const QString &error)
 {
     applyState(state, error);
+}
+
+void StreamPlayer::applyRecordingState(bool recording, const QString &path, const QString &error)
+{
+    if (m_recording != recording) {
+        m_recording = recording;
+        emit recordingChanged();
+    }
+    if (!recording) {
+        if (!path.isEmpty())
+            emit recordingSaved(path);
+        else if (!error.isEmpty())
+            emit recordingFailed(error);
+    }
+}
+
+bool StreamPlayer::recording() const
+{
+    return m_recording;
+}
+
+bool StreamPlayer::startRecording(const QString &path)
+{
+    if (!m_session || m_state != State::Streaming)
+        return false;
+    QString out = path;
+    if (out.isEmpty()) {
+        const QString dir = Paths::recordingsDir();
+        const QString stamp =
+            QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_hhmmss"));
+        out = dir + QStringLiteral("/clip_") + stamp + QStringLiteral(".mp4");
+    }
+    {
+        QMutexLocker lock(&m_session->recMutex);
+        m_session->recPath = out;
+    }
+    m_session->recordRequested.store(true);
+    return true;
+}
+
+void StreamPlayer::stopRecording()
+{
+    if (m_session)
+        m_session->recordRequested.store(false);
 }
 
 StreamPlayer::StreamPlayer(QObject *parent) : QObject(parent) {}
@@ -538,6 +726,10 @@ void StreamPlayer::stop()
     }
     m_session->abort.store(true);
     m_session.reset();
+    if (m_recording) {
+        m_recording = false;
+        emit recordingChanged();
+    }
     if (m_state != State::Idle)
         applyState(State::Stopped, QString());
 }
