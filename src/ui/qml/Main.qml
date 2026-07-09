@@ -28,8 +28,10 @@ ApplicationWindow {
         }
     }
     // Keep the flag in sync if the compositor changes visibility out from under us.
-    onVisibilityChanged: if (visibility !== Window.FullScreen && videoFullscreen)
-                             videoFullscreen = false
+    onVisibilityChanged: () => {
+        if (window.visibility !== Window.FullScreen && videoFullscreen)
+            videoFullscreen = false;
+    }
 
     Shortcut {
         sequence: "F11"

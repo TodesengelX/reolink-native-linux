@@ -103,6 +103,96 @@ private slots:
                                          QStringLiteral("p:a/s"), 0, true);
         QCOMPARE(url, QStringLiteral("rtsp://user%40x:p%3Aa%2Fs@h:554/h264Preview_01_main"));
     }
+
+    void ipv6HostsAreBracketed()
+    {
+        QVERIFY(api::apiUrl(QStringLiteral("fd00::12"), 443, true, QStringLiteral("Login"))
+                    .startsWith(QStringLiteral("https://[fd00::12]:443/")));
+        QVERIFY(api::rtspUrl(QStringLiteral("fd00::12"), QStringLiteral("a"), QStringLiteral("b"),
+                             0, true)
+                    .contains(QStringLiteral("@[fd00::12]:554/")));
+    }
+
+    void ptzCtrlBuild()
+    {
+        const Json move = api::ptzCtrl(2, QStringLiteral("Left"), 40);
+        QCOMPARE(move.value("cmd", std::string{}), std::string("PtzCtrl"));
+        QCOMPARE(move["param"].value("channel", -1), 2);
+        QCOMPARE(move["param"].value("op", std::string{}), std::string("Left"));
+        QCOMPARE(move["param"].value("speed", -1), 40);
+        QVERIFY(!move["param"].contains("id"));
+
+        // Stop carries no speed.
+        const Json stop = api::ptzCtrl(0, QStringLiteral("Stop"));
+        QVERIFY(!stop["param"].contains("speed"));
+
+        // Speed is clamped to the device range.
+        QCOMPARE(api::ptzCtrl(0, QStringLiteral("Up"), 999)["param"].value("speed", -1), 64);
+
+        // ToPos includes the preset id.
+        const Json preset = api::ptzCtrl(1, QStringLiteral("ToPos"), 32, 3);
+        QCOMPARE(preset["param"].value("id", -1), 3);
+    }
+
+    void snapUrlBuild()
+    {
+        const QString url = api::snapUrl(QStringLiteral("10.0.0.5"), 443, true, 1,
+                                         QStringLiteral("tok"));
+        QCOMPARE(url, QStringLiteral("https://10.0.0.5:443/cgi-bin/api.cgi?cmd=Snap&channel=1"
+                                     "&rs=reolink&token=tok"));
+    }
+
+    void parseAbilityCaps()
+    {
+        const QByteArray body = R"({"Ability":{"talk":{"ver":1,"permit":6},
+            "abilityChn":[
+              {"ptzCtrl":{"ver":4,"permit":6},"ptzPreset":{"ver":1,"permit":6},
+               "supportAiPeople":{"ver":1,"permit":6},"floodLight":{"ver":0,"permit":0}},
+              {"ptzCtrl":{"ver":0,"permit":0},"battery":{"ver":1,"permit":6}}
+            ]}})";
+        const Json value = Json::parse(body.constData(), body.constData() + body.size(),
+                                       nullptr, false);
+        const api::Capabilities caps = api::parseAbility(value);
+        QVERIFY(caps.valid);
+        QVERIFY(caps.talk);
+        QCOMPARE(caps.channels.size(), 2);
+        QVERIFY(caps.channels[0].ptz);
+        QVERIFY(caps.channels[0].ptzPreset);
+        QVERIFY(caps.channels[0].aiPeople);
+        QVERIFY(caps.channels[0].ai);
+        QVERIFY(!caps.channels[0].floodlight);
+        QVERIFY(!caps.channels[1].ptz);
+        QVERIFY(caps.channels[1].battery);
+    }
+
+    void parseAbilityEmptyIsInvalid()
+    {
+        QVERIFY(!api::parseAbility(Json::object()).valid);
+        QVERIFY(!api::parseAbility(Json::array()).valid);
+    }
+
+    void searchRoundTrip()
+    {
+        const QDateTime start(QDate(2026, 7, 9), QTime(0, 0));
+        const QDateTime end(QDate(2026, 7, 9), QTime(23, 59, 59));
+        const Json body = api::searchBody(0, start, end, QStringLiteral("main"));
+        const Json s = body["param"]["Search"];
+        QCOMPARE(s.value("streamType", std::string{}), std::string("main"));
+        QCOMPARE(s["StartTime"].value("year", 0), 2026);
+        QCOMPARE(s["EndTime"].value("hour", 0), 23);
+
+        const QByteArray resp = R"({"SearchResult":{"channel":0,"File":[
+            {"name":"Mp4Record/2026-07-09/RecS02_x.mp4","size":1048576,"type":"main",
+             "StartTime":{"year":2026,"mon":7,"day":9,"hour":8,"min":30,"sec":0},
+             "EndTime":{"year":2026,"mon":7,"day":9,"hour":8,"min":31,"sec":0}}]}})";
+        const Json value = Json::parse(resp.constData(), resp.constData() + resp.size(),
+                                       nullptr, false);
+        const api::SearchResult sr = api::parseSearch(value);
+        QVERIFY(sr.ok);
+        QCOMPARE(sr.files.size(), 1);
+        QCOMPARE(sr.files[0].start, QDateTime(QDate(2026, 7, 9), QTime(8, 30)));
+        QCOMPARE(sr.files[0].size, qint64(1048576));
+    }
 };
 
 QTEST_GUILESS_MAIN(TestProtocol)

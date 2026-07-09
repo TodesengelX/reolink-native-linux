@@ -2,6 +2,7 @@
 
 #include "Json.h"
 
+#include <QDateTime>
 #include <QString>
 #include <QVector>
 
@@ -62,6 +63,85 @@ LoginResult parseLogin(const QByteArray &body);
 QString rtspUrl(const QString &host, const QString &username, const QString &password,
                 int channel = 0, bool mainStream = true, const QString &codec = QStringLiteral("h264"),
                 int port = 554);
+
+// ---- PTZ ------------------------------------------------------------------
+// Operations accepted by PtzCtrl (Reolink HTTP API). Directional ops run until a
+// matching Stop; ToPos/Auto/Patrol take an id.
+namespace ptz {
+inline constexpr auto Left = "Left";
+inline constexpr auto Right = "Right";
+inline constexpr auto Up = "Up";
+inline constexpr auto Down = "Down";
+inline constexpr auto LeftUp = "LeftUp";
+inline constexpr auto RightUp = "RightUp";
+inline constexpr auto LeftDown = "LeftDown";
+inline constexpr auto RightDown = "RightDown";
+inline constexpr auto ZoomInc = "ZoomInc";
+inline constexpr auto ZoomDec = "ZoomDec";
+inline constexpr auto FocusInc = "FocusInc";
+inline constexpr auto FocusDec = "FocusDec";
+inline constexpr auto Stop = "Stop";
+inline constexpr auto ToPos = "ToPos"; // go to preset (needs presetId)
+} // namespace ptz
+
+// Build a PtzCtrl command. presetId >= 0 is included (for ToPos); speed is clamped
+// by the device to its own range (typically 1..64).
+Json ptzCtrl(int channel, const QString &op, int speed = 32, int presetId = -1);
+
+// GET URL that returns a JPEG snapshot of the channel (not JSON). rs is a
+// cache-buster the device expects.
+QString snapUrl(const QString &host, int port, bool https, int channel, const QString &token,
+                const QString &rs = QStringLiteral("reolink"));
+
+// ---- Capabilities (GetAbility) --------------------------------------------
+// Per-channel capability flags parsed from Ability.abilityChn[i]. Field names
+// follow reolink_aio; unknown/absent capabilities degrade to false so the UI
+// simply hides the control. Verify against target firmware (DESIGN §6.10).
+struct ChannelCaps {
+    bool ptz = false;
+    bool ptzPreset = false;
+    bool zoom = false;
+    bool focus = false;
+    bool ai = false;
+    bool aiPeople = false;
+    bool aiVehicle = false;
+    bool aiDogCat = false;
+    bool audio = false;
+    bool siren = false;
+    bool floodlight = false;
+    bool battery = false;
+    bool doorbell = false;
+    bool supportsBalanced = false; // exposes a third ("Balanced") stream
+};
+struct Capabilities {
+    bool valid = false;
+    bool talk = false; // two-way audio (host-level)
+    bool p2p = false;
+    QVector<ChannelCaps> channels;
+};
+Capabilities parseAbility(const Json &value);
+
+// ---- OSD ------------------------------------------------------------------
+Json getOsd(int channel);
+
+// ---- Playback search ------------------------------------------------------
+// Search recorded files for a channel in [start,end]. streamType is "main"/"sub".
+Json searchBody(int channel, const QDateTime &start, const QDateTime &end,
+                const QString &streamType = QStringLiteral("sub"));
+
+struct RecordingFile {
+    QString name;   // opaque handle for Download/Playback
+    QDateTime start;
+    QDateTime end;
+    QString type;   // "md" (motion/alarm) vs "" / other (timer/continuous)
+    qint64 size = 0;
+};
+struct SearchResult {
+    bool ok = false;
+    QVector<RecordingFile> files;
+    QString error;
+};
+SearchResult parseSearch(const Json &value);
 
 } // namespace api
 } // namespace rl

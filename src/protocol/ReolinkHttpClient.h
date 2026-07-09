@@ -25,6 +25,10 @@ public:
     // Convenience for a single command; returns the lone CommandResult.
     api::CommandResult callOne(const QString &cmd, Json param = Json::object(), int action = 0);
 
+    // Fetch a JPEG snapshot of a channel (cmd=Snap, binary GET). Returns empty on
+    // failure with *error set.
+    QByteArray fetchSnapshot(int channel, QString *error = nullptr);
+
     bool ensureLogin(QString *error = nullptr);
     void logout();
 
@@ -36,10 +40,12 @@ private:
         long status = 0;
         QByteArray body;
         QString error;
+        QByteArray contentType;
     };
     // totalTimeoutSec == 0 uses the default; pass a smaller value for best-effort
     // calls (e.g. Logout) that must not pin a thread on a dead device.
     HttpResponse post(const QString &url, const QByteArray &body, long totalTimeoutSec = 0);
+    HttpResponse get(const QString &url);
     bool loginLocked(QString *error);
     bool tokenValidLocked() const;
 

@@ -112,12 +112,17 @@ Item {
                 columns: page.maximizedIndex >= 0 ? 1 : page.cols
                 spacing: 4
 
-                // Device-backed panes (model gives live name/status updates).
+                // Device-backed panes (model gives live name/status/caps updates).
                 Repeater {
                     model: Devices
                     LivePane {
                         required property int index
                         required property string name
+                        required property bool hasPtz
+                        required property bool hasZoom
+                        required property bool hasAudio
+                        required property bool hasSiren
+                        required property bool hasFloodlight
 
                         visible: index < page.preset &&
                                  (page.maximizedIndex === -1 || page.maximizedIndex === index)
@@ -125,11 +130,16 @@ Item {
                         height: page.maximizedIndex === index ? gridArea.height
                                                               : gridArea.cellHeight
                         paneIndex: index
+                        deviceRow: index
                         label: name
                         selected: page.selectedIndex === index
                         // Sub-stream in the grid, main stream when maximized (DESIGN §5.7).
-                        sourceUrl: visible ? Devices.liveUrl(index, page.maximizedIndex === index)
-                                           : ""
+                        forceMain: page.maximizedIndex === index
+                        capPtz: hasPtz
+                        capZoom: hasZoom
+                        capAudio: hasAudio
+                        capSiren: hasSiren
+                        capFloodlight: hasFloodlight
                         onToggleMaximize: (idx) => {
                             page.maximizedIndex = page.maximizedIndex === idx ? -1 : idx;
                         }

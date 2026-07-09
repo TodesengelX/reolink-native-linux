@@ -118,5 +118,129 @@ QString rtspUrl(const QString &host, const QString &username, const QString &pas
            (mainStream ? QStringLiteral("main") : QStringLiteral("sub"));
 }
 
+Json ptzCtrl(int channel, const QString &op, int speed, int presetId)
+{
+    Json param = {{"channel", channel}, {"op", op.toStdString()}};
+    // Stop takes no speed; directional/zoom ops do; ToPos also takes an id.
+    if (op != QLatin1String(ptz::Stop))
+        param["speed"] = qBound(1, speed, 64);
+    if (presetId >= 0)
+        param["id"] = presetId;
+    return command(QStringLiteral("PtzCtrl"), std::move(param));
+}
+
+QString snapUrl(const QString &host, int port, bool https, int channel, const QString &token,
+                const QString &rs)
+{
+    QString url = QStringLiteral("%1://%2:%3/cgi-bin/api.cgi?cmd=Snap&channel=%4&rs=%5")
+                      .arg(https ? QStringLiteral("https") : QStringLiteral("http"),
+                           hostForUrl(host))
+                      .arg(port)
+                      .arg(channel)
+                      .arg(rs);
+    if (!token.isEmpty())
+        url += QStringLiteral("&token=") + QString::fromUtf8(QUrl::toPercentEncoding(token));
+    return url;
+}
+
+// A capability is "present" when its {ver} (or bare int) is > 0.
+static bool capVer(const Json &chn, const char *key)
+{
+    const Json &v = jsonRef(chn, key);
+    if (v.is_object())
+        return jsonInt(v, "ver", 0) > 0;
+    if (v.is_number_integer() || v.is_number_unsigned())
+        return v.get<int>() > 0;
+    return false;
+}
+
+Capabilities parseAbility(const Json &value)
+{
+    Capabilities caps;
+    const Json ability = jsonObj(value, "Ability");
+    if (ability.empty())
+        return caps;
+    caps.valid = true;
+    caps.talk = capVer(ability, "talk");
+    caps.p2p = capVer(ability, "p2p");
+
+    const Json chns = jsonArr(ability, "abilityChn");
+    for (const Json &chn : chns) {
+        ChannelCaps c;
+        c.ptz = capVer(chn, "ptzCtrl") || capVer(chn, "ptzType");
+        c.ptzPreset = capVer(chn, "ptzPreset");
+        c.zoom = capVer(chn, "ptzCtrl") || capVer(chn, "supportPtzZoom");
+        c.focus = capVer(chn, "ptzCtrl") || capVer(chn, "supportPtzFocus");
+        // AI: some firmware exposes supportAi, others per-type flags.
+        c.aiPeople = capVer(chn, "supportAiPeople");
+        c.aiVehicle = capVer(chn, "supportAiVehicle");
+        c.aiDogCat = capVer(chn, "supportAiDogCat") || capVer(chn, "supportAiAnimal");
+        c.ai = capVer(chn, "supportAi") || c.aiPeople || c.aiVehicle || c.aiDogCat;
+        c.audio = capVer(chn, "supportAudio") || capVer(chn, "supportGop");
+        c.siren = capVer(chn, "supportAudioAlarm") || capVer(chn, "alarmAudio");
+        c.floodlight = capVer(chn, "floodLight") || capVer(chn, "supportFLIntensity") ||
+                       capVer(chn, "whiteLed");
+        c.battery = capVer(chn, "battery") || capVer(chn, "supportBattery");
+        c.doorbell = capVer(chn, "supportVisitor") || capVer(chn, "supportDoorbell");
+        c.supportsBalanced = capVer(chn, "supportBalanced") || capVer(chn, "mainEncType");
+        caps.channels.append(c);
+    }
+    return caps;
+}
+
+Json getOsd(int channel)
+{
+    return command(QStringLiteral("GetOsd"), Json{{"channel", channel}}, /*action=*/1);
+}
+
+static Json timeObj(const QDateTime &dt)
+{
+    const QDate d = dt.date();
+    const QTime t = dt.time();
+    return Json{{"year", d.year()}, {"mon", d.month()}, {"day", d.day()},
+                {"hour", t.hour()}, {"min", t.minute()}, {"sec", t.second()}};
+}
+
+static QDateTime parseTimeObj(const Json &o)
+{
+    if (!o.is_object())
+        return {};
+    const QDate d(jsonInt(o, "year"), jsonInt(o, "mon"), jsonInt(o, "day"));
+    const QTime t(jsonInt(o, "hour"), jsonInt(o, "min"), jsonInt(o, "sec"));
+    if (!d.isValid())
+        return {};
+    return QDateTime(d, t.isValid() ? t : QTime(0, 0));
+}
+
+Json searchBody(int channel, const QDateTime &start, const QDateTime &end,
+                const QString &streamType)
+{
+    Json search = {{"channel", channel},
+                   {"onlyStatus", 0},
+                   {"streamType", streamType.toStdString()},
+                   {"StartTime", timeObj(start)},
+                   {"EndTime", timeObj(end)}};
+    return command(QStringLiteral("Search"), Json{{"Search", std::move(search)}});
+}
+
+SearchResult parseSearch(const Json &value)
+{
+    SearchResult out;
+    const Json sr = jsonObj(value, "SearchResult");
+    if (sr.empty())
+        return out;
+    out.ok = true;
+    for (const Json &f : jsonArr(sr, "File")) {
+        RecordingFile rf;
+        rf.name = QString::fromStdString(jsonStr(f, "name"));
+        rf.start = parseTimeObj(jsonObj(f, "StartTime"));
+        rf.end = parseTimeObj(jsonObj(f, "EndTime"));
+        rf.type = QString::fromStdString(jsonStr(f, "type"));
+        rf.size = jsonInt(f, "size", 0);
+        out.files.append(rf);
+    }
+    return out;
+}
+
 } // namespace api
 } // namespace rl

@@ -4,72 +4,157 @@ import QtMultimedia
 import ReolinkApp
 import ReolinkApp.Core
 
-// One cell of the live grid: video + name overlay + connection-state overlay.
-// Double-click toggles maximize (handled by the page).
+// One cell of the live grid: video + name overlay + connection-state overlay +
+// a hover floating toolbar and an optional PTZ joystick. Double-click toggles
+// maximize (handled by the page). Digital zoom via wheel + drag.
 Rectangle {
     id: root
     color: Theme.paneBackground
     border.color: selected ? Theme.accent : Theme.border
     border.width: 1
+    clip: true
 
-    property int paneIndex: -1
-    property string sourceUrl: ""
+    property int paneIndex: -1     // grid slot
+    property int deviceRow: -1     // row in the Devices model (-1 = empty slot)
     property string label: ""
     property bool selected: false
-    readonly property bool hasSource: sourceUrl.length > 0
+    property bool forceMain: false // maximized panes pull the main stream
+
+    // Capabilities (from the Devices model; false for empty slots). Named cap*
+    // to avoid colliding with the identically-named model roles in the delegate.
+    property bool capPtz: false
+    property bool capZoom: false
+    property bool capAudio: false
+    property bool capSiren: false
+    property bool capFloodlight: false
+
+    // User stream-quality preference: false = Fluent (sub), true = Clear (main).
+    property bool qualityMain: false
+    readonly property bool effectiveMain: forceMain || qualityMain
+    readonly property bool hasSource: deviceRow >= 0
+    property string sourceUrl: ""
 
     signal toggleMaximize(int index)
     signal clicked(int index)
 
+    function updateSource() {
+        var url = (deviceRow >= 0 && visible) ? Devices.liveUrl(deviceRow, effectiveMain) : "";
+        if (url !== sourceUrl)
+            sourceUrl = url;
+    }
+    onDeviceRowChanged: updateSource()
+    onVisibleChanged: updateSource()
+    onEffectiveMainChanged: updateSource()
+    Component.onCompleted: updateSource()
+
+    // Recompute when the backing device finishes priming / changes.
+    Connections {
+        target: Devices
+        function onDataChanged(topLeft, bottomRight) {
+            if (root.deviceRow >= topLeft.row && root.deviceRow <= bottomRight.row)
+                root.updateSource();
+        }
+    }
+
     StreamPlayer {
         id: player
         videoSink: video.videoSink
-        // Loop non-live sources so file-based test streams keep playing.
-        loop: !root.sourceUrl.startsWith("rtsp://") && !root.sourceUrl.startsWith("rtmp://")
     }
 
-    // The onSourceUrlChanged handler fires BEFORE any declarative `source:` binding
-    // would re-evaluate, so assign imperatively then start — otherwise an
-    // empty→URL transition (restore, preset grow, tab return) would start with a
-    // still-empty source and the pane would stay dead.
     onSourceUrlChanged: {
-        if (root.hasSource) {
+        if (root.hasSource && root.sourceUrl.length > 0) {
+            // Set loop before start() so the worker sees the right value from
+            // frame one (the declarative `loop:` binding can lag the handler).
+            player.loop = !root.sourceUrl.startsWith("rtsp://")
+                       && !root.sourceUrl.startsWith("rtmp://")
+                       && !root.sourceUrl.startsWith("tcp://")
+                       && !root.sourceUrl.startsWith("udp://");
             player.source = root.sourceUrl;
             player.start();
         } else {
             player.stop();
         }
     }
-    Component.onCompleted: if (root.hasSource) { player.source = root.sourceUrl; player.start(); }
     Component.onDestruction: player.stop()
 
-    VideoOutput {
-        id: video
+    // ---- Video with digital zoom ------------------------------------------
+    property real zoom: 1.0
+    property real panX: 0
+    property real panY: 0
+
+    Item {
         anchors.fill: parent
         anchors.margins: 1
-        fillMode: VideoOutput.PreserveAspectFit
-        visible: player.state === StreamPlayer.Streaming
+        clip: true
+
+        VideoOutput {
+            id: video
+            anchors.fill: parent
+            fillMode: VideoOutput.PreserveAspectFit
+            visible: player.state === StreamPlayer.Streaming
+            transform: [
+                Scale {
+                    origin.x: video.width / 2
+                    origin.y: video.height / 2
+                    xScale: root.zoom
+                    yScale: root.zoom
+                },
+                Translate { x: root.panX; y: root.panY }
+            ]
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            drag.target: undefined
+            property real lastX: 0
+            property real lastY: 0
+
+            onClicked: root.clicked(root.paneIndex)
+            onDoubleClicked: if (root.hasSource) root.toggleMaximize(root.paneIndex)
+            onPressed: (m) => { lastX = m.x; lastY = m.y; }
+            onPositionChanged: (m) => {
+                if (root.zoom > 1.0 && (m.buttons & Qt.LeftButton)) {
+                    root.panX += (m.x - lastX);
+                    root.panY += (m.y - lastY);
+                    lastX = m.x; lastY = m.y;
+                }
+            }
+            onWheel: (w) => {
+                if (!root.capZoom && !root.hasSource) return;
+                var z = root.zoom * (w.angleDelta.y > 0 ? 1.15 : 0.87);
+                root.zoom = Math.max(1.0, Math.min(8.0, z));
+                if (root.zoom <= 1.0) { root.panX = 0; root.panY = 0; }
+            }
+        }
     }
 
-    Rectangle { // name overlay
+    // ---- Name + zoom badge -------------------------------------------------
+    Rectangle {
         visible: root.hasSource && player.state === StreamPlayer.Streaming
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.margins: 6
         radius: 3
         color: "#80000000"
-        width: nameText.implicitWidth + 12
-        height: nameText.implicitHeight + 6
-        Text {
-            id: nameText
+        width: nameRow.implicitWidth + 12
+        height: nameRow.implicitHeight + 6
+        Row {
+            id: nameRow
             anchors.centerIn: parent
-            text: root.label
-            color: "white"
-            font.pixelSize: 11
+            spacing: 6
+            Text { text: root.label; color: "white"; font.pixelSize: 11 }
+            Text {
+                visible: root.zoom > 1.01
+                text: root.zoom.toFixed(1) + "×"
+                color: Theme.accent
+                font.pixelSize: 11
+            }
         }
     }
 
-    Column { // state overlay
+    // ---- Connection-state overlay -----------------------------------------
+    Column {
         anchors.centerIn: parent
         spacing: Theme.spacing
         visible: player.state !== StreamPlayer.Streaming
@@ -89,8 +174,7 @@ Rectangle {
             color: player.state === StreamPlayer.Error ? Theme.danger : Theme.textMuted
             font.pixelSize: 11
             text: {
-                if (!root.hasSource)
-                    return qsTr("No camera");
+                if (!root.hasSource) return qsTr("No camera");
                 switch (player.state) {
                 case StreamPlayer.Connecting: return qsTr("Connecting…");
                 case StreamPlayer.Error: return player.errorString;
@@ -101,9 +185,88 @@ Rectangle {
         }
     }
 
-    MouseArea {
-        anchors.fill: parent
-        onClicked: root.clicked(root.paneIndex)
-        onDoubleClicked: if (root.hasSource) root.toggleMaximize(root.paneIndex)
+    // ---- PTZ joystick overlay ---------------------------------------------
+    property bool ptzOpen: false
+    Loader {
+        active: root.ptzOpen && root.capPtz
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.rightMargin: 10
+        sourceComponent: PtzPad {
+            deviceRow: root.deviceRow
+            showZoom: root.capZoom
+        }
+    }
+
+    // ---- Floating toolbar (hover) -----------------------------------------
+    HoverHandler { id: paneHover }
+
+    Rectangle {
+        id: toolbar
+        visible: root.hasSource && (paneHover.hovered || root.ptzOpen)
+        anchors.bottom: parent.bottom
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottomMargin: 8
+        radius: Theme.radius
+        color: "#cc0d141b"
+        border.color: Theme.border
+        height: 34
+        width: toolRow.implicitWidth + 16
+
+        Row {
+            id: toolRow
+            anchors.centerIn: parent
+            spacing: 2
+
+            component ToolButton: Rectangle {
+                property string glyph: ""
+                property bool active: false
+                property bool enabledTool: true
+                signal activated()
+                width: 28; height: 28; radius: 4
+                visible: enabledTool
+                color: active ? Theme.accentDim : (hover.hovered ? Theme.surfaceAlt : "transparent")
+                Text {
+                    anchors.centerIn: parent
+                    text: parent.glyph
+                    color: parent.active ? Theme.text : Theme.textMuted
+                    font.pixelSize: 14
+                }
+                HoverHandler { id: hover }
+                TapHandler { onTapped: parent.activated() }
+            }
+
+            // Quality: Fluent / (Balanced) / Clear. Balanced omitted until wired.
+            ToolButton {
+                glyph: root.qualityMain ? "HD" : "SD"
+                active: root.qualityMain
+                onActivated: root.qualityMain = !root.qualityMain
+            }
+            ToolButton {
+                glyph: "◉"; enabledTool: true
+                onActivated: Devices.snapshot(root.deviceRow)
+            }
+            ToolButton {
+                glyph: "⊕"; active: root.zoom > 1.01
+                onActivated: { if (root.zoom > 1.01) { root.zoom = 1; root.panX = 0; root.panY = 0; }
+                               else root.zoom = 2; }
+            }
+            ToolButton {
+                glyph: "⇅"; active: root.ptzOpen; enabledTool: root.capPtz
+                onActivated: root.ptzOpen = !root.ptzOpen
+            }
+            ToolButton {
+                glyph: "🔊"; enabledTool: root.capSiren
+                onActivated: Devices.ptzMove(root.deviceRow, "Stop", 0) // placeholder: siren wires in M10
+            }
+            ToolButton {
+                glyph: "💡"; enabledTool: root.capFloodlight
+                onActivated: {} // floodlight toggle wires with SetWhiteLed (M9)
+            }
+            ToolButton {
+                glyph: "⛶"
+                onActivated: if (root.hasSource) root.toggleMaximize(root.paneIndex)
+            }
+        }
     }
 }

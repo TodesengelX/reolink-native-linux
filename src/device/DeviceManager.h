@@ -2,9 +2,16 @@
 
 #include "core/CredentialStore.h"
 #include "core/Database.h"
+#include "protocol/ReolinkApi.h"
 
 #include <QAbstractListModel>
 #include <QFutureSynchronizer>
+
+#include <memory>
+
+namespace rl {
+class ReolinkHttpClient;
+}
 
 namespace rl {
 
@@ -27,6 +34,14 @@ public:
         OnlineRole,
         StatusRole,
         HostIdRole,
+        HasPtzRole,
+        HasPtzPresetRole,
+        HasZoomRole,
+        HasAudioRole,
+        HasSirenRole,
+        HasFloodlightRole,
+        HasBatteryRole,
+        HasTalkRole,
     };
 
     DeviceManager(Database *db, CredentialStore *credentials, QObject *parent = nullptr);
@@ -49,9 +64,18 @@ public:
     Q_INVOKABLE QString liveUrl(int row, bool mainStream = true);
     Q_INVOKABLE QString nameAt(int row) const;
 
+    // Live controls (channel 0). Fire-and-forget on the worker pool.
+    Q_INVOKABLE void ptzMove(int row, const QString &op, int speed = 32);
+    Q_INVOKABLE void ptzStop(int row);
+    Q_INVOKABLE void ptzPreset(int row, int presetId);
+    // Capture a JPEG snapshot; emits snapshotSaved/snapshotFailed.
+    Q_INVOKABLE void snapshot(int row);
+
 signals:
     void countChanged();
     void deviceError(const QString &addr, const QString &message);
+    void snapshotSaved(int row, const QString &path);
+    void snapshotFailed(int row, const QString &error);
 
 private:
     struct Entry {
@@ -61,17 +85,35 @@ private:
         QString mainCodec = QStringLiteral("h264"); // sub stream is always h264
         QString password;                           // in-memory only (keyring at rest)
         bool primed = false;                        // password loaded?
+        api::ChannelCaps caps;                      // channel 0 capabilities
+        bool talk = false;                          // host supports two-way audio
+        // Persistent authenticated client for live control (PTZ, snapshot, …),
+        // created lazily. Shared so worker tasks can hold it past a model edit.
+        std::shared_ptr<ReolinkHttpClient> client;
+    };
+
+    // Outcome of a worker-thread validation, applied back on the GUI thread.
+    struct Validation {
+        bool online = false;
+        QString status;
+        QString name;
+        QString model;
+        QString codec;
+        int channelNum = 0;
+        QString password;
+        api::Capabilities caps;
+        std::shared_ptr<ReolinkHttpClient> client;
     };
 
     // Runs on a worker: loads the password from the keyring (or stores newPassword
-    // first), logs in, fetches device info + encoding, updates the row on the GUI
-    // thread. storeNew persists newPassword to the keyring before validating.
+    // first), logs in, fetches device info + encoding + abilities, updates the row
+    // on the GUI thread. storeNew persists newPassword to the keyring first.
     void validateAsync(qint64 hostId, const QString &newPassword = QString(),
                        bool storeNew = false);
     int rowForHostId(qint64 hostId) const;
-    void applyValidation(qint64 hostId, bool online, const QString &status, const QString &name,
-                         const QString &model, const QString &codec, int channelNum,
-                         const QString &password);
+    void applyValidation(qint64 hostId, const Validation &v);
+    void postValidation(qint64 hostId, const Validation &v); // marshals to GUI thread
+    std::shared_ptr<ReolinkHttpClient> clientFor(int row);
 
     Database *m_db;
     CredentialStore *m_credentials;

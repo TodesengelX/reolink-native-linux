@@ -31,7 +31,9 @@ using State = StreamPlayer::State;
 bool isLiveUrl(const QString &source)
 {
     return source.startsWith(QLatin1String("rtsp://")) ||
-           source.startsWith(QLatin1String("rtmp://"));
+           source.startsWith(QLatin1String("rtmp://")) ||
+           source.startsWith(QLatin1String("tcp://")) ||
+           source.startsWith(QLatin1String("udp://"));
 }
 
 // Never log credentials embedded in an RTSP/RTMP URL (finding: password-in-logs).
