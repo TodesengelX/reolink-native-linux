@@ -11,6 +11,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/time.h>
 #include <libswscale/swscale.h>
@@ -145,6 +146,58 @@ bool emitFrame(const std::shared_ptr<Session> &s, AVFrame *out,
     return true;
 }
 
+// ---- Hardware decode ------------------------------------------------------
+// Offload H.264/H.265 decode to the GPU (VAAPI/CUDA/VDPAU), then transfer the
+// surface back to system memory for the sink-upload path. This is not yet the
+// zero-copy path (DMA-BUF→GL lands with the GPU render spike, DESIGN §5.2) but
+// it already moves decode off the CPU, which is what lets a 16-tile grid scale.
+// Any failure falls back to software decode, per-stream and silently.
+bool hwDecodeEnabled()
+{
+    return qgetenv("RL_HWDECODE") != "0"; // default on
+}
+
+AVPixelFormat getHwFormat(AVCodecContext *ctx, const AVPixelFormat *fmts)
+{
+    const auto want = static_cast<AVPixelFormat>(reinterpret_cast<intptr_t>(ctx->opaque));
+    for (const AVPixelFormat *p = fmts; *p != AV_PIX_FMT_NONE; ++p)
+        if (*p == want)
+            return *p;
+    return fmts[0]; // GPU surface not offered — take the software format
+}
+
+// Configures dec for hardware decode; returns the hw pixel format (or NONE).
+AVPixelFormat setupHwDecode(AVCodecContext *dec, const AVCodec *codec, AVBufferRef **hwCtx)
+{
+    static const AVHWDeviceType order[] = {AV_HWDEVICE_TYPE_VAAPI, AV_HWDEVICE_TYPE_CUDA,
+                                           AV_HWDEVICE_TYPE_VDPAU};
+    for (AVHWDeviceType type : order) {
+        AVPixelFormat pixfmt = AV_PIX_FMT_NONE;
+        for (int i = 0;; ++i) {
+            const AVCodecHWConfig *cfg = avcodec_get_hw_config(codec, i);
+            if (!cfg)
+                break;
+            if ((cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) &&
+                cfg->device_type == type) {
+                pixfmt = cfg->pix_fmt;
+                break;
+            }
+        }
+        if (pixfmt == AV_PIX_FMT_NONE)
+            continue;
+        AVBufferRef *ctx = nullptr;
+        if (av_hwdevice_ctx_create(&ctx, type, nullptr, nullptr, 0) < 0)
+            continue;
+        *hwCtx = ctx;
+        dec->hw_device_ctx = av_buffer_ref(ctx);
+        dec->opaque = reinterpret_cast<void *>(static_cast<intptr_t>(pixfmt));
+        dec->get_format = getHwFormat;
+        qCInfo(lcMedia) << "hw decode via" << av_hwdevice_get_type_name(type);
+        return pixfmt;
+    }
+    return AV_PIX_FMT_NONE;
+}
+
 // One open→decode session. Returns true when the caller should retry (reconnect).
 bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
 {
@@ -204,30 +257,58 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
 
     avcodec_parameters_to_context(dec, stream->codecpar);
     dec->thread_count = 0; // auto
+
+    AVBufferRef *hwCtx = nullptr;
+    AVPixelFormat hwPixFmt = AV_PIX_FMT_NONE;
+    if (hwDecodeEnabled())
+        hwPixFmt = setupHwDecode(dec, codec, &hwCtx);
+    struct HwGuard {
+        AVBufferRef **ctx;
+        ~HwGuard() { av_buffer_unref(ctx); }
+    } hwGuard{&hwCtx};
+
     if (avcodec_open2(dec, codec, nullptr) < 0) {
-        postState(s, State::Error, QStringLiteral("could not open decoder"));
-        return false;
+        // Hardware path can fail at open on some driver/profile combos; retry
+        // software before giving up.
+        if (hwPixFmt != AV_PIX_FMT_NONE) {
+            qCInfo(lcMedia) << redacted(source) << "hw decoder open failed — software fallback";
+            av_buffer_unref(&dec->hw_device_ctx);
+            av_buffer_unref(&hwCtx);
+            dec->get_format = nullptr;
+            dec->opaque = nullptr;
+            hwPixFmt = AV_PIX_FMT_NONE;
+            if (avcodec_open2(dec, codec, nullptr) < 0) {
+                postState(s, State::Error, QStringLiteral("could not open decoder"));
+                return false;
+            }
+        } else {
+            postState(s, State::Error, QStringLiteral("could not open decoder"));
+            return false;
+        }
     }
 
     qCInfo(lcMedia) << redacted(source) << "opened:" << codec->name << stream->codecpar->width
-                    << "x" << stream->codecpar->height;
+                    << "x" << stream->codecpar->height
+                    << (hwPixFmt != AV_PIX_FMT_NONE ? "[hw]" : "[sw]");
 
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
+    AVFrame *hwTransfer = av_frame_alloc();
     AVFrame *converted = av_frame_alloc();
     SwsContext *sws = nullptr;
     struct LoopGuard {
         AVPacket *p;
-        AVFrame *f1, *f2;
+        AVFrame *f1, *f2, *f3;
         SwsContext **s;
         ~LoopGuard()
         {
             av_packet_free(&p);
             av_frame_free(&f1);
             av_frame_free(&f2);
+            av_frame_free(&f3);
             sws_freeContext(*s);
         }
-    } loopGuard{packet, frame, converted, &sws};
+    } loopGuard{packet, frame, hwTransfer, converted, &sws};
 
     bool streaming = *streamingOut;
     qint64 playbackStartUs = 0;
@@ -236,36 +317,51 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
     // Drain one decoded frame at a time; shared by the normal and flush paths.
     auto receiveFrames = [&]() {
         while (avcodec_receive_frame(dec, frame) == 0 && !s->abort.load()) {
-            const QVideoFrameFormat::PixelFormat qtFormat = mapPixelFormat(frame->format);
-            AVFrame *out = frame;
-            QVideoFrameFormat::PixelFormat outFormat = qtFormat;
-            if (qtFormat == QVideoFrameFormat::Format_Invalid) {
-                sws = sws_getCachedContext(sws, frame->width, frame->height,
-                                           static_cast<AVPixelFormat>(frame->format), frame->width,
-                                           frame->height, AV_PIX_FMT_YUV420P, SWS_BILINEAR, nullptr,
-                                           nullptr, nullptr);
-                if (!sws) {
-                    av_frame_unref(frame);
-                    continue; // swscale can't ingest this pixel format; drop
-                }
-                converted->width = frame->width;
-                converted->height = frame->height;
-                converted->format = AV_PIX_FMT_YUV420P;
-                if (av_frame_get_buffer(converted, 0) < 0) {
+            // Hardware frames live on the GPU; pull them into system memory.
+            AVFrame *decoded = frame;
+            if (hwPixFmt != AV_PIX_FMT_NONE && frame->format == hwPixFmt) {
+                if (av_hwframe_transfer_data(hwTransfer, frame, 0) < 0) {
                     av_frame_unref(frame);
                     continue;
                 }
-                sws_scale(sws, frame->data, frame->linesize, 0, frame->height, converted->data,
-                          converted->linesize);
+                hwTransfer->pts = frame->pts; // transfer drops timing metadata
+                decoded = hwTransfer;
+            }
+
+            const QVideoFrameFormat::PixelFormat qtFormat = mapPixelFormat(decoded->format);
+            AVFrame *out = decoded;
+            QVideoFrameFormat::PixelFormat outFormat = qtFormat;
+            if (qtFormat == QVideoFrameFormat::Format_Invalid) {
+                sws = sws_getCachedContext(sws, decoded->width, decoded->height,
+                                           static_cast<AVPixelFormat>(decoded->format),
+                                           decoded->width, decoded->height, AV_PIX_FMT_YUV420P,
+                                           SWS_BILINEAR, nullptr, nullptr, nullptr);
+                if (!sws) {
+                    if (decoded == hwTransfer)
+                        av_frame_unref(hwTransfer);
+                    av_frame_unref(frame);
+                    continue; // swscale can't ingest this pixel format; drop
+                }
+                converted->width = decoded->width;
+                converted->height = decoded->height;
+                converted->format = AV_PIX_FMT_YUV420P;
+                if (av_frame_get_buffer(converted, 0) < 0) {
+                    if (decoded == hwTransfer)
+                        av_frame_unref(hwTransfer);
+                    av_frame_unref(frame);
+                    continue;
+                }
+                sws_scale(sws, decoded->data, decoded->linesize, 0, decoded->height,
+                          converted->data, converted->linesize);
                 out = converted;
                 outFormat = QVideoFrameFormat::Format_YUV420P;
             }
 
             // File pacing: map the stream clock onto the wall clock (live is paced
             // by the network).
-            if (!live && frame->pts != AV_NOPTS_VALUE) {
+            if (!live && decoded->pts != AV_NOPTS_VALUE) {
                 const qint64 ptsUs =
-                    av_rescale_q(frame->pts, stream->time_base, AVRational{1, 1000000});
+                    av_rescale_q(decoded->pts, stream->time_base, AVRational{1, 1000000});
                 if (firstPtsUs == static_cast<qint64>(AV_NOPTS_VALUE) || ptsUs < firstPtsUs) {
                     firstPtsUs = ptsUs;
                     playbackStartUs = av_gettime_relative();
@@ -288,6 +384,8 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
             }
             if (out == converted)
                 av_frame_unref(converted);
+            if (decoded == hwTransfer)
+                av_frame_unref(hwTransfer);
             av_frame_unref(frame);
         }
     };
