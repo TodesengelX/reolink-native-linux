@@ -124,8 +124,14 @@ Dialog {
         } else if (tabs.currentIndex === 1 && streamUrlField.text.length > 0) {
             Devices.addStreamUrl(streamNameField.text, streamUrlField.text);
         }
+    }
+
+    // Clear every field after close (fires on both accept and cancel/Escape), so a
+    // typed password never lingers in this reused dialog instance.
+    onClosed: {
         addrField.text = "";
         passwordField.text = "";
+        portField.text = "";
         streamNameField.text = "";
         streamUrlField.text = "";
     }

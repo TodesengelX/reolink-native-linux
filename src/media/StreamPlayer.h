@@ -7,6 +7,7 @@
 #include <QVideoSink>
 
 #include <atomic>
+#include <memory>
 #include <thread>
 
 namespace rl {
@@ -14,6 +15,12 @@ namespace rl {
 // One live/playback stream: FFmpeg demux + decode on a dedicated worker thread,
 // frames delivered to a QML VideoOutput's QVideoSink (NV12/YUV420P upload path —
 // DESIGN.md §5: the universal fallback; zero-copy VAAPI arrives with the GPU spike).
+//
+// Lifetime: the worker shares a heap-allocated Session (below). stop()/destruction
+// signal abort and detach — they NEVER join on the GUI thread, so a stalled network
+// read or DNS lookup can never freeze the UI. The Session outlives the StreamPlayer
+// until the worker drops its reference; a mutex-guarded back-pointer makes stale
+// frame/state callbacks safe no-ops after the StreamPlayer is gone.
 //
 // Sources: rtsp:// (live, TCP, low-latency flags), or any libavformat-openable
 // URL/file (used by tests and the "direct stream" device kind).
@@ -31,6 +38,24 @@ public:
     enum class State { Idle, Connecting, Streaming, Error, Stopped };
     Q_ENUM(State)
 
+    // Shared between the StreamPlayer and its detached worker thread.
+    struct Session {
+        std::atomic<bool> abort{false};
+        std::atomic<bool> loop{false};
+        std::atomic<qint64> framesDecoded{0};
+        QString source;
+
+        // Frame/state callbacks marshal to the GUI thread only while the player
+        // is alive. backMutex guards `player`; the StreamPlayer destructor nulls
+        // it under the lock before detaching, closing the lifetime race.
+        QMutex backMutex;
+        QPointer<StreamPlayer> player;
+
+        // The sink is owned by QML; delivery hops to the GUI thread where it lives.
+        QMutex sinkMutex;
+        QPointer<QVideoSink> sink;
+    };
+
     explicit StreamPlayer(QObject *parent = nullptr);
     ~StreamPlayer() override;
 
@@ -42,13 +67,17 @@ public:
 
     State state() const { return m_state; }
     QString errorString() const { return m_errorString; }
-    qint64 framesDecoded() const { return m_framesDecoded.load(); }
+    qint64 framesDecoded() const;
 
     bool loop() const { return m_loop; }
     void setLoop(bool loop);
 
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
+
+    // Called on the GUI thread by the worker (via QMetaObject::invokeMethod).
+    // Public so the worker helpers can reach it; not part of the QML API.
+    void applyStateFromWorker(State state, const QString &error);
 
 signals:
     void sourceChanged();
@@ -59,26 +88,20 @@ signals:
     void loopChanged();
 
 private:
-    void workerLoop();
-    // Runs one open→decode session; returns false when the session should not
-    // be retried (clean stop / EOF without loop).
-    bool runSession(QString *error);
-    void setStateFromWorker(State state, const QString &error = {});
-    void deliverFrame(const class QVideoFrame &frame);
-
-    friend struct InterruptContext;
+    void applyState(State state, const QString &error);
 
     QString m_source;
-    mutable QMutex m_sinkMutex;
-    QPointer<QVideoSink> m_sink;
+    bool m_loop = false;
 
     State m_state = State::Idle;
     QString m_errorString;
-    std::atomic<qint64> m_framesDecoded{0};
-    bool m_loop = false;
 
-    std::thread m_thread;
-    std::atomic<bool> m_abort{false};
+    // Set via QML before start(); copied into each new Session. Survives stop().
+    QPointer<QVideoSink> m_pendingSink;
+
+    // The current session; replaced on each start(). Held so we can signal abort
+    // and read framesDecoded. The worker holds its own shared_ptr copy.
+    std::shared_ptr<Session> m_session;
 };
 
 } // namespace rl

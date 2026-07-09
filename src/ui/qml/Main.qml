@@ -12,9 +12,24 @@ ApplicationWindow {
     color: Theme.window
 
     // Video fullscreen (official client: chrome disappears, grid fills the
-    // screen). F11 or the ⛶ buttons toggle; Esc always exits.
+    // screen). F11 or the ⛶ buttons toggle; Esc always exits. The pre-fullscreen
+    // visibility is saved and restored so leaving fullscreen doesn't clobber a
+    // maximized window.
     property bool videoFullscreen: false
-    onVideoFullscreenChanged: visibility = videoFullscreen ? Window.FullScreen : Window.Windowed
+    property int _preFsVisibility: Window.AutomaticVisibility
+    onVideoFullscreenChanged: {
+        if (videoFullscreen) {
+            if (visibility !== Window.FullScreen)
+                _preFsVisibility = visibility;
+            visibility = Window.FullScreen;
+        } else {
+            visibility = _preFsVisibility === Window.FullScreen
+                       ? Window.Windowed : _preFsVisibility;
+        }
+    }
+    // Keep the flag in sync if the compositor changes visibility out from under us.
+    onVisibilityChanged: if (visibility !== Window.FullScreen && videoFullscreen)
+                             videoFullscreen = false
 
     Shortcut {
         sequence: "F11"

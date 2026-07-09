@@ -5,6 +5,14 @@
 namespace rl {
 namespace api {
 
+// RFC 3986: IPv6 literals must be bracketed inside a URL authority.
+static QString hostForUrl(const QString &host)
+{
+    if (host.contains(u':') && !host.startsWith(u'['))
+        return u'[' + host + u']';
+    return host;
+}
+
 bool BatchResult::needsRelogin() const
 {
     for (const CommandResult &r : results) {
@@ -31,7 +39,8 @@ QString apiUrl(const QString &host, int port, bool https, const QString &firstCm
                const QString &token)
 {
     QString url = QStringLiteral("%1://%2:%3/cgi-bin/api.cgi?cmd=%4")
-                      .arg(https ? QStringLiteral("https") : QStringLiteral("http"), host)
+                      .arg(https ? QStringLiteral("https") : QStringLiteral("http"),
+                           hostForUrl(host))
                       .arg(port)
                       .arg(firstCmd);
     if (!token.isEmpty())
@@ -50,16 +59,18 @@ BatchResult parseBatch(const QByteArray &body)
     }
     out.transportOk = true;
     for (const Json &item : doc) {
+        if (!item.is_object())
+            continue; // ignore junk array elements ([null], [42], …)
         CommandResult r;
-        r.cmd = QString::fromStdString(item.value("cmd", std::string{}));
-        const int code = item.value("code", 1);
+        r.cmd = QString::fromStdString(jsonStr(item, "cmd"));
+        const int code = jsonInt(item, "code", 1);
         if (code == 0) {
             r.ok = true;
-            r.value = item.value("value", Json::object());
+            r.value = jsonObj(item, "value");
         } else {
-            const Json err = item.value("error", Json::object());
-            r.rspCode = err.value("rspCode", 0);
-            r.detail = QString::fromStdString(err.value("detail", std::string{}));
+            const Json err = jsonObj(item, "error");
+            r.rspCode = jsonInt(err, "rspCode", 0);
+            r.detail = QString::fromStdString(jsonStr(err, "detail"));
         }
         out.results.append(std::move(r));
     }
@@ -85,9 +96,9 @@ LoginResult parseLogin(const QByteArray &body)
                         : r.detail;
         return out;
     }
-    const Json token = r.value.value("Token", Json::object());
-    out.token = QString::fromStdString(token.value("name", std::string{}));
-    out.leaseTimeSec = token.value("leaseTime", 0);
+    const Json token = jsonObj(r.value, "Token");
+    out.token = QString::fromStdString(jsonStr(token, "name"));
+    out.leaseTimeSec = jsonInt(token, "leaseTime", 0);
     out.ok = !out.token.isEmpty();
     if (!out.ok)
         out.error = QStringLiteral("login response missing token");
@@ -101,7 +112,7 @@ QString rtspUrl(const QString &host, const QString &username, const QString &pas
     const QString pass = QString::fromUtf8(QUrl::toPercentEncoding(password));
     // Concatenation, not .arg(): percent-encoded credentials contain sequences
     // like %3A that .arg() would consume as positional placeholders.
-    return QStringLiteral("rtsp://") + user + u':' + pass + u'@' + host + u':' +
+    return QStringLiteral("rtsp://") + user + u':' + pass + u'@' + hostForUrl(host) + u':' +
            QString::number(port) + u'/' + codec + QStringLiteral("Preview_") +
            QString::number(channel + 1).rightJustified(2, u'0') + u'_' +
            (mainStream ? QStringLiteral("main") : QStringLiteral("sub"));

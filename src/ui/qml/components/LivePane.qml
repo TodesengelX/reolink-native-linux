@@ -23,15 +23,24 @@ Rectangle {
 
     StreamPlayer {
         id: player
-        source: root.sourceUrl
         videoSink: video.videoSink
         // Loop non-live sources so file-based test streams keep playing.
         loop: !root.sourceUrl.startsWith("rtsp://") && !root.sourceUrl.startsWith("rtmp://")
     }
 
-    // (Re)start whenever the pane gains a source; stop when it loses one.
-    onSourceUrlChanged: root.hasSource ? player.start() : player.stop()
-    Component.onCompleted: if (root.hasSource) player.start()
+    // The onSourceUrlChanged handler fires BEFORE any declarative `source:` binding
+    // would re-evaluate, so assign imperatively then start — otherwise an
+    // empty→URL transition (restore, preset grow, tab return) would start with a
+    // still-empty source and the pane would stay dead.
+    onSourceUrlChanged: {
+        if (root.hasSource) {
+            player.source = root.sourceUrl;
+            player.start();
+        } else {
+            player.stop();
+        }
+    }
+    Component.onCompleted: if (root.hasSource) { player.source = root.sourceUrl; player.start(); }
     Component.onDestruction: player.stop()
 
     VideoOutput {

@@ -13,8 +13,12 @@ namespace {
 // Relogin this many seconds before the advertised lease expires. Firmware
 // reports leaseTime dynamically (usually 3600s but not guaranteed).
 constexpr int kLeaseMarginSec = 300;
+constexpr int kDefaultLeaseSec = 3600; // when firmware omits/zeros leaseTime
+constexpr int kLeaseFloorSec = 60;     // never let a session expire faster than this
 constexpr long kConnectTimeoutSec = 5;
 constexpr long kTotalTimeoutSec = 15;
+constexpr long kLogoutTimeoutSec = 2; // best-effort; must not pin a pool thread
+constexpr qsizetype kMaxResponseBytes = 8 * 1024 * 1024;
 
 void ensureCurlGlobalInit()
 {
@@ -25,7 +29,11 @@ void ensureCurlGlobalInit()
 size_t writeToByteArray(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     auto *out = static_cast<QByteArray *>(userdata);
-    out->append(ptr, static_cast<qsizetype>(size * nmemb));
+    const qsizetype incoming = static_cast<qsizetype>(size * nmemb);
+    // Cap the buffer so a hostile/broken device can't drive us to bad_alloc.
+    if (out->size() + incoming > kMaxResponseBytes)
+        return 0; // signals an error to libcurl, aborting the transfer
+    out->append(ptr, incoming);
     return size * nmemb;
 }
 
@@ -38,10 +46,13 @@ ReolinkHttpClient::ReolinkHttpClient(QString host, int port, bool https, QString
 {
     ensureCurlGlobalInit();
     if (m_password.size() > 31) {
-        // Observed firmware behavior (reolink_aio): passwords are truncated to 31
-        // chars at the device; longer ones fail to authenticate.
-        qCWarning(lcProto) << m_host << "password exceeds 31 characters — Reolink firmware"
-                           << "is known to truncate; login will likely fail";
+        // Observed firmware behavior (reolink_aio / fact-check.md): the device
+        // truncates passwords to 31 chars at set-time. Match it on both the HTTP
+        // and RTSP paths so authentication stays consistent.
+        qCWarning(lcProto) << m_host
+                           << "password exceeds 31 characters — truncating to match Reolink"
+                           << "firmware behavior";
+        m_password.truncate(31);
     }
 }
 
@@ -50,8 +61,8 @@ ReolinkHttpClient::~ReolinkHttpClient()
     logout();
 }
 
-ReolinkHttpClient::HttpResponse ReolinkHttpClient::post(const QString &url,
-                                                        const QByteArray &body)
+ReolinkHttpClient::HttpResponse ReolinkHttpClient::post(const QString &url, const QByteArray &body,
+                                                        long totalTimeoutSec)
 {
     HttpResponse resp;
     CURL *curl = curl_easy_init();
@@ -69,7 +80,7 @@ ReolinkHttpClient::HttpResponse ReolinkHttpClient::post(const QString &url,
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeToByteArray);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, kConnectTimeoutSec);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, kTotalTimeoutSec);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, totalTimeoutSec > 0 ? totalTimeoutSec : kTotalTimeoutSec);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     // Reolink devices ship self-signed certificates; the official client accepts
     // them. TODO(security, DESIGN §10): trust-on-first-use certificate pinning.
@@ -114,10 +125,13 @@ bool ReolinkHttpClient::loginLocked(QString *error)
         return false;
     }
     m_token = login.token;
-    const int lease = login.leaseTimeSec > kLeaseMarginSec ? login.leaseTimeSec - kLeaseMarginSec
-                                                           : login.leaseTimeSec;
+    // Fall back to the documented 3600s when firmware omits/zeros the lease, then
+    // subtract the refresh margin and floor it so a session never expires instantly
+    // (which would otherwise trigger a login storm).
+    const int reported = login.leaseTimeSec > 0 ? login.leaseTimeSec : kDefaultLeaseSec;
+    const int lease = qMax(kLeaseFloorSec, reported - kLeaseMarginSec);
     m_tokenExpiry = QDateTime::currentDateTimeUtc().addSecs(lease);
-    qCInfo(lcProto) << m_host << "logged in, lease" << login.leaseTimeSec << "s";
+    qCInfo(lcProto) << m_host << "logged in, lease" << reported << "s";
     return true;
 }
 
@@ -139,7 +153,8 @@ void ReolinkHttpClient::logout()
     const QString url =
         api::apiUrl(m_host, m_port, m_https, QStringLiteral("Logout"), m_token);
     const Json body = Json::array({api::command(QStringLiteral("Logout"))});
-    post(url, QByteArray::fromStdString(body.dump()));
+    // Short timeout: a dead device must not pin this (often a pool) thread for 15s.
+    post(url, QByteArray::fromStdString(body.dump()), kLogoutTimeoutSec);
     m_token.clear();
     m_tokenExpiry = {};
 }
@@ -163,8 +178,7 @@ api::BatchResult ReolinkHttpClient::call(const Json &commands)
             QMutexLocker lock(&m_mutex);
             token = m_token;
         }
-        const QString firstCmd =
-            QString::fromStdString(commands.front().value("cmd", std::string{}));
+        const QString firstCmd = QString::fromStdString(jsonStr(commands.front(), "cmd"));
         const QString url = api::apiUrl(m_host, m_port, m_https, firstCmd, token);
         const HttpResponse resp = post(url, QByteArray::fromStdString(commands.dump()));
         if (!resp.ok) {
@@ -174,9 +188,13 @@ api::BatchResult ReolinkHttpClient::call(const Json &commands)
         out = api::parseBatch(resp.body);
         if (out.transportOk && out.needsRelogin() && attempt == 0) {
             // Token invalidated server-side (reboot, credential change) — relogin once.
+            // Compare-and-clear: only drop the token WE used, so a token another
+            // thread just refreshed survives.
             QMutexLocker lock(&m_mutex);
-            m_token.clear();
-            m_tokenExpiry = {};
+            if (m_token == token) {
+                m_token.clear();
+                m_tokenExpiry = {};
+            }
             continue;
         }
         return out;

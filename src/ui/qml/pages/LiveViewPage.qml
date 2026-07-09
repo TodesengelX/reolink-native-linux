@@ -16,6 +16,23 @@ Item {
     property int selectedIndex: -1
     readonly property int cols: preset === 1 ? 1 : preset === 4 ? 2 : preset === 9 ? 3 : 4
 
+    // Removing a device shifts row indices; keep maximized/selected pointing at the
+    // right pane (or clear them) so the grid never blanks or maximizes the wrong cam.
+    Connections {
+        target: Devices
+        function onRowsRemoved(parent, first, last) {
+            const removed = last - first + 1;
+            if (page.maximizedIndex > last)
+                page.maximizedIndex -= removed;
+            else if (page.maximizedIndex >= first)
+                page.maximizedIndex = -1;
+            if (page.selectedIndex > last)
+                page.selectedIndex -= removed;
+            else if (page.selectedIndex >= first)
+                page.selectedIndex = -1;
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: page.fullscreen ? 0 : Theme.spacing

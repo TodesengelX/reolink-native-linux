@@ -37,7 +37,9 @@ private:
         QByteArray body;
         QString error;
     };
-    HttpResponse post(const QString &url, const QByteArray &body);
+    // totalTimeoutSec == 0 uses the default; pass a smaller value for best-effort
+    // calls (e.g. Logout) that must not pin a thread on a dead device.
+    HttpResponse post(const QString &url, const QByteArray &body, long totalTimeoutSec = 0);
     bool loginLocked(QString *error);
     bool tokenValidLocked() const;
 
