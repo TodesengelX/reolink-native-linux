@@ -165,6 +165,21 @@ private slots:
         QVERIFY(caps.channels[1].battery);
     }
 
+    void parseAbilityAdmin()
+    {
+        const QByteArray adminBody = R"({"Ability":{"userManage":{"ver":1,"permit":6},
+            "abilityChn":[{}]}})";
+        Json v = Json::parse(adminBody.constData(), adminBody.constData() + adminBody.size(),
+                             nullptr, false);
+        QVERIFY(api::parseAbility(v).isAdmin);
+
+        const QByteArray userBody = R"({"Ability":{"userManage":{"ver":1,"permit":0},
+            "abilityChn":[{}]}})";
+        v = Json::parse(userBody.constData(), userBody.constData() + userBody.size(), nullptr,
+                        false);
+        QVERIFY(!api::parseAbility(v).isAdmin);
+    }
+
     void parseAbilityEmptyIsInvalid()
     {
         QVERIFY(!api::parseAbility(Json::object()).valid);

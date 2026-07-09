@@ -82,6 +82,8 @@ QVariant DeviceManager::data(const QModelIndex &index, int role) const
         return e.caps.battery;
     case HasTalkRole:
         return e.talk;
+    case IsAdminRole:
+        return e.isAdmin;
     }
     return {};
 }
@@ -104,6 +106,7 @@ QHash<int, QByteArray> DeviceManager::roleNames() const
         {HasFloodlightRole, "hasFloodlight"},
         {HasBatteryRole, "hasBattery"},
         {HasTalkRole, "hasTalk"},
+        {IsAdminRole, "isAdmin"},
     };
 }
 
@@ -216,6 +219,7 @@ void DeviceManager::applyValidation(qint64 hostId, const Validation &v)
         if (v.channelNum > 1)
             e.rec.kind = QStringLiteral("nvr");
         e.talk = v.caps.talk;
+        e.isAdmin = v.caps.isAdmin;
         if (!v.caps.channels.isEmpty())
             e.caps = v.caps.channels.first();
         m_db->updateHost(e.rec);

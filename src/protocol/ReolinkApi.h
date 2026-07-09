@@ -115,8 +115,9 @@ struct ChannelCaps {
 };
 struct Capabilities {
     bool valid = false;
-    bool talk = false; // two-way audio (host-level)
+    bool talk = false;    // two-way audio (host-level)
     bool p2p = false;
+    bool isAdmin = false; // logged-in user may change settings / reboot / manage users
     QVector<ChannelCaps> channels;
 };
 Capabilities parseAbility(const Json &value);

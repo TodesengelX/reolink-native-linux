@@ -42,6 +42,7 @@ public:
         HasFloodlightRole,
         HasBatteryRole,
         HasTalkRole,
+        IsAdminRole,
     };
 
     DeviceManager(Database *db, CredentialStore *credentials, QObject *parent = nullptr);
@@ -87,6 +88,7 @@ private:
         bool primed = false;                        // password loaded?
         api::ChannelCaps caps;                      // channel 0 capabilities
         bool talk = false;                          // host supports two-way audio
+        bool isAdmin = false;                       // logged-in user may edit settings
         // Persistent authenticated client for live control (PTZ, snapshot, …),
         // created lazily. Shared so worker tasks can hold it past a model edit.
         std::shared_ptr<ReolinkHttpClient> client;

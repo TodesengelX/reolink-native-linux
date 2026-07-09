@@ -163,6 +163,13 @@ Capabilities parseAbility(const Json &value)
     caps.valid = true;
     caps.talk = capVer(ability, "talk");
     caps.p2p = capVer(ability, "p2p");
+    // The per-ability "permit" is a bitmask of the user's rights; admins can write
+    // config and manage the device. Use privileged abilities as the signal.
+    auto permit = [&](const char *key) {
+        const Json &v = jsonRef(ability, key);
+        return v.is_object() ? jsonInt(v, "permit", 0) : 0;
+    };
+    caps.isAdmin = permit("userManage") > 0 || permit("reboot") > 0 || permit("restore") > 0;
 
     const Json chns = jsonArr(ability, "abilityChn");
     for (const Json &chn : chns) {
