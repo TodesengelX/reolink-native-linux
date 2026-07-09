@@ -1,5 +1,7 @@
 # Reolink Linux Client
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A fully **native Linux desktop client** for Reolink cameras and NVRs — a 1:1 replica of the official Reolink Client (Windows/macOS): same screens, controls, settings, and behaviors, including the 1/4/9/16 live grid, double-click pane maximize/restore, fullscreen, PTZ, color-coded playback timeline, downloads, and the full device-settings surface.
 
 **No Wine, no Electron, no web wrappers, no bundled third-party NVR software.** Compiled native code talking directly to the devices over their own protocols.
@@ -44,6 +46,12 @@ Requires: Qt 6.5+ (base/declarative/multimedia/tools), FFmpeg dev headers, libcu
 
 Next per the [roadmap](docs/DESIGN.md): M2 feasibility spikes (hardware decode bench, P2P/UID, battery bridge), M3 live-view completion (PTZ, snapshot, stream-quality toggle), M4 manual recording.
 
-## Licensing posture
+## Licensing
+
+This project is licensed under the [MIT License](LICENSE).
 
 All runtime dependencies are LGPL/MIT/Apache and dynamically linked; the protocol layer is implemented from the MIT-licensed `reolink_aio` knowledge base and Reolink's published HTTP API — never from AGPL code. See DESIGN.md §10 for the full legal notes (HEVC, Baichuan reverse-engineering, bridge policy).
+
+## Disclaimer
+
+This is an independent, unofficial project and is not affiliated with, endorsed by, or supported by Reolink. "Reolink" is a trademark of its respective owner. Use with your own devices at your own risk.
