@@ -47,6 +47,7 @@ public:
         IsAdminRole,
         BatteryPercentRole,
         BatteryChargingRole,
+        ChannelRole,
     };
 
     DeviceManager(Database *db, CredentialStore *credentials, QObject *parent = nullptr);
@@ -112,34 +113,48 @@ private slots:
     void pollDetections();
 
 private:
+    // One model row = one camera. A standalone camera is a host with a single
+    // channel (0); an NVR fans out into one Entry per online channel, all sharing
+    // the same host connection (hostId, addr, credentials, client).
     struct Entry {
-        HostRecord rec;
+        HostRecord rec;    // host connection (shared across an NVR's channels)
+        int channel = 0;   // channel index on the host
+        QString chanName;  // camera name for this channel
         bool online = false;
         QString status;
         QString mainCodec = QStringLiteral("h264"); // sub stream is always h264
         QString password;                           // in-memory only (keyring at rest)
         bool primed = false;                        // password loaded?
-        api::ChannelCaps caps;                      // channel 0 capabilities
-        bool talk = false;                          // host supports two-way audio
+        api::ChannelCaps caps;                      // this channel's capabilities
+        bool talk = false;                          // channel supports two-way audio
         bool isAdmin = false;                       // logged-in user may edit settings
         api::BatteryInfo battery;                   // battery/solar state (if any)
-        // Persistent authenticated client for live control (PTZ, snapshot, …),
-        // created lazily. Shared so worker tasks can hold it past a model edit.
+        // Persistent authenticated client for the host, shared by its channels.
         std::shared_ptr<ReolinkHttpClient> client;
+    };
+
+    // One camera's validated state (channel within a host).
+    struct ChannelResult {
+        int channel = 0;
+        QString name;
+        bool online = false;
+        QString codec = QStringLiteral("h264");
+        api::ChannelCaps caps;
     };
 
     // Outcome of a worker-thread validation, applied back on the GUI thread.
     struct Validation {
         bool online = false;
         QString status;
-        QString name;
+        QString hostName; // device/NVR name from GetDevInfo
         QString model;
-        QString codec;
         int channelNum = 0;
+        bool isAdmin = false;
+        bool talk = false;
         QString password;
-        api::Capabilities caps;
         api::BatteryInfo battery;
         std::shared_ptr<ReolinkHttpClient> client;
+        QVector<ChannelResult> channels; // one per camera to show
     };
 
     // Runs on a worker: loads the password from the keyring (or stores newPassword
@@ -158,8 +173,9 @@ private:
     QFutureSynchronizer<void> m_pending; // drains in-flight validations at teardown
 
     QTimer m_pollTimer;
-    QHash<qint64, api::DetectionState> m_lastDetection; // per hostId, for edge detection
-    QHash<qint64, bool> m_pollInFlight;                 // avoid overlapping polls
+    // Keyed by "hostId:channel" so each NVR camera is tracked independently.
+    QHash<QString, api::DetectionState> m_lastDetection; // for 0->1 edge detection
+    QHash<QString, bool> m_pollInFlight;                 // avoid overlapping polls
 };
 
 } // namespace rl

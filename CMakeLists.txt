@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS
-    Core Gui Qml Quick QuickControls2 Sql Multimedia Concurrent LinguistTools Test ShaderTools)
+    Core Gui Qml Quick QuickControls2 Sql Multimedia Concurrent Network LinguistTools Test ShaderTools)
 qt_standard_project_setup(REQUIRES 6.5)
 
 find_package(PkgConfig REQUIRED)
@@ -31,12 +31,13 @@ add_library(reolink_core STATIC
     src/protocol/ReolinkApi.h src/protocol/ReolinkApi.cpp
     src/protocol/ReolinkHttpClient.h src/protocol/ReolinkHttpClient.cpp
     src/device/DeviceManager.h src/device/DeviceManager.cpp
+    src/device/DeviceDiscovery.h src/device/DeviceDiscovery.cpp
     src/device/EventManager.h src/device/EventManager.cpp
     src/media/StreamPlayer.h src/media/StreamPlayer.cpp
 )
 target_include_directories(reolink_core PUBLIC src third_party)
 target_link_libraries(reolink_core PUBLIC
-    Qt6::Core Qt6::Gui Qt6::Sql Qt6::Multimedia Qt6::Concurrent
+    Qt6::Core Qt6::Gui Qt6::Sql Qt6::Multimedia Qt6::Concurrent Qt6::Network
     PkgConfig::FFMPEG PkgConfig::CURL PkgConfig::SECRET)
 
 # ---------------------------------------------------------------------------

@@ -224,6 +224,27 @@ private slots:
         QVERIFY(back["Enc"]["flags"].is_array());
     }
 
+    void parseChannelStatusNvr()
+    {
+        // Real RLN8-410 shape: value.status[] with per-channel online/name/uid.
+        const QByteArray body = R"({"count":4,"status":[
+            {"channel":0,"name":"Front","online":1,"sleep":0,"uid":"AAA"},
+            {"channel":1,"name":"Side","online":1,"sleep":0,"uid":"BBB"},
+            {"channel":2,"name":"","online":0,"sleep":0,"uid":""},
+            {"channel":3,"name":"Rear","online":1,"sleep":0,"uid":"CCC"}]})";
+        const Json v = Json::parse(body.constData(), body.constData() + body.size(), nullptr, false);
+        const QVector<api::ChannelInfo> chans = api::parseChannelStatus(v);
+        QCOMPARE(chans.size(), 4);
+        int online = 0;
+        for (const auto &c : chans)
+            if (c.online)
+                ++online;
+        QCOMPARE(online, 3);
+        QCOMPARE(chans[0].name, QStringLiteral("Front"));
+        QCOMPARE(chans[3].channel, 3);
+        QVERIFY(!chans[2].online);
+    }
+
     void detectionStates()
     {
         auto parse = [](const char *s) {

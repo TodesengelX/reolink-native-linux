@@ -132,6 +132,16 @@ ApplicationWindow {
             doorbell.camera = "Front Door";
             doorbell.active = true;
         }
+        // First run: no devices yet → open Add Device and scan the network,
+        // just like the official client does on install.
+        if (Devices.count === 0)
+            firstRunTimer.start();
+    }
+    // A short delay so the window is mapped before the modal + scan appear.
+    Timer {
+        id: firstRunTimer
+        interval: 400
+        onTriggered: if (Devices.count === 0) addDeviceDialog.openAndScan()
     }
 
     // Detached camera windows for multi-monitor viewing.

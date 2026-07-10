@@ -268,6 +268,21 @@ Capabilities parseAbility(const Json &value)
     return caps;
 }
 
+QVector<ChannelInfo> parseChannelStatus(const Json &value)
+{
+    // value = {"count":N,"status":[{"channel":i,"name":..,"online":0/1,"uid":..}]}
+    QVector<ChannelInfo> out;
+    for (const Json &c : jsonArr(value, "status")) {
+        ChannelInfo ci;
+        ci.channel = jsonInt(c, "channel", 0);
+        ci.name = QString::fromStdString(jsonStr(c, "name"));
+        ci.online = jsonBool(c, "online");
+        ci.uid = QString::fromStdString(jsonStr(c, "uid"));
+        out.append(ci);
+    }
+    return out;
+}
+
 Json getOsd(int channel)
 {
     return command(QStringLiteral("GetOsd"), Json{{"channel", channel}}, /*action=*/1);

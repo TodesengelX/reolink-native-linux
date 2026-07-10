@@ -2,6 +2,7 @@
 #include "core/Database.h"
 #include "core/Log.h"
 #include "core/Paths.h"
+#include "device/DeviceDiscovery.h"
 #include "device/DeviceManager.h"
 #include "device/EventManager.h"
 #include "media/StreamPlayer.h"
@@ -47,12 +48,28 @@ int main(int argc, char *argv[])
     QCommandLineOption recordSecsOption(QStringLiteral("record-secs"),
                                         QStringLiteral("Seconds to record."),
                                         QStringLiteral("s"), QStringLiteral("4"));
+    QCommandLineOption discoverOption(QStringLiteral("discover"),
+                                      QStringLiteral("Scan the LAN for Reolink devices then exit."));
     parser.addOption(smokeOption);
     parser.addOption(smokeDelayOption);
     parser.addOption(recordOption);
     parser.addOption(recordOutOption);
     parser.addOption(recordSecsOption);
+    parser.addOption(discoverOption);
     parser.process(app);
+
+    if (parser.isSet(discoverOption)) {
+        auto *disc = new rl::DeviceDiscovery(&app);
+        QObject::connect(disc, &rl::DeviceDiscovery::deviceFound, &app,
+                         [](const QString &ip, const QString &info) {
+                             qCInfo(lcUi) << "DISCOVERED Reolink device:" << ip << info;
+                         });
+        QObject::connect(disc, &rl::DeviceDiscovery::scanFinished, &app,
+                         [] { qCInfo(lcUi) << "discovery finished"; QCoreApplication::exit(0); });
+        disc->scan();
+        QTimer::singleShot(30000, &app, [] { QCoreApplication::exit(1); });
+        return app.exec();
+    }
 
     if (parser.isSet(recordOption)) {
         auto *player = new rl::StreamPlayer(&app);
@@ -88,10 +105,12 @@ int main(int argc, char *argv[])
     rl::CredentialStore credentials;
     rl::DeviceManager devices(&database, &credentials);
     rl::EventManager events(&database, &devices);
+    rl::DeviceDiscovery discovery;
 
     qmlRegisterType<rl::StreamPlayer>("ReolinkApp.Core", 1, 0, "StreamPlayer");
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Devices", &devices);
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Events", &events);
+    qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Discovery", &discovery);
 
     QQmlApplicationEngine engine;
     // Lets tests/screenshots open a specific page (0=Live,1=Playback,2=Events,3=Settings).

@@ -133,6 +133,16 @@ struct Capabilities {
 };
 Capabilities parseAbility(const Json &value);
 
+// ---- Channels (GetChannelstatus, NVR fan-out) -----------------------------
+// An NVR reports its bound cameras here; each online entry becomes a live pane.
+struct ChannelInfo {
+    int channel = 0;
+    QString name;
+    bool online = false;
+    QString uid; // per-camera UID (for P2P), may be empty
+};
+QVector<ChannelInfo> parseChannelStatus(const Json &value);
+
 // ---- OSD ------------------------------------------------------------------
 Json getOsd(int channel);
 
