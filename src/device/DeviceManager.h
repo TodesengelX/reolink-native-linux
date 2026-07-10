@@ -102,6 +102,10 @@ public:
     Q_INVOKABLE void searchRecordings(int row, int year, int month, int day);
     // Playable HTTP-FLV URL for a recording starting at startEpoch (Unix seconds).
     Q_INVOKABLE QString playbackUrl(int row, qint64 startEpoch, bool mainStream = false);
+    // Full-resolution (main-stream) playback: download the clip covering
+    // [startEpoch, startEpoch+durationSecs] to a local file, then emit hdClipReady
+    // with its path (the file is playable/seekable locally, unlike the FLV path).
+    Q_INVOKABLE void requestHdClip(int row, qint64 startEpoch, int durationSecs = 15);
 
     // Settings: fetch a batch of Get* commands (emits settingsLoaded with a map
     // of cmd -> value) and apply one Set* command (emits settingApplied).
@@ -117,6 +121,8 @@ signals:
     void recordingsFound(int row, const QVariantList &segments);
     void recordingDaysFound(int row, int year, int month, const QVariantList &days);
     void recordingsFailed(int row, const QString &error);
+    void hdClipReady(int row, const QString &localPath, qint64 startEpoch);
+    void hdClipFailed(int row, const QString &error);
     void settingsLoaded(int row, const QVariantMap &values);
     void settingsFailed(int row, const QString &error);
     void settingApplied(int row, const QString &command, bool ok, const QString &error);

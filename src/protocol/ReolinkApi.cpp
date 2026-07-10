@@ -411,5 +411,43 @@ QString playbackFlvUrl(const QString &host, int port, bool https, int channel, b
                            QString::fromUtf8(QUrl::toPercentEncoding(password)));
 }
 
+Json nvrDownloadBody(int channel, const QDateTime &start, const QDateTime &end,
+                     const QString &streamType)
+{
+    return command(QStringLiteral("NvrDownload"),
+                   Json{{"NvrDownload",
+                         Json{{"channel", channel},
+                              {"iLogicChannel", 0},
+                              {"StartTime", timeObj(start)},
+                              {"EndTime", timeObj(end)},
+                              {"streamType", streamType.toStdString()}}}},
+                   1);
+}
+
+QVector<DownloadFile> parseNvrDownload(const Json &value)
+{
+    QVector<DownloadFile> out;
+    for (const Json &f : jsonArr(value, "fileList")) {
+        DownloadFile df;
+        df.fileName = QString::fromStdString(jsonStr(f, "fileName"));
+        df.size = jsonInt(f, "fileSize", 0); // arrives as a string on NVR firmware
+        if (!df.fileName.isEmpty())
+            out.append(df);
+    }
+    return out;
+}
+
+QString downloadUrl(const QString &host, int port, bool https, const QString &fileName,
+                    const QString &token, const QString &output)
+{
+    Q_UNUSED(port); // Download is served from the web port
+    const QString scheme = https ? QStringLiteral("https") : QStringLiteral("http");
+    return QStringLiteral("%1://%2/cgi-bin/api.cgi?cmd=Download&source=%3&output=%4&token=%5")
+        .arg(scheme, hostForUrl(host),
+             QString::fromUtf8(QUrl::toPercentEncoding(fileName)),
+             QString::fromUtf8(QUrl::toPercentEncoding(output)),
+             QString::fromUtf8(QUrl::toPercentEncoding(token)));
+}
+
 } // namespace api
 } // namespace rl

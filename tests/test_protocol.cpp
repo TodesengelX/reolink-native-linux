@@ -333,6 +333,37 @@ private slots:
         QVERIFY(url.contains(QStringLiteral("start=20260709000000")));
         QVERIFY(url.contains(QStringLiteral("user=admin")));
     }
+
+    void nvrDownloadRoundTrip()
+    {
+        const QDateTime start(QDate(2026, 7, 9), QTime(1, 59, 58));
+        const QDateTime end(QDate(2026, 7, 9), QTime(2, 0, 10));
+        const Json cmd = api::nvrDownloadBody(0, start, end, QStringLiteral("main"));
+        QCOMPARE(cmd.value("cmd", std::string{}), std::string("NvrDownload"));
+        QCOMPARE(cmd.value("action", 0), 1);
+        const Json nd = cmd["param"]["NvrDownload"];
+        QCOMPARE(nd.value("channel", -1), 0);
+        QCOMPARE(nd.value("streamType", std::string{}), std::string("main"));
+        QCOMPARE(nd["StartTime"].value("hour", 0), 1);
+        QCOMPARE(nd["EndTime"].value("min", 0), 0);
+
+        // Real firmware: fileSize is a STRING; fileName carries the local start.
+        const QByteArray resp = R"({"fileCount":2,"fileList":[
+            {"fileName":"fragment_01_20260709015958.mp4","fileSize":"17914540"},
+            {"fileName":"fragment_01_20260708205958.mp4","fileSize":"4783735"}]})";
+        const Json value = Json::parse(resp.constData(), resp.constData() + resp.size(),
+                                       nullptr, false);
+        const QVector<api::DownloadFile> files = api::parseNvrDownload(value);
+        QCOMPARE(files.size(), 2);
+        QCOMPARE(files[0].fileName, QStringLiteral("fragment_01_20260709015958.mp4"));
+        QCOMPARE(files[0].size, qint64(17914540)); // string coerced to int
+
+        const QString url = api::downloadUrl(QStringLiteral("10.0.0.5"), 443, true,
+                                             files[0].fileName, QStringLiteral("tok/en+1"));
+        QVERIFY(url.startsWith(QStringLiteral("https://10.0.0.5/cgi-bin/api.cgi?cmd=Download")));
+        QVERIFY(url.contains(QStringLiteral("source=fragment_01_20260709015958.mp4")));
+        QVERIFY(url.contains(QStringLiteral("token=tok%2Fen%2B1"))); // percent-encoded
+    }
 };
 
 QTEST_GUILESS_MAIN(TestProtocol)

@@ -5,7 +5,9 @@
 #include "protocol/ReolinkHttpClient.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QRegularExpression>
 #include <QSet>
 #include <QUrl>
@@ -744,6 +746,80 @@ QString DeviceManager::playbackUrl(int row, qint64 startEpoch, bool mainStream)
     const QString token = e.client ? e.client->token() : QString();
     return api::playbackFlvUrl(e.rec.addr, e.rec.port, e.rec.https, e.channel, mainStream, start,
                                e.rec.username, e.password, token);
+}
+
+void DeviceManager::requestHdClip(int row, qint64 startEpoch, int durationSecs)
+{
+    auto client = clientFor(row);
+    if (!client || row < 0 || row >= m_entries.size() || startEpoch <= 0) {
+        emit hdClipFailed(row, tr("device not ready"));
+        return;
+    }
+    const Entry &e = m_entries.at(row);
+    if (e.rec.kind == QLatin1String("stream") || !e.primed) {
+        emit hdClipFailed(row, tr("no recordings on this device"));
+        return;
+    }
+    const int ch = e.channel;
+    const QString host = e.rec.addr;
+    const int port = e.rec.port;
+    const bool https = e.rec.https;
+    // NvrDownload takes wall-clock local times (like Search), not the FLV
+    // playback clock — no offset applied here.
+    const QDateTime start = QDateTime::fromSecsSinceEpoch(startEpoch);
+    const QDateTime end = start.addSecs(qBound(2, durationSecs, 120));
+    const QString startStamp = start.toString(QStringLiteral("yyyyMMddHHmmss"));
+
+    m_pending.addFuture(QtConcurrent::run([this, client, ch, row, host, port, https, start, end,
+                                           startStamp, startEpoch] {
+        QString error;
+        QString localPath;
+        const api::BatchResult b =
+            client->call(Json::array({api::nvrDownloadBody(ch, start, end, QStringLiteral("main"))}));
+        if (b.transportOk && !b.results.isEmpty() && b.results.first().ok) {
+            const QVector<api::DownloadFile> files = api::parseNvrDownload(b.results.first().value);
+            // Prefer the clip named for the requested start; otherwise the largest.
+            api::DownloadFile pick;
+            for (const api::DownloadFile &f : files)
+                if (f.fileName.contains(startStamp)) {
+                    pick = f;
+                    break;
+                }
+            if (pick.fileName.isEmpty())
+                for (const api::DownloadFile &f : files)
+                    if (f.size > pick.size)
+                        pick = f;
+
+            if (pick.fileName.isEmpty()) {
+                error = tr("no clip available for this moment");
+            } else {
+                const QString url =
+                    api::downloadUrl(host, port, https, pick.fileName, client->token());
+                const QString dir = Paths::dataDir() + QStringLiteral("/hdcache");
+                QDir().mkpath(dir);
+                // Keep only the current clip — these files are large.
+                for (const QFileInfo &fi : QDir(dir).entryInfoList(QDir::Files))
+                    QFile::remove(fi.absoluteFilePath());
+                const QString path = dir + QStringLiteral("/clip_") + startStamp + QStringLiteral(".mp4");
+                QString dlErr;
+                if (client->downloadToFile(url, path, 120, &dlErr)) // slow NVR download
+                    localPath = path;
+                else
+                    error = dlErr.isEmpty() ? tr("clip download failed") : dlErr;
+            }
+        } else {
+            error = b.error.isEmpty() ? tr("clip request failed") : b.error;
+        }
+        QMetaObject::invokeMethod(
+            this,
+            [this, row, localPath, startEpoch, error] {
+                if (!localPath.isEmpty())
+                    emit hdClipReady(row, localPath, startEpoch);
+                else
+                    emit hdClipFailed(row, error);
+            },
+            Qt::QueuedConnection);
+    }));
 }
 
 void DeviceManager::fetchSettings(int row, const QStringList &getCommands)

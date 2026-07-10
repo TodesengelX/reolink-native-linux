@@ -2,8 +2,11 @@
 
 #include "core/Log.h"
 
+#include <QFile>
+
 #include <curl/curl.h>
 
+#include <cstdio>
 #include <mutex>
 
 namespace rl {
@@ -101,7 +104,7 @@ ReolinkHttpClient::HttpResponse ReolinkHttpClient::post(const QString &url, cons
     return resp;
 }
 
-ReolinkHttpClient::HttpResponse ReolinkHttpClient::get(const QString &url)
+ReolinkHttpClient::HttpResponse ReolinkHttpClient::get(const QString &url, long totalTimeoutSec)
 {
     HttpResponse resp;
     CURL *curl = curl_easy_init();
@@ -115,7 +118,7 @@ ReolinkHttpClient::HttpResponse ReolinkHttpClient::get(const QString &url)
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeToByteArray);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, kConnectTimeoutSec);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, kTotalTimeoutSec);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, totalTimeoutSec > 0 ? totalTimeoutSec : kTotalTimeoutSec);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
@@ -134,6 +137,58 @@ ReolinkHttpClient::HttpResponse ReolinkHttpClient::get(const QString &url)
     }
     curl_easy_cleanup(curl);
     return resp;
+}
+
+bool ReolinkHttpClient::downloadToFile(const QString &url, const QString &destPath,
+                                       long timeoutSec, QString *error)
+{
+    const QByteArray destUtf8 = destPath.toUtf8();
+    FILE *fp = std::fopen(destUtf8.constData(), "wb");
+    if (!fp) {
+        if (error)
+            *error = QStringLiteral("cannot open %1").arg(destPath);
+        return false;
+    }
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        std::fclose(fp);
+        QFile::remove(destPath);
+        if (error)
+            *error = QStringLiteral("curl_easy_init failed");
+        return false;
+    }
+    const QByteArray urlUtf8 = url.toUtf8();
+    curl_easy_setopt(curl, CURLOPT_URL, urlUtf8.constData());
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp); // default fwrite-to-FILE callback
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, kConnectTimeoutSec);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSec > 0 ? timeoutSec : kTotalTimeoutSec);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+    const CURLcode rc = curl_easy_perform(curl);
+    long status = 0;
+    if (rc == CURLE_OK)
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    curl_easy_cleanup(curl);
+    std::fclose(fp);
+
+    if (rc != CURLE_OK) {
+        QFile::remove(destPath);
+        if (error)
+            *error = QString::fromUtf8(curl_easy_strerror(rc));
+        return false;
+    }
+    if (status < 200 || status >= 300) {
+        QFile::remove(destPath);
+        if (error)
+            *error = QStringLiteral("HTTP %1").arg(status);
+        return false;
+    }
+    if (error)
+        error->clear();
+    return true;
 }
 
 QByteArray ReolinkHttpClient::fetchSnapshot(int channel, QString *error)

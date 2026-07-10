@@ -29,6 +29,13 @@ public:
     // failure with *error set.
     QByteArray fetchSnapshot(int channel, QString *error = nullptr);
 
+    // Stream an authenticated GET straight to a file (e.g. a recording clip via
+    // cmd=Download). Streams to disk rather than buffering, so it handles the large
+    // clips the endpoint produces. Returns false with *error set on failure (and
+    // removes any partial file). timeoutSec allows a long cap (0 = default).
+    bool downloadToFile(const QString &url, const QString &destPath, long timeoutSec = 0,
+                        QString *error = nullptr);
+
     bool ensureLogin(QString *error = nullptr);
     void logout();
 
@@ -47,7 +54,9 @@ private:
     // totalTimeoutSec == 0 uses the default; pass a smaller value for best-effort
     // calls (e.g. Logout) that must not pin a thread on a dead device.
     HttpResponse post(const QString &url, const QByteArray &body, long totalTimeoutSec = 0);
-    HttpResponse get(const QString &url);
+    // totalTimeoutSec == 0 uses the default; large clip downloads from a slow NVR
+    // need a generous value.
+    HttpResponse get(const QString &url, long totalTimeoutSec = 0);
     bool loginLocked(QString *error);
     bool tokenValidLocked() const;
 

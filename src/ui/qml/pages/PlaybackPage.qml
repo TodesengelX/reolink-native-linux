@@ -27,6 +27,10 @@ Item {
     property var recordingDays: []
     property real playheadSecs: 0    // playhead position (seconds into the day)
     property bool _autoplayed: false // test hook guard
+    // HD mode plays the full-resolution main stream by downloading the clip (the
+    // FLV path can't carry HEVC); off = light sub-stream scrubbing.
+    property bool hdMode: false
+    property bool hdLoading: false
 
     function refresh() {
         if (page.deviceRow >= 0)
@@ -52,15 +56,31 @@ Item {
             player.stop();
             return;
         }
+        if (page.hdMode) {
+            page.playHd(sec);
+            return;
+        }
         // Scrub against the sub stream: it is light and always landscape, so the
-        // timeline stays responsive. (Main is a giant 4K keyframe stream and, on
-        // ultra-wide cameras, rotated — reserved for a future HD-playback toggle.)
+        // timeline stays responsive. (HD mode below plays the full-res main.)
+        player.loop = false;
         var url = Devices.playbackUrl(page.deviceRow, epochAt(sec), false);
         if (url.length > 0) {
             player.expectedSize = Devices.declaredSize(page.deviceRow, false); // sub
             player.source = url;
             player.start();
         }
+    }
+
+    // HD: download the full-resolution main-stream clip covering this moment, then
+    // play it locally (the FLV path can't carry the HEVC main stream). The download
+    // is slow on a home NVR, so we surface a clear loading state.
+    function playHd(sec) {
+        if (page.deviceRow < 0)
+            return;
+        player.stop();
+        page.hdLoading = true;
+        statusText.text = qsTr("Downloading HD clip…");
+        Devices.requestHdClip(page.deviceRow, epochAt(sec), 15);
     }
 
     property real _pendingPlayEpoch: 0  // play this once the day's search returns
@@ -110,6 +130,22 @@ Item {
         function onRecordingDaysFound(row, year, month, days) {
             if (row === page.deviceRow && year === page.selYear && month === page.selMonth)
                 page.recordingDays = days;
+        }
+        function onHdClipReady(row, path, epoch) {
+            if (row !== page.deviceRow)
+                return;
+            page.hdLoading = false;
+            statusText.text = qsTr("HD");
+            player.expectedSize = Devices.declaredSize(page.deviceRow, true); // main
+            player.loop = true; // short clip — replay until the user scrubs away
+            player.source = path;
+            player.start();
+        }
+        function onHdClipFailed(row, error) {
+            if (row !== page.deviceRow)
+                return;
+            page.hdLoading = false;
+            statusText.text = error;
         }
         function onRecordingsFailed(row, error) {
             if (row === page.deviceRow) {
@@ -177,14 +213,15 @@ Item {
                     visible: player.state !== StreamPlayer.Streaming
                     BusyIndicator {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        running: player.state === StreamPlayer.Connecting
+                        running: player.state === StreamPlayer.Connecting || page.hdLoading
                         visible: running; width: 32; height: 32
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         color: player.state === StreamPlayer.Error ? Theme.danger : Theme.textMuted
                         font.pixelSize: 12
-                        text: player.state === StreamPlayer.Error ? player.errorString
+                        text: page.hdLoading ? qsTr("Downloading HD clip…")
+                            : player.state === StreamPlayer.Error ? player.errorString
                             : qsTr("Click a recording on the timeline to play")
                     }
                 }
@@ -231,8 +268,30 @@ Item {
                       onActivated: player.state === StreamPlayer.Streaming ? player.stop() : player.start() }
                 Ctl { glyph: "⏹"; onActivated: player.stop() }
                 Item { Layout.fillWidth: true }
-                Text { text: qsTr("Speed and download arrive with NVR verification");
-                       color: Theme.textMuted; font.pixelSize: 11 }
+                Text { text: qsTr("Downloading…"); color: Theme.textMuted; font.pixelSize: 11
+                       visible: page.hdLoading }
+                // Quality toggle: SD = light sub-stream scrubbing; HD = full-res
+                // main stream (downloaded per clip).
+                Rectangle {
+                    width: 52; height: 30; radius: Theme.radius
+                    color: page.hdMode ? Theme.accent : (hdHover.hovered ? Theme.surfaceAlt : Theme.surface)
+                    border.color: page.hdMode ? Theme.accent : Theme.border
+                    Text {
+                        anchors.centerIn: parent
+                        text: page.hdMode ? qsTr("HD") : qsTr("SD")
+                        color: page.hdMode ? Theme.window : Theme.text
+                        font.pixelSize: 12; font.bold: true
+                    }
+                    HoverHandler { id: hdHover }
+                    TapHandler {
+                        onTapped: {
+                            page.hdMode = !page.hdMode;
+                            // Re-play the current moment in the newly selected quality.
+                            if (player.state === StreamPlayer.Streaming || page.hdLoading)
+                                page.playAt(page.playheadSecs);
+                        }
+                    }
+                }
             }
         }
 

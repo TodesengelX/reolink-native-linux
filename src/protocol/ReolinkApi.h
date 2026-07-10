@@ -206,5 +206,23 @@ QString playbackFlvUrl(const QString &host, int port, bool https, int channel,
                        bool mainStream, const QDateTime &start, const QString &username,
                        const QString &password, const QString &token = {});
 
+// ---- Full-resolution clip download (NvrDownload + Download) ----------------
+// HTTP-FLV can't carry the HEVC main stream, so full-res playback goes through
+// the clip-download path the official client uses: NvrDownload enumerates the
+// clip(s) covering [start,end] (local time), then downloadUrl() fetches one.
+// The endpoint does NOT support HTTP range, so the whole clip must be fetched to
+// disk before a demuxer can open it (its moov box is at the end and unseekable).
+Json nvrDownloadBody(int channel, const QDateTime &start, const QDateTime &end,
+                     const QString &streamType = QStringLiteral("main"));
+
+struct DownloadFile {
+    QString fileName; // opaque handle passed to Download as `source`
+    qint64 size = 0;  // bytes (clipped to the requested range)
+};
+QVector<DownloadFile> parseNvrDownload(const Json &value);
+
+QString downloadUrl(const QString &host, int port, bool https, const QString &fileName,
+                    const QString &token, const QString &output = QStringLiteral("clip.mp4"));
+
 } // namespace api
 } // namespace rl
