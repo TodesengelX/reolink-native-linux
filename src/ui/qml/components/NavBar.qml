@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import ReolinkApp
+import ReolinkApp.Core
 
 Rectangle {
     id: root
@@ -48,6 +49,26 @@ Rectangle {
                     text: parent.modelData
                     color: root.currentIndex === parent.index ? Theme.text : Theme.textMuted
                     font.pixelSize: 14
+                }
+                // Unread badge on the Events tab (index 2).
+                Rectangle {
+                    visible: parent.index === 2 && Events.unread > 0
+                    anchors.left: tabLabel.right
+                    anchors.leftMargin: 2
+                    anchors.verticalCenter: tabLabel.verticalCenter
+                    anchors.verticalCenterOffset: -6
+                    width: Math.max(16, badgeText.implicitWidth + 8)
+                    height: 16
+                    radius: 8
+                    color: Theme.danger
+                    Text {
+                        id: badgeText
+                        anchors.centerIn: parent
+                        text: Events.unread > 99 ? "99+" : Events.unread
+                        color: "white"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
                 }
                 MouseArea {
                     anchors.fill: parent

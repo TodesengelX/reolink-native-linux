@@ -87,8 +87,13 @@ ApplicationWindow {
                     fullscreen: window.videoFullscreen
                     onFullscreenToggled: window.videoFullscreen = !window.videoFullscreen
                 }
-                PlaybackPage {}
-                EventsPage {}
+                PlaybackPage { id: playbackPage }
+                EventsPage {
+                    onJumpToPlayback: (hostId, timestamp) => {
+                        nav.currentIndex = 1;
+                        playbackPage.openAt(hostId, timestamp);
+                    }
+                }
                 DeviceSettingsPage {}
             }
         }

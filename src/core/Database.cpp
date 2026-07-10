@@ -83,33 +83,106 @@ bool Database::migrate()
                        " panes_json TEXT NOT NULL DEFAULT '[]')"),
     };
 
-    const int current = schemaVersion();
-    if (current >= 1)
-        return true;
+    static const QStringList migrationsV2 = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS events ("
+                       " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                       " host_id INTEGER NOT NULL,"
+                       " channel INTEGER NOT NULL DEFAULT 0,"
+                       " ts INTEGER NOT NULL,"
+                       " type TEXT NOT NULL,"
+                       " camera TEXT NOT NULL DEFAULT '',"
+                       " thumbnail TEXT NOT NULL DEFAULT '')"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC)"),
+    };
 
+    // Ordered migrations; each bumps the stored version by one.
+    const QVector<QPair<int, const QStringList *>> steps = {
+        {1, &migrationsV1},
+        {2, &migrationsV2},
+    };
+
+    const int current = schemaVersion();
     QSqlDatabase database = db();
-    if (!database.transaction()) {
-        m_lastError = database.lastError().text();
-        return false;
-    }
-    for (const QString &stmt : migrationsV1) {
+    for (const auto &[version, stmts] : steps) {
+        if (current >= version)
+            continue;
+        if (!database.transaction()) {
+            m_lastError = database.lastError().text();
+            return false;
+        }
+        for (const QString &stmt : *stmts) {
+            QSqlQuery q(database);
+            if (!q.exec(stmt)) {
+                m_lastError = q.lastError().text();
+                qCCritical(lcCore) << "Migration to v" << version << "failed:" << m_lastError;
+                database.rollback();
+                return false;
+            }
+        }
         QSqlQuery q(database);
-        if (!q.exec(stmt)) {
-            m_lastError = q.lastError().text();
-            qCCritical(lcCore) << "Migration failed:" << m_lastError;
+        q.exec(QStringLiteral("DELETE FROM schema_version"));
+        q.prepare(QStringLiteral("INSERT INTO schema_version (version) VALUES (:v)"));
+        q.bindValue(QStringLiteral(":v"), version);
+        q.exec();
+        if (!database.commit()) {
+            m_lastError = database.lastError().text();
             database.rollback();
             return false;
         }
+        qCInfo(lcCore) << "Database migrated to schema v" << version;
     }
-    QSqlQuery q(database);
-    q.exec(QStringLiteral("DELETE FROM schema_version"));
-    q.exec(QStringLiteral("INSERT INTO schema_version (version) VALUES (1)"));
-    if (!database.commit()) {
-        m_lastError = database.lastError().text();
-        database.rollback();
+    return true;
+}
+
+qint64 Database::addEvent(const EventRecord &rec)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(
+        "INSERT INTO events (host_id, channel, ts, type, camera, thumbnail)"
+        " VALUES (:host, :ch, :ts, :type, :cam, :thumb)"));
+    q.bindValue(QStringLiteral(":host"), rec.hostId);
+    q.bindValue(QStringLiteral(":ch"), rec.channel);
+    q.bindValue(QStringLiteral(":ts"), rec.timestamp);
+    q.bindValue(QStringLiteral(":type"), rec.type);
+    q.bindValue(QStringLiteral(":cam"), sqlText(rec.camera));
+    q.bindValue(QStringLiteral(":thumb"), sqlText(rec.thumbnail));
+    if (!q.exec()) {
+        m_lastError = q.lastError().text();
+        return -1;
+    }
+    return q.lastInsertId().toLongLong();
+}
+
+QVector<EventRecord> Database::recentEvents(int limit) const
+{
+    QVector<EventRecord> out;
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("SELECT id, host_id, channel, ts, type, camera, thumbnail"
+                             " FROM events ORDER BY ts DESC, id DESC LIMIT :lim"));
+    q.bindValue(QStringLiteral(":lim"), limit);
+    if (!q.exec())
+        return out;
+    while (q.next()) {
+        EventRecord r;
+        r.id = q.value(0).toLongLong();
+        r.hostId = q.value(1).toLongLong();
+        r.channel = q.value(2).toInt();
+        r.timestamp = q.value(3).toLongLong();
+        r.type = q.value(4).toString();
+        r.camera = q.value(5).toString();
+        r.thumbnail = q.value(6).toString();
+        out.append(r);
+    }
+    return out;
+}
+
+bool Database::clearEvents()
+{
+    QSqlQuery q(db());
+    if (!q.exec(QStringLiteral("DELETE FROM events"))) {
+        m_lastError = q.lastError().text();
         return false;
     }
-    qCInfo(lcCore) << "Database ready, schema v1 at" << m_filePath;
     return true;
 }
 

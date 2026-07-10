@@ -27,11 +27,72 @@ DeviceManager::DeviceManager(Database *db, CredentialStore *credentials, QObject
     }
     // Prime credentials + refresh status for stored camera/NVR devices on startup
     // (also loads passwords into memory so liveUrl never blocks on the keyring).
-    for (const Entry &e : m_entries) {
-        if (e.rec.kind != QLatin1String("stream"))
-            validateAsync(e.rec.id);
-        else
-            validateAsync(e.rec.id); // stream: just load stripped creds into memory
+    for (const Entry &e : m_entries)
+        validateAsync(e.rec.id);
+
+    // Poll detection state for the event inbox. 5s balances latency vs load;
+    // the real event push (Baichuan) lands with M12.
+    m_pollTimer.setInterval(5000);
+    connect(&m_pollTimer, &QTimer::timeout, this, &DeviceManager::pollDetections);
+    m_pollTimer.start();
+}
+
+void DeviceManager::pollDetections()
+{
+    for (int row = 0; row < m_entries.size(); ++row) {
+        Entry &e = m_entries[row];
+        if (!e.online || e.rec.kind == QLatin1String("stream") || !e.client)
+            continue;
+        const qint64 hostId = e.rec.id;
+        if (m_pollInFlight.value(hostId, false))
+            continue;
+        m_pollInFlight[hostId] = true;
+        auto client = e.client;
+        const QString camera = e.rec.name;
+        const bool wantAi = e.caps.ai;
+
+        m_pending.addFuture(QtConcurrent::run([this, client, hostId, camera, wantAi] {
+            Json cmds = Json::array({api::command(QStringLiteral("GetMdState"),
+                                                  Json{{"channel", 0}})});
+            if (wantAi)
+                cmds.push_back(api::command(QStringLiteral("GetAiState"), Json{{"channel", 0}}));
+            const api::BatchResult batch = client->call(cmds);
+
+            api::DetectionState st;
+            if (batch.transportOk) {
+                for (const api::CommandResult &r : batch.results) {
+                    if (r.cmd == QLatin1String("GetMdState") && r.ok)
+                        st.motion = api::parseMdState(r.value);
+                    else if (r.cmd == QLatin1String("GetAiState") && r.ok) {
+                        const api::DetectionState ai = api::parseAiState(r.value);
+                        st.person = ai.person;
+                        st.vehicle = ai.vehicle;
+                        st.pet = ai.pet;
+                    }
+                }
+            }
+            QMetaObject::invokeMethod(
+                this,
+                [this, hostId, camera, st] {
+                    m_pollInFlight[hostId] = false;
+                    const api::DetectionState prev = m_lastDetection.value(hostId);
+                    // Emit an event for each object type on a 0->1 transition.
+                    auto edge = [&](bool now, bool was, const char *type) {
+                        if (now && !was)
+                            emit detectionEvent(hostId, 0, QString::fromUtf8(type), camera);
+                    };
+                    // AI types take precedence over bare motion to avoid duplicates.
+                    edge(st.person, prev.person, "person");
+                    edge(st.vehicle, prev.vehicle, "vehicle");
+                    edge(st.pet, prev.pet, "pet");
+                    const bool aiActive = st.person || st.vehicle || st.pet;
+                    const bool prevAi = prev.person || prev.vehicle || prev.pet;
+                    if (!aiActive)
+                        edge(st.motion, prev.motion || prevAi, "motion");
+                    m_lastDetection[hostId] = st;
+                },
+                Qt::QueuedConnection);
+        }));
     }
 }
 

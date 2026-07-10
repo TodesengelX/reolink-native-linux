@@ -21,6 +21,18 @@ Item {
             Devices.searchRecordings(page.deviceRow, page.selYear, page.selMonth, page.selDay);
     }
 
+    // Called when an event is clicked in the Events inbox.
+    function openAt(hostId, timestamp) {
+        var row = Devices.rowOfHost(hostId);
+        if (row >= 0)
+            deviceCombo.currentIndex = row;
+        var d = new Date(timestamp * 1000);
+        page.selYear = d.getFullYear();
+        page.selMonth = d.getMonth() + 1;
+        page.selDay = d.getDate();
+        page.refresh();
+    }
+
     Connections {
         target: Devices
         function onRecordingsFound(row, segments) {

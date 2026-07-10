@@ -31,6 +31,7 @@ add_library(reolink_core STATIC
     src/protocol/ReolinkApi.h src/protocol/ReolinkApi.cpp
     src/protocol/ReolinkHttpClient.h src/protocol/ReolinkHttpClient.cpp
     src/device/DeviceManager.h src/device/DeviceManager.cpp
+    src/device/EventManager.h src/device/EventManager.cpp
     src/media/StreamPlayer.h src/media/StreamPlayer.cpp
 )
 target_include_directories(reolink_core PUBLIC src third_party)

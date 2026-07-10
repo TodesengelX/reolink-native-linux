@@ -9,13 +9,16 @@ class TestDatabase : public QObject
 {
     Q_OBJECT
 
+    // Current schema version; bump alongside new migrations in Database.cpp.
+    static constexpr int kSchemaVersion = 2;
+
 private slots:
-    void migratesToV1()
+    void migratesToCurrent()
     {
         QTemporaryDir dir;
         Database db(dir.filePath("t.db"), QStringLiteral("test_migrate"));
         QVERIFY2(db.open(), qPrintable(db.lastError()));
-        QCOMPARE(db.schemaVersion(), 1);
+        QCOMPARE(db.schemaVersion(), kSchemaVersion);
     }
 
     void openIsIdempotent()
@@ -28,7 +31,30 @@ private slots:
         }
         Database db2(path, QStringLiteral("test_idem_2"));
         QVERIFY(db2.open());
-        QCOMPARE(db2.schemaVersion(), 1);
+        QCOMPARE(db2.schemaVersion(), kSchemaVersion);
+    }
+
+    void eventCrud()
+    {
+        QTemporaryDir dir;
+        Database db(dir.filePath("t.db"), QStringLiteral("test_events"));
+        QVERIFY(db.open());
+        EventRecord e;
+        e.hostId = 7;
+        e.timestamp = 1700000000;
+        e.type = QStringLiteral("person");
+        e.camera = QStringLiteral("Front Door");
+        QVERIFY(db.addEvent(e) > 0);
+        e.timestamp = 1700000100;
+        e.type = QStringLiteral("vehicle");
+        QVERIFY(db.addEvent(e) > 0);
+
+        const QVector<EventRecord> evs = db.recentEvents(10);
+        QCOMPARE(evs.size(), 2);
+        QCOMPARE(evs[0].type, QStringLiteral("vehicle")); // newest first
+        QCOMPARE(evs[1].type, QStringLiteral("person"));
+        QVERIFY(db.clearEvents());
+        QCOMPARE(db.recentEvents(10).size(), 0);
     }
 
     void hostCrud()

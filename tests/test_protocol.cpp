@@ -186,6 +186,24 @@ private slots:
         QVERIFY(!api::parseAbility(Json::array()).valid);
     }
 
+    void detectionStates()
+    {
+        auto parse = [](const char *s) {
+            const QByteArray b(s);
+            return Json::parse(b.constData(), b.constData() + b.size(), nullptr, false);
+        };
+        QVERIFY(api::parseMdState(parse(R"({"state":1})")));
+        QVERIFY(!api::parseMdState(parse(R"({"state":0})")));
+        QVERIFY(!api::parseMdState(parse(R"({})")));
+
+        const api::DetectionState d = api::parseAiState(parse(
+            R"({"people":{"alarm_state":1,"support":1},"vehicle":{"alarm_state":0,"support":1},)"
+            R"("dog_cat":{"alarm_state":1,"support":1}})"));
+        QVERIFY(d.person);
+        QVERIFY(!d.vehicle);
+        QVERIFY(d.pet);
+    }
+
     void searchRoundTrip()
     {
         const QDateTime start(QDate(2026, 7, 9), QTime(0, 0));

@@ -17,6 +17,16 @@ struct HostRecord {
     QString model;
 };
 
+struct EventRecord {
+    qint64 id = -1;
+    qint64 hostId = -1;
+    int channel = 0;
+    qint64 timestamp = 0; // Unix seconds (UTC)
+    QString type;         // "motion" | "person" | "vehicle" | "pet" | "visitor"
+    QString camera;       // device name at event time
+    QString thumbnail;    // optional JPEG path
+};
+
 // SQLite-backed application store: devices, channels, layouts.
 // Schema is versioned; open() runs pending migrations.
 class Database
@@ -35,6 +45,11 @@ public:
     bool removeHost(qint64 id);
     bool updateHost(const HostRecord &rec);
     QVector<HostRecord> hosts() const;
+
+    // Events (motion / AI detections), newest first.
+    qint64 addEvent(const EventRecord &rec);
+    QVector<EventRecord> recentEvents(int limit = 500) const;
+    bool clearEvents();
 
 private:
     bool migrate();

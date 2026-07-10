@@ -200,6 +200,23 @@ Json getOsd(int channel)
     return command(QStringLiteral("GetOsd"), Json{{"channel", channel}}, /*action=*/1);
 }
 
+bool parseMdState(const Json &value)
+{
+    return jsonInt(value, "state", 0) != 0;
+}
+
+DetectionState parseAiState(const Json &value)
+{
+    // Each object type is {"alarm_state":0/1,"support":0/1}. Field names follow
+    // reolink_aio; dog_cat covers pets.
+    DetectionState d;
+    auto alarm = [&](const char *key) { return jsonInt(jsonObj(value, key), "alarm_state", 0) != 0; };
+    d.person = alarm("people");
+    d.vehicle = alarm("vehicle");
+    d.pet = alarm("dog_cat");
+    return d;
+}
+
 static Json timeObj(const QDateTime &dt)
 {
     const QDate d = dt.date();

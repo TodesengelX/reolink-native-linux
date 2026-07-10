@@ -6,6 +6,8 @@
 
 #include <QAbstractListModel>
 #include <QFutureSynchronizer>
+#include <QHash>
+#include <QTimer>
 
 #include <memory>
 
@@ -64,6 +66,7 @@ public:
     // Playable URL for a device row; empty when credentials aren't loaded yet.
     Q_INVOKABLE QString liveUrl(int row, bool mainStream = true);
     Q_INVOKABLE QString nameAt(int row) const;
+    Q_INVOKABLE int rowOfHost(qint64 hostId) const { return rowForHostId(hostId); }
 
     // Live controls (channel 0). Fire-and-forget on the worker pool.
     Q_INVOKABLE void ptzMove(int row, const QString &op, int speed = 32);
@@ -85,6 +88,11 @@ signals:
     void snapshotFailed(int row, const QString &error);
     void recordingsFound(int row, const QVariantList &segments);
     void recordingsFailed(int row, const QString &error);
+    // Emitted on each detection 0->1 transition (feeds the event inbox).
+    void detectionEvent(qint64 hostId, int channel, const QString &type, const QString &camera);
+
+private slots:
+    void pollDetections();
 
 private:
     struct Entry {
@@ -129,6 +137,10 @@ private:
     CredentialStore *m_credentials;
     QVector<Entry> m_entries;
     QFutureSynchronizer<void> m_pending; // drains in-flight validations at teardown
+
+    QTimer m_pollTimer;
+    QHash<qint64, api::DetectionState> m_lastDetection; // per hostId, for edge detection
+    QHash<qint64, bool> m_pollInFlight;                 // avoid overlapping polls
 };
 
 } // namespace rl

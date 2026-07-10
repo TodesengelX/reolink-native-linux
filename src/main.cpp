@@ -3,6 +3,7 @@
 #include "core/Log.h"
 #include "core/Paths.h"
 #include "device/DeviceManager.h"
+#include "device/EventManager.h"
 #include "media/StreamPlayer.h"
 
 #include <QCommandLineParser>
@@ -86,9 +87,11 @@ int main(int argc, char *argv[])
     }
     rl::CredentialStore credentials;
     rl::DeviceManager devices(&database, &credentials);
+    rl::EventManager events(&database, &devices);
 
     qmlRegisterType<rl::StreamPlayer>("ReolinkApp.Core", 1, 0, "StreamPlayer");
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Devices", &devices);
+    qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Events", &events);
 
     QQmlApplicationEngine engine;
     // Lets tests/screenshots open a specific page (0=Live,1=Playback,2=Events,3=Settings).

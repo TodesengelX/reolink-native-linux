@@ -125,6 +125,17 @@ Capabilities parseAbility(const Json &value);
 // ---- OSD ------------------------------------------------------------------
 Json getOsd(int channel);
 
+// ---- Detection state (polled for the event inbox) -------------------------
+// GetMdState -> plain motion; GetAiState -> per-object-type alarm flags.
+struct DetectionState {
+    bool motion = false;
+    bool person = false;
+    bool vehicle = false;
+    bool pet = false;
+};
+bool parseMdState(const Json &value);              // GetMdState -> motion bool
+DetectionState parseAiState(const Json &value);    // GetAiState -> per-type flags
+
 // ---- Playback search ------------------------------------------------------
 // Search recorded files for a channel in [start,end]. streamType is "main"/"sub".
 Json searchBody(int channel, const QDateTime &start, const QDateTime &end,
