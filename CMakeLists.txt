@@ -30,6 +30,7 @@ add_library(reolink_core STATIC
     src/protocol/Json.h
     src/protocol/ReolinkApi.h src/protocol/ReolinkApi.cpp
     src/protocol/ReolinkHttpClient.h src/protocol/ReolinkHttpClient.cpp
+    src/protocol/BcCrypto.h src/protocol/BcCrypto.cpp
     src/device/DeviceManager.h src/device/DeviceManager.cpp
     src/device/DeviceDiscovery.h src/device/DeviceDiscovery.cpp
     src/device/EventManager.h src/device/EventManager.cpp

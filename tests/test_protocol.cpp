@@ -1,3 +1,4 @@
+#include "protocol/BcCrypto.h"
 #include "protocol/ReolinkApi.h"
 
 #include <QtTest>
@@ -363,6 +364,41 @@ private slots:
         QVERIFY(url.startsWith(QStringLiteral("https://10.0.0.5/cgi-bin/api.cgi?cmd=Download")));
         QVERIFY(url.contains(QStringLiteral("source=fragment_01_20260709015958.mp4")));
         QVERIFY(url.contains(QStringLiteral("token=tok%2Fen%2B1"))); // percent-encoded
+    }
+
+    void baichuanCrypto()
+    {
+        // Modern-login hash: uppercase-hex MD5(value+nonce), first 31 chars.
+        // Known-answer vector (admin + a sample nonce).
+        QCOMPARE(bc::modernHash(QStringLiteral("admin"), QStringLiteral("9E6D1FCB9E69846D")),
+                 QByteArray("9F07915E819A076E2E14169830769D6"));
+        QCOMPARE(bc::modernHash(QStringLiteral("admin"), QStringLiteral("9E6D1FCB9E69846D")).size(),
+                 31);
+
+        // BCEncrypt XOR: encrypt == decrypt (round-trips), for several offsets.
+        const QByteArray plain = QByteArrayLiteral("<?xml version=\"1.0\"?><body/>");
+        for (quint8 off : {quint8(0), quint8(1), quint8(7), quint8(255)}) {
+            const QByteArray enc = bc::xorCrypt(plain, off);
+            QVERIFY(enc != plain);
+            QCOMPARE(bc::xorCrypt(enc, off), plain); // involution
+        }
+        // Offset 0 is a plain repeating 8-byte key XOR: first byte 'A'(0x41)^0x1F.
+        QCOMPARE(static_cast<quint8>(bc::xorCrypt(QByteArray("A"), 0).at(0)),
+                 quint8(0x41 ^ 0x1F));
+
+        // AES key derivation (nonce-first, dash separator, 16 ASCII chars).
+        const QByteArray key = bc::aesKey(QStringLiteral("9E6D1FCB9E69846D"),
+                                          QStringLiteral("123456"));
+        QCOMPARE(key, QByteArray("0D119EB629684BDF"));
+
+        // AES-128-CFB against an openssl-generated known-answer vector.
+        const QByteArray pt = QByteArrayLiteral(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" ?><body><Preview/></body>");
+        const QByteArray ct = QByteArray::fromHex(
+            "c640e9ad98c8769f3cdb1a55cfd4985710bee2e828f6d0d6cd7b76bc8c7cc3fe"
+            "19a62165915a810dd1f9842104dbe1b4147050eee074ee5eb1228d9cd8e9");
+        QCOMPARE(bc::aesCfb(pt, key, /*decrypt=*/false), ct);       // encrypt
+        QCOMPARE(bc::aesCfb(ct, key, /*decrypt=*/true), pt);        // decrypt round-trips
     }
 };
 
