@@ -19,6 +19,7 @@ Rectangle {
     property string label: ""
     property bool selected: false
     property bool forceMain: false // maximized panes pull the main stream
+    property bool pageActive: true // false when the Live View page isn't on screen
 
     // Capabilities (from the Devices model; false for empty slots). Named cap*
     // to avoid colliding with the identically-named model roles in the delegate.
@@ -41,12 +42,17 @@ Rectangle {
     signal popOut(int deviceRow, string label)
 
     function updateSource() {
-        var url = (deviceRow >= 0 && visible) ? Devices.liveUrl(deviceRow, effectiveMain) : "";
+        // Only stream when the pane is laid out AND its page is actually on screen
+        // — otherwise hidden Live View panes keep streaming and exhaust the NVR's
+        // limited session slots (starving Playback and other cameras).
+        var url = (deviceRow >= 0 && visible && pageActive)
+                  ? Devices.liveUrl(deviceRow, effectiveMain) : "";
         if (url !== sourceUrl)
             sourceUrl = url;
     }
     onDeviceRowChanged: updateSource()
     onVisibleChanged: updateSource()
+    onPageActiveChanged: updateSource()
     onEffectiveMainChanged: updateSource()
     Component.onCompleted: updateSource()
 

@@ -18,8 +18,10 @@ Rectangle {
     property real zoom: 1.0              // 1 = whole day; >1 zooms in
     property real viewStart: 0           // left edge, seconds
 
-    signal seekRequested(real seconds)
-    signal segmentActivated(var startEpoch, real seconds)
+    // seek fires continuously while pressing/dragging (move the playhead);
+    // commit fires once on release (start playback there).
+    signal seek(real seconds)
+    signal commit(real seconds)
 
     readonly property real visibleSpan: duration / zoom
     function xForSec(sec) { return (sec - viewStart) / visibleSpan * width; }
@@ -102,18 +104,12 @@ Rectangle {
 
     MouseArea {
         anchors.fill: parent
-        onClicked: (m) => {
-            var sec = root.secForX(m.x);
-            root.seekRequested(sec);
-            // Activate the segment under the click, if any.
-            for (var i = 0; i < root.segments.length; i++) {
-                var seg = root.segments[i];
-                if (sec >= seg.start && sec <= seg.end) {
-                    root.segmentActivated(seg.startEpoch, sec);
-                    return;
-                }
-            }
-        }
+        preventStealing: true
+        property real lastSec: 0
+        function secAt(x) { return Math.max(0, Math.min(root.duration, root.secForX(x))); }
+        onPressed: (m) => { lastSec = secAt(m.x); root.seek(lastSec); }
+        onPositionChanged: (m) => { if (m.buttons & Qt.LeftButton) { lastSec = secAt(m.x); root.seek(lastSec); } }
+        onReleased: () => root.commit(lastSec)
         onWheel: (w) => {
             var focus = root.secForX(w.x);
             root.zoom = Math.max(1, Math.min(48, root.zoom * (w.angleDelta.y > 0 ? 1.25 : 0.8)));

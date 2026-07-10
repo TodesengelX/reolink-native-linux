@@ -85,15 +85,16 @@ ApplicationWindow {
                 currentIndex: nav.currentIndex
 
                 LiveViewPage {
+                    active: nav.currentIndex === 0
                     fullscreen: window.videoFullscreen
                     onFullscreenToggled: window.videoFullscreen = !window.videoFullscreen
                     onPopOut: (row, lbl) => window.openPopout(row, lbl)
                 }
                 PlaybackPage { id: playbackPage }
                 EventsPage {
-                    onJumpToPlayback: (hostId, timestamp) => {
+                    onJumpToPlayback: (hostId, channel, timestamp) => {
                         nav.currentIndex = 1;
-                        playbackPage.openAt(hostId, timestamp);
+                        playbackPage.openAt(hostId, channel, timestamp);
                     }
                 }
                 DeviceSettingsPage {}

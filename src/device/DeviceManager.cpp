@@ -36,7 +36,9 @@ DeviceManager::DeviceManager(Database *db, CredentialStore *credentials, QObject
             validateAsync(e.rec.id);
         }
 
-    m_pollTimer.setInterval(5000);
+    // 10s interval also delays the first poll to ~10s, so it doesn't compete with
+    // the startup validation burst for the NVR's limited connection slots.
+    m_pollTimer.setInterval(10000);
     connect(&m_pollTimer, &QTimer::timeout, this, &DeviceManager::pollDetections);
     m_pollTimer.start();
 }
@@ -53,58 +55,98 @@ static QString detKey(qint64 hostId, int channel)
 
 void DeviceManager::pollDetections()
 {
-    for (int row = 0; row < m_entries.size(); ++row) {
-        Entry &e = m_entries[row];
+    // Poll each HOST with a SINGLE batched request covering all its online
+    // channels — Reolink NVRs are connection-limited, so opening one connection
+    // per channel (5+ at once) starves live/playback streams. One connection per
+    // host per cycle keeps capacity free.
+    struct HostPoll {
+        std::shared_ptr<ReolinkHttpClient> client;
+        QVector<int> channels;
+        QVector<bool> wantAi;
+        QVector<QString> names;
+    };
+    QHash<qint64, HostPoll> byHost;
+    QVector<qint64> order;
+    for (const Entry &e : m_entries) {
         if (!e.online || e.rec.kind == QLatin1String("stream") || !e.client)
             continue;
-        const qint64 hostId = e.rec.id;
-        const int channel = e.channel;
-        const QString key = detKey(hostId, channel);
+        if (!byHost.contains(e.rec.id)) {
+            byHost[e.rec.id] = HostPoll{e.client, {}, {}, {}};
+            order.append(e.rec.id);
+        }
+        HostPoll &hp = byHost[e.rec.id];
+        hp.channels.append(e.channel);
+        hp.wantAi.append(e.caps.ai);
+        hp.names.append(e.chanName);
+    }
+
+    for (qint64 hostId : order) {
+        const QString key = QString::number(hostId);
         if (m_pollInFlight.value(key, false))
             continue;
         m_pollInFlight[key] = true;
-        auto client = e.client;
-        const QString camera = e.chanName;
-        const bool wantAi = e.caps.ai;
+        const HostPoll hp = byHost.value(hostId);
 
-        m_pending.addFuture(QtConcurrent::run([this, client, hostId, channel, key, camera, wantAi] {
-            Json cmds = Json::array(
-                {api::command(QStringLiteral("GetMdState"), Json{{"channel", channel}})});
-            if (wantAi)
-                cmds.push_back(
-                    api::command(QStringLiteral("GetAiState"), Json{{"channel", channel}}));
-            const api::BatchResult batch = client->call(cmds);
+        m_pending.addFuture(QtConcurrent::run([this, hostId, key, hp] {
+            // Build one ordered batch; remember what each entry maps to.
+            struct Item { int channel; bool isAi; };
+            QVector<Item> items;
+            Json cmds = Json::array();
+            for (int i = 0; i < hp.channels.size(); ++i) {
+                const int ch = hp.channels[i];
+                items.append({ch, false});
+                cmds.push_back(api::command(QStringLiteral("GetMdState"), Json{{"channel", ch}}));
+                if (hp.wantAi[i]) {
+                    items.append({ch, true});
+                    cmds.push_back(
+                        api::command(QStringLiteral("GetAiState"), Json{{"channel", ch}}));
+                }
+            }
+            const api::BatchResult batch = hp.client->call(cmds);
 
-            api::DetectionState st;
+            // Combine per-channel md/ai (results preserve request order).
+            QHash<int, api::DetectionState> states;
             if (batch.transportOk) {
-                for (const api::CommandResult &r : batch.results) {
-                    if (r.cmd == QLatin1String("GetMdState") && r.ok)
-                        st.motion = api::parseMdState(r.value);
-                    else if (r.cmd == QLatin1String("GetAiState") && r.ok) {
+                for (int i = 0; i < batch.results.size() && i < items.size(); ++i) {
+                    const api::CommandResult &r = batch.results[i];
+                    if (!r.ok)
+                        continue;
+                    api::DetectionState &st = states[items[i].channel];
+                    if (items[i].isAi) {
                         const api::DetectionState ai = api::parseAiState(r.value);
                         st.person = ai.person;
                         st.vehicle = ai.vehicle;
                         st.pet = ai.pet;
+                    } else {
+                        st.motion = api::parseMdState(r.value);
                     }
                 }
             }
+
             QMetaObject::invokeMethod(
                 this,
-                [this, hostId, channel, key, camera, st] {
+                [this, hostId, key, hp, states] {
                     m_pollInFlight[key] = false;
-                    const api::DetectionState prev = m_lastDetection.value(key);
-                    auto edge = [&](bool now, bool was, const char *type) {
-                        if (now && !was)
-                            emit detectionEvent(hostId, channel, QString::fromUtf8(type), camera);
-                    };
-                    edge(st.person, prev.person, "person");
-                    edge(st.vehicle, prev.vehicle, "vehicle");
-                    edge(st.pet, prev.pet, "pet");
-                    const bool aiActive = st.person || st.vehicle || st.pet;
-                    const bool prevAi = prev.person || prev.vehicle || prev.pet;
-                    if (!aiActive)
-                        edge(st.motion, prev.motion || prevAi, "motion");
-                    m_lastDetection[key] = st;
+                    for (int i = 0; i < hp.channels.size(); ++i) {
+                        const int channel = hp.channels[i];
+                        const QString ckey = detKey(hostId, channel);
+                        const api::DetectionState st = states.value(channel);
+                        const api::DetectionState prev = m_lastDetection.value(ckey);
+                        const QString camera = hp.names[i];
+                        auto edge = [&](bool now, bool was, const char *type) {
+                            if (now && !was)
+                                emit detectionEvent(hostId, channel, QString::fromUtf8(type),
+                                                    camera);
+                        };
+                        edge(st.person, prev.person, "person");
+                        edge(st.vehicle, prev.vehicle, "vehicle");
+                        edge(st.pet, prev.pet, "pet");
+                        const bool aiActive = st.person || st.vehicle || st.pet;
+                        const bool prevAi = prev.person || prev.vehicle || prev.pet;
+                        if (!aiActive)
+                            edge(st.motion, prev.motion || prevAi, "motion");
+                        m_lastDetection[ckey] = st;
+                    }
                 },
                 Qt::QueuedConnection);
         }));

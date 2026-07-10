@@ -9,7 +9,7 @@ import ReolinkApp.Core
 // wide windows. Clicking an event jumps to Playback at that camera/time.
 Item {
     id: page
-    signal jumpToPlayback(var hostId, var timestamp)
+    signal jumpToPlayback(var hostId, var channel, var timestamp)
 
     readonly property int columnWidth: Math.min(width - Theme.spacing * 4, 820)
 
@@ -139,6 +139,7 @@ Item {
                 required property string timeText
                 required property string thumbnail
                 required property var hostId
+                required property var channel
                 required property var timestamp
 
                 width: ListView.view.width
@@ -226,7 +227,7 @@ Item {
                 }
 
                 HoverHandler { id: rowHover }
-                TapHandler { onTapped: page.jumpToPlayback(hostId, timestamp) }
+                TapHandler { onTapped: page.jumpToPlayback(hostId, channel, timestamp) }
             }
 
             // Empty state

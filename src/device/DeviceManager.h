@@ -70,6 +70,14 @@ public:
     Q_INVOKABLE QString liveUrl(int row, bool mainStream = true);
     Q_INVOKABLE QString nameAt(int row) const;
     Q_INVOKABLE int rowOfHost(qint64 hostId) const { return rowForHostId(hostId); }
+    // The exact camera row for a host+channel (an NVR shares a host across cameras).
+    Q_INVOKABLE int rowOfHostChannel(qint64 hostId, int channel) const
+    {
+        for (int i = 0; i < m_entries.size(); ++i)
+            if (m_entries.at(i).rec.id == hostId && m_entries.at(i).channel == channel)
+                return i;
+        return rowForHostId(hostId);
+    }
     Q_INVOKABLE bool isAdminAt(int row) const
     {
         return row >= 0 && row < m_entries.size() && m_entries.at(row).isAdmin;

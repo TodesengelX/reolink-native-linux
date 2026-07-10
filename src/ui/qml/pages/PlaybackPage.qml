@@ -24,14 +24,45 @@ Item {
         selDay = now.getDate();
     }
 
+    property var recordingDays: []
+    property real playheadSecs: 0    // playhead position (seconds into the day)
+    property bool _autoplayed: false // test hook guard
+
     function refresh() {
         if (page.deviceRow >= 0)
             Devices.searchRecordings(page.deviceRow, page.selYear, page.selMonth, page.selDay);
     }
 
-    // Called when an event is clicked in the Events inbox.
-    function openAt(hostId, timestamp) {
-        var row = Devices.rowOfHost(hostId);
+    // Unix epoch (local time) at a given second into the selected day.
+    function epochAt(sec) {
+        var d = new Date(page.selYear, page.selMonth - 1, page.selDay, 0, 0, 0);
+        return Math.floor(d.getTime() / 1000) + Math.floor(sec);
+    }
+    function inRecording(sec) {
+        for (var i = 0; i < timeline.segments.length; i++) {
+            var s = timeline.segments[i];
+            if (sec >= s.start && sec <= s.end) return true;
+        }
+        return false;
+    }
+    // Move the playhead and, if a recording covers that moment, play from it.
+    function playAt(sec) {
+        page.playheadSecs = sec;
+        if (!inRecording(sec)) {
+            player.stop();
+            return;
+        }
+        var url = Devices.playbackUrl(page.deviceRow, epochAt(sec), true); // type=1
+        if (url.length > 0) {
+            player.source = url;
+            player.start();
+        }
+    }
+
+    // Called when an event is clicked in the Events inbox: jump to that exact
+    // camera, date, and moment, and start playing.
+    function openAt(hostId, channel, timestamp) {
+        var row = Devices.rowOfHostChannel(hostId, channel);
         if (row >= 0)
             deviceCombo.currentIndex = row;
         var d = new Date(timestamp * 1000);
@@ -39,9 +70,13 @@ Item {
         page.selMonth = d.getMonth() + 1;
         page.selDay = d.getDate();
         page.refresh();
+        page.playheadSecs = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+        var url = Devices.playbackUrl(row, timestamp, true);
+        if (url.length > 0) {
+            player.source = url;
+            player.start();
+        }
     }
-
-    property var recordingDays: []
 
     Connections {
         target: Devices
@@ -49,6 +84,12 @@ Item {
             if (row === page.deviceRow) {
                 timeline.segments = segments;
                 statusText.text = segments.length + qsTr(" recordings");
+                // Test hook: auto-play the first recording ONCE to verify the video path.
+                if (typeof playbackAutoplay !== "undefined" && playbackAutoplay
+                    && segments.length > 0 && !page._autoplayed) {
+                    page._autoplayed = true;
+                    page.playAt(segments[0].start); // exact segment start
+                }
             }
         }
         function onRecordingDaysFound(row, year, month, days) {
@@ -111,7 +152,9 @@ Item {
                     fillMode: VideoOutput.PreserveAspectFit
                     visible: player.state === StreamPlayer.Streaming
                 }
-                StreamPlayer { id: player; videoSink: video.videoSink }
+                // Retry on connection error: NVRs are connection-limited and may
+                // momentarily refuse the playback stream.
+                StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true }
 
                 Column {
                     anchors.centerIn: parent
@@ -143,7 +186,7 @@ Item {
                         { start: 45000, end: 45600, type: "alarm", name: "d" },
                         { start: 61200, end: 79200, type: "timer", name: "e" }
                     ];
-                    timeline.position = 32400;
+                    page.playheadSecs = 32400;
                     statusText.text = "5 recordings (mock)";
                 }
             }
@@ -151,14 +194,9 @@ Item {
             Timeline {
                 id: timeline
                 Layout.fillWidth: true
-                position: 0
-                onSegmentActivated: (startEpoch, seconds) => {
-                    var url = Devices.playbackUrl(page.deviceRow, startEpoch, false);
-                    if (url.length > 0) {
-                        player.source = url;
-                        player.start();
-                    }
-                }
+                position: page.playheadSecs
+                onSeek: (seconds) => page.playheadSecs = seconds  // move playhead only
+                onCommit: (seconds) => page.playAt(seconds)       // start playback on release
             }
 
             RowLayout {

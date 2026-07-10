@@ -33,6 +33,7 @@ class StreamPlayer : public QObject
     Q_PROPERTY(QString errorString READ errorString NOTIFY errorStringChanged)
     Q_PROPERTY(qint64 framesDecoded READ framesDecoded NOTIFY framesDecodedChanged)
     Q_PROPERTY(bool loop READ loop WRITE setLoop NOTIFY loopChanged)
+    Q_PROPERTY(bool retryOnError READ retryOnError WRITE setRetryOnError NOTIFY retryOnErrorChanged)
     Q_PROPERTY(bool recording READ recording NOTIFY recordingChanged)
 
 public:
@@ -45,6 +46,10 @@ public:
         std::atomic<bool> loop{false};
         std::atomic<qint64> framesDecoded{0};
         QString source;
+
+        // Retry on connection error even for non-live sources (playback FLV on a
+        // connection-limited NVR often needs a couple of attempts).
+        std::atomic<bool> retryOnError{false};
 
         // Recording taps this same demux session (DESIGN §5.5): no second stream.
         std::atomic<bool> recordRequested{false};
@@ -79,6 +84,9 @@ public:
     bool loop() const { return m_loop; }
     void setLoop(bool loop);
 
+    bool retryOnError() const { return m_retryOnError; }
+    void setRetryOnError(bool v);
+
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
 
@@ -100,6 +108,7 @@ signals:
     void errorStringChanged();
     void framesDecodedChanged();
     void loopChanged();
+    void retryOnErrorChanged();
     void recordingChanged();
     void recordingSaved(const QString &path);
     void recordingFailed(const QString &error);
@@ -113,6 +122,7 @@ private:
     State m_state = State::Idle;
     QString m_errorString;
     bool m_recording = false;
+    bool m_retryOnError = false;
 
     // Set via QML before start(); copied into each new Session. Survives stop().
     QPointer<QVideoSink> m_pendingSink;

@@ -337,7 +337,7 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         char buf[AV_ERROR_MAX_STRING_SIZE]{};
         av_strerror(rc, buf, sizeof(buf));
         postState(s, State::Error, QString::fromUtf8(buf));
-        return live;
+        return live || s->retryOnError.load(); // NVR may be momentarily out of slots
     }
 
     struct FmtGuard {
@@ -348,7 +348,7 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
     interrupt.deadline = QDeadlineTimer(kOpenTimeoutMs);
     if (avformat_find_stream_info(fmt, nullptr) < 0) {
         postState(s, State::Error, QStringLiteral("could not read stream info"));
-        return live;
+        return live || s->retryOnError.load();
     }
 
     const int videoIndex = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
@@ -562,7 +562,7 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         if (rc < 0) {
             postState(s, State::Error, QStringLiteral("read error / stalled"));
             finalizeRecording();
-            return live;
+            return live || s->retryOnError.load();
         }
         if (packet->stream_index != videoIndex) {
             av_packet_unref(packet);
@@ -585,13 +585,21 @@ void runWorker(std::shared_ptr<Session> s)
 {
     int backoffMs = kBackoffStartMs;
     bool streaming = false;
+    // Live sources reconnect indefinitely; a non-live retry (playback FLV on a
+    // busy NVR) is capped so it can't loop forever.
+    const bool live = isLiveUrl(s->source);
+    int retriesLeft = 6;
     while (!s->abort.load()) {
         const qint64 framesBefore = s->framesDecoded.load();
         const bool retry = runSession(s, &streaming);
         if (s->abort.load() || !retry)
             break;
-        if (s->framesDecoded.load() - framesBefore > 100)
+        if (s->framesDecoded.load() - framesBefore > 100) {
             backoffMs = kBackoffStartMs;
+            retriesLeft = 6; // made progress; reset the budget
+        }
+        if (!live && --retriesLeft <= 0)
+            break;
         postState(s, State::Connecting, QStringLiteral("reconnecting"));
         QDeadlineTimer wait(backoffMs);
         while (!wait.hasExpired() && !s->abort.load())
@@ -711,6 +719,16 @@ void StreamPlayer::setLoop(bool loop)
     emit loopChanged();
 }
 
+void StreamPlayer::setRetryOnError(bool v)
+{
+    if (m_retryOnError == v)
+        return;
+    m_retryOnError = v;
+    if (m_session)
+        m_session->retryOnError.store(v);
+    emit retryOnErrorChanged();
+}
+
 void StreamPlayer::start()
 {
     if (m_source.isEmpty())
@@ -721,6 +739,7 @@ void StreamPlayer::start()
     s->player = this;
     s->source = m_source;
     s->loop.store(m_loop);
+    s->retryOnError.store(m_retryOnError);
     {
         QMutexLocker lock(&s->sinkMutex);
         s->sink = m_pendingSink;

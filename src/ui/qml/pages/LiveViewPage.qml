@@ -9,6 +9,7 @@ Item {
     id: page
 
     property bool fullscreen: false
+    property bool active: true      // true only while Live View is the shown page
     signal fullscreenToggled()
     signal popOut(int deviceRow, string label)
 
@@ -135,6 +136,7 @@ Item {
                         deviceRow: index
                         label: name
                         selected: page.selectedIndex === index
+                        pageActive: page.active && page.visible
                         // Sub-stream in the grid, main stream when maximized (DESIGN §5.7).
                         forceMain: page.maximizedIndex === index
                         capPtz: hasPtz
