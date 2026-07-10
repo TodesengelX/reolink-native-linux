@@ -38,6 +38,7 @@ Rectangle {
 
     signal toggleMaximize(int index)
     signal clicked(int index)
+    signal popOut(int deviceRow, string label)
 
     function updateSource() {
         var url = (deviceRow >= 0 && visible) ? Devices.liveUrl(deviceRow, effectiveMain) : "";
@@ -277,6 +278,11 @@ Rectangle {
             ToolButton {
                 glyph: "💡"; enabledTool: root.capFloodlight
                 onActivated: {} // floodlight toggle wires with SetWhiteLed (M9)
+            }
+            // Pop out into a detached window (drag to another monitor).
+            ToolButton {
+                glyph: "⧉"
+                onActivated: if (root.hasSource) root.popOut(root.deviceRow, root.label)
             }
             ToolButton {
                 glyph: "⛶"

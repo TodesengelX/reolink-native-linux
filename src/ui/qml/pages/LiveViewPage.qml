@@ -10,6 +10,7 @@ Item {
 
     property bool fullscreen: false
     signal fullscreenToggled()
+    signal popOut(int deviceRow, string label)
 
     property int preset: 4
     property int maximizedIndex: -1
@@ -146,6 +147,7 @@ Item {
                             page.maximizedIndex = page.maximizedIndex === idx ? -1 : idx;
                         }
                         onClicked: (idx) => page.selectedIndex = idx
+                        onPopOut: (row, lbl) => page.popOut(row, lbl)
                     }
                 }
 

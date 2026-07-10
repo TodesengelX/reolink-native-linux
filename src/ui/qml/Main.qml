@@ -87,6 +87,7 @@ ApplicationWindow {
                 LiveViewPage {
                     fullscreen: window.videoFullscreen
                     onFullscreenToggled: window.videoFullscreen = !window.videoFullscreen
+                    onPopOut: (row, lbl) => window.openPopout(row, lbl)
                 }
                 PlaybackPage { id: playbackPage }
                 EventsPage {
@@ -131,5 +132,11 @@ ApplicationWindow {
             doorbell.camera = "Front Door";
             doorbell.active = true;
         }
+    }
+
+    // Detached camera windows for multi-monitor viewing.
+    Component { id: popoutComponent; PoppedWindow {} }
+    function openPopout(row, label) {
+        popoutComponent.createObject(window, { deviceRow: row, label: label });
     }
 }

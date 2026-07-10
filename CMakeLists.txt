@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS
-    Core Gui Qml Quick QuickControls2 Sql Multimedia Concurrent LinguistTools Test)
+    Core Gui Qml Quick QuickControls2 Sql Multimedia Concurrent LinguistTools Test ShaderTools)
 qt_standard_project_setup(REQUIRES 6.5)
 
 find_package(PkgConfig REQUIRED)
@@ -55,6 +55,8 @@ set(APP_QML_FILES
     src/ui/qml/components/MonthCalendar.qml
     src/ui/qml/components/SettingRow.qml
     src/ui/qml/components/DoorbellOverlay.qml
+    src/ui/qml/components/PoppedWindow.qml
+    src/ui/qml/components/FisheyeView.qml
     src/ui/qml/pages/LiveViewPage.qml
     src/ui/qml/pages/PlaybackPage.qml
     src/ui/qml/pages/EventsPage.qml
@@ -72,6 +74,14 @@ qt_add_qml_module(reolink-client
     URI ReolinkApp
     VERSION 1.0
     QML_FILES ${APP_QML_FILES}
+)
+
+# Fisheye dewarp shader → compiled .qsb, exposed under the module's qml resource
+# path so FisheyeView can reference it as qrc:/qt/qml/ReolinkApp/shaders/...
+qt_add_shaders(reolink-client "reolink_shaders"
+    PREFIX "/qt/qml/ReolinkApp"
+    FILES src/ui/shaders/dewarp.frag
+    OUTPUTS shaders/dewarp.frag.qsb
 )
 
 target_link_libraries(reolink-client PRIVATE reolink_core Qt6::QuickControls2)
