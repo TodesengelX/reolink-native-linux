@@ -192,9 +192,13 @@ bool ReolinkHttpClient::loginLocked(QString *error)
     }
     const api::LoginResult login = api::parseLogin(resp.body);
     if (!login.ok) {
+        QString msg = login.error;
+        if (login.wrongPassword && login.remainingAttempts >= 0)
+            msg += QStringLiteral(" (%1 attempts left before lockout)")
+                       .arg(login.remainingAttempts);
         if (error)
-            *error = login.error;
-        qCWarning(lcProto) << m_host << "login rejected:" << login.error;
+            *error = msg;
+        qCWarning(lcProto) << m_host << "login rejected:" << msg;
         return false;
     }
     m_token = login.token;

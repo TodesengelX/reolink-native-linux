@@ -22,9 +22,11 @@ namespace api {
 // rspCode values observed across firmware (behaviors validated against reolink_aio/HA;
 // treat as "observed, verify against target firmware" per DESIGN.md §4).
 enum RspCode {
-    RspLoginRequired = -6, // "please login first" — token missing/expired
-    RspLoginFailed = -7,   // bad credentials
-    RspNotSupported = -9,  // command not supported by this device
+    RspLoginRequired = -6,   // "please login first" — token missing/expired
+    RspLoginFailed = -7,     // generic login failure (older firmware)
+    RspNotSupported = -9,    // command not supported by this device
+    RspPasswordWrong = -502, // wrong password (verified on real firmware; carries
+                             // error.auth_warning_info.remain_times before lockout)
 };
 
 struct CommandResult {
@@ -61,6 +63,8 @@ struct LoginResult {
     QString token;
     int leaseTimeSec = 0;
     QString error;
+    bool wrongPassword = false; // rspCode -502
+    int remainingAttempts = -1; // error.auth_warning_info.remain_times (-1 = unknown)
 };
 LoginResult parseLogin(const QByteArray &body);
 
@@ -113,6 +117,7 @@ struct ChannelCaps {
     bool aiVehicle = false;
     bool aiDogCat = false;
     bool audio = false;
+    bool talk = false; // two-way audio (verified per-channel on real firmware)
     bool siren = false;
     bool floodlight = false;
     bool battery = false;
@@ -121,7 +126,7 @@ struct ChannelCaps {
 };
 struct Capabilities {
     bool valid = false;
-    bool talk = false;    // two-way audio (host-level)
+    bool talk = false;    // any channel supports two-way audio
     bool p2p = false;
     bool isAdmin = false; // logged-in user may change settings / reboot / manage users
     QVector<ChannelCaps> channels;

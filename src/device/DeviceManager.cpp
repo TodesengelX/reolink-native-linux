@@ -286,11 +286,11 @@ void DeviceManager::applyValidation(qint64 hostId, const Validation &v)
             e.mainCodec = v.codec;
         if (v.channelNum > 1)
             e.rec.kind = QStringLiteral("nvr");
-        e.talk = v.caps.talk;
         e.isAdmin = v.caps.isAdmin;
         e.battery = v.battery;
         if (!v.caps.channels.isEmpty())
             e.caps = v.caps.channels.first();
+        e.talk = e.caps.talk; // the pane shows channel 0; use its talk capability
         m_db->updateHost(e.rec);
     } else {
         emit deviceError(e.rec.addr, v.status);

@@ -61,6 +61,19 @@ private slots:
         QCOMPARE(r.error, QStringLiteral("login failed"));
     }
 
+    void parseLoginWrongPassword()
+    {
+        // Exact response from real Reolink firmware (rspCode -502 + lockout counter).
+        const QByteArray body =
+            R"([{"cmd":"Login","code":1,"error":{"auth_warning_info":{"remain_times":10,)"
+            R"("unlock_time":0},"detail":"password wrong","rspCode":-502}}])";
+        const api::LoginResult r = api::parseLogin(body);
+        QVERIFY(!r.ok);
+        QVERIFY(r.wrongPassword);
+        QCOMPARE(r.remainingAttempts, 10);
+        QCOMPARE(r.error, QStringLiteral("password wrong"));
+    }
+
     void parseBatchMixed()
     {
         const QByteArray body =
@@ -144,24 +157,29 @@ private slots:
 
     void parseAbilityCaps()
     {
-        const QByteArray body = R"({"Ability":{"talk":{"ver":1,"permit":6},
+        // talk is per-channel (verified on RLN8-410 firmware).
+        const QByteArray body = R"({"Ability":{"p2p":{"ver":1,"permit":6},
             "abilityChn":[
               {"ptzCtrl":{"ver":4,"permit":6},"ptzPreset":{"ver":1,"permit":6},
+               "talk":{"ver":1,"permit":0},
                "supportAiPeople":{"ver":1,"permit":6},"floodLight":{"ver":0,"permit":0}},
-              {"ptzCtrl":{"ver":0,"permit":0},"battery":{"ver":1,"permit":6}}
+              {"ptzCtrl":{"ver":0,"permit":0},"talk":{"ver":0,"permit":0},
+               "battery":{"ver":1,"permit":6}}
             ]}})";
         const Json value = Json::parse(body.constData(), body.constData() + body.size(),
                                        nullptr, false);
         const api::Capabilities caps = api::parseAbility(value);
         QVERIFY(caps.valid);
-        QVERIFY(caps.talk);
+        QVERIFY(caps.talk); // any channel has talk
         QCOMPARE(caps.channels.size(), 2);
         QVERIFY(caps.channels[0].ptz);
         QVERIFY(caps.channels[0].ptzPreset);
+        QVERIFY(caps.channels[0].talk);
         QVERIFY(caps.channels[0].aiPeople);
         QVERIFY(caps.channels[0].ai);
         QVERIFY(!caps.channels[0].floodlight);
         QVERIFY(!caps.channels[1].ptz);
+        QVERIFY(!caps.channels[1].talk);
         QVERIFY(caps.channels[1].battery);
     }
 
@@ -238,8 +256,11 @@ private slots:
 
         // Mains device: no battery fields -> not present.
         QVERIFY(!api::parseBatteryInfo(parse(R"({"Enc":{}})")).present);
-        // Clamp out-of-range percent.
-        QCOMPARE(api::parseBatteryInfo(parse(R"({"batteryPercent":150})")).percent, 100);
+        // NVR garbage (verified on RLN8-410): code 0 but nonsense values -> not present.
+        QVERIFY(!api::parseBatteryInfo(
+                     parse(R"({"Battery":{"batteryPercent":2124718168,"chargeStatus":1990912008}})"))
+                     .present);
+        QVERIFY(!api::parseBatteryInfo(parse(R"({"batteryPercent":150})")).present);
     }
 
     void searchRoundTrip()

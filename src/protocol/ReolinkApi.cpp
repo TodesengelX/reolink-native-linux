@@ -154,6 +154,17 @@ LoginResult parseLogin(const QByteArray &body)
         out.error = r.detail.isEmpty()
                         ? QStringLiteral("login failed (rspCode %1)").arg(r.rspCode)
                         : r.detail;
+        out.wrongPassword = r.rspCode == RspPasswordWrong;
+        // Surface the lockout counter (error.auth_warning_info.remain_times) so
+        // the UI can warn before the account locks. Re-parse for the nested field
+        // parseBatch does not expose.
+        const Json doc = Json::parse(body.constData(), body.constData() + body.size(),
+                                     nullptr, false);
+        if (doc.is_array() && !doc.empty()) {
+            const Json warn = jsonObj(jsonObj(doc.front(), "error"), "auth_warning_info");
+            if (warn.contains("remain_times"))
+                out.remainingAttempts = jsonInt(warn, "remain_times", -1);
+        }
         return out;
     }
     const Json token = jsonObj(r.value, "Token");
@@ -221,8 +232,7 @@ Capabilities parseAbility(const Json &value)
     if (ability.empty())
         return caps;
     caps.valid = true;
-    caps.talk = capVer(ability, "talk");
-    caps.p2p = capVer(ability, "p2p");
+    caps.p2p = capVer(ability, "p2p"); // p2p is host-level; talk is per-channel (below)
     // The per-ability "permit" is a bitmask of the user's rights; admins can write
     // config and manage the device. Use privileged abilities as the signal.
     auto permit = [&](const char *key) {
@@ -244,12 +254,15 @@ Capabilities parseAbility(const Json &value)
         c.aiDogCat = capVer(chn, "supportAiDogCat") || capVer(chn, "supportAiAnimal");
         c.ai = capVer(chn, "supportAi") || c.aiPeople || c.aiVehicle || c.aiDogCat;
         c.audio = capVer(chn, "supportAudio") || capVer(chn, "supportGop");
+        c.talk = capVer(chn, "talk"); // per-channel (verified on RLN8-410)
         c.siren = capVer(chn, "supportAudioAlarm") || capVer(chn, "alarmAudio");
         c.floodlight = capVer(chn, "floodLight") || capVer(chn, "supportFLIntensity") ||
                        capVer(chn, "whiteLed");
         c.battery = capVer(chn, "battery") || capVer(chn, "supportBattery");
         c.doorbell = capVer(chn, "supportVisitor") || capVer(chn, "supportDoorbell");
-        c.supportsBalanced = capVer(chn, "supportBalanced") || capVer(chn, "mainEncType");
+        // supportBalanced only; mainEncType is an encoder flag, NOT a third stream.
+        c.supportsBalanced = capVer(chn, "supportBalanced");
+        caps.talk = caps.talk || c.talk;
         caps.channels.append(c);
     }
     return caps;
@@ -281,15 +294,22 @@ BatteryInfo parseBatteryInfo(const Json &value)
 {
     // GetBatteryInfo -> {"Battery":{"batteryPercent":N,"chargeStatus":0/1,...}} or
     // the fields directly under value on some firmware.
+    //
+    // Mains-powered devices (NVRs) answer with code 0 but UNINITIALIZED garbage
+    // (e.g. batteryPercent in the billions) rather than an error — so validate the
+    // value range and treat out-of-range as "no battery" (verified on RLN8-410).
     BatteryInfo b;
     const Json bat = value.contains("Battery") ? jsonObj(value, "Battery") : value;
     if (!bat.is_object() || !bat.contains("batteryPercent"))
         return b;
+    const int raw = jsonInt(bat, "batteryPercent", -1);
+    if (raw < 0 || raw > 100)
+        return b; // garbage from a non-battery device
     b.present = true;
-    b.percent = qBound(0, jsonInt(bat, "batteryPercent", 0), 100);
+    b.percent = raw;
     // chargeStatus: 0 none, 1 charging, 2 charge-complete; adapterStatus also seen.
     const int cs = jsonInt(bat, "chargeStatus", 0);
-    b.charging = cs == 1 || jsonInt(bat, "adapterStatus", 0) == 1;
+    b.charging = cs == 1 || cs == 2 || jsonInt(bat, "adapterStatus", 0) == 1;
     return b;
 }
 
