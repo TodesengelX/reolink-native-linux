@@ -91,6 +91,12 @@ qt_add_translations(reolink-client
     LUPDATE_OPTIONS -no-obsolete)
 
 install(TARGETS reolink-client RUNTIME DESTINATION bin)
+install(FILES packaging/io.github.todesengelx.ReolinkLinux.desktop
+        DESTINATION share/applications)
+install(FILES packaging/io.github.todesengelx.ReolinkLinux.metainfo.xml
+        DESTINATION share/metainfo)
+install(FILES packaging/io.github.todesengelx.ReolinkLinux.svg
+        DESTINATION share/icons/hicolor/scalable/apps)
 
 # ---------------------------------------------------------------------------
 # Tests

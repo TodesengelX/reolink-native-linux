@@ -1,0 +1,27 @@
+# Flatpak manifest. Build:
+#   flatpak-builder --user --install --force-clean build-flatpak \
+#     packaging/flatpak/io.github.todesengelx.ReolinkLinux.yml
+# The KDE runtime provides Qt 6 (LGPL, dynamically linked); FFmpeg comes from the
+# runtime as an LGPL build. libsecret talks to the host keyring via the portal.
+app-id: io.github.todesengelx.ReolinkLinux
+runtime: org.kde.Platform
+runtime-version: '6.7'
+sdk: org.kde.Sdk
+command: reolink-client
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri                     # GPU for hardware decode
+  - --talk-name=org.freedesktop.secrets  # keyring for credentials
+  - --filesystem=xdg-videos          # snapshots / recordings
+modules:
+  - name: reolink-client
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    sources:
+      - type: dir
+        path: ../..

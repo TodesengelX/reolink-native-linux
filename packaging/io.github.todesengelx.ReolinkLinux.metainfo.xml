@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.todesengelx.ReolinkLinux</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Reolink Linux Client</name>
+  <summary>Native Linux client for Reolink cameras and NVRs</summary>
+  <description>
+    <p>
+      A fully native Linux desktop client for Reolink cameras and NVRs — a 1:1
+      replica of the official Reolink Client. Live grid (1/4/9/16) with
+      hardware-accelerated H.264/H.265 decode, double-click maximize and
+      fullscreen, PTZ, snapshots, manual recording, a color-coded playback
+      timeline, an events inbox, and the full device-settings surface.
+    </p>
+    <p>Not affiliated with or endorsed by Reolink.</p>
+  </description>
+  <launchable type="desktop-id">io.github.todesengelx.ReolinkLinux.desktop</launchable>
+  <url type="homepage">https://github.com/TodesengelX/reolink-client-linux</url>
+  <url type="bugtracker">https://github.com/TodesengelX/reolink-client-linux/issues</url>
+  <developer id="io.github.todesengelx">
+    <name>reolink-client-linux contributors</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+  </categories>
+  <releases>
+    <release version="0.1.0" date="2026-07-09">
+      <description><p>Initial development release: live view, playback, events, and settings.</p></description>
+    </release>
+  </releases>
+</component>

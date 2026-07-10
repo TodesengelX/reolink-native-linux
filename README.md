@@ -32,19 +32,33 @@ A fully **native Linux desktop client** for Reolink cameras and NVRs — a 1:1 r
 
 ## Status
 
-**M0 + M1 core complete** (2026-07-09): the app builds and runs natively — dark-theme shell (Live View / Playback / Events / Device Settings navigation), device sidebar with add/remove, SQLite store, keyring credentials, the HTTP-CGI protocol client with login/token lifecycle, and the FFmpeg media pipeline rendering a multi-pane live grid (verified with 4 simultaneous streams including a network source). Double-click pane maximize/restore and F11/Esc fullscreen are wired.
+Milestones **M0–M14** implemented (2026-07-09). The app builds, runs natively, and mirrors the official client:
+
+- **Live View** — 1/4/9/16 grid, hardware-accelerated H.264/H.265 decode (VAAPI/NVDEC) with software fallback, double-click maximize, F11 fullscreen, per-pane floating toolbar (stream quality, snapshot, record, digital zoom, PTZ joystick, talk, siren, pop-out), auto-reconnect
+- **Playback** — month calendar, color-coded two-tone timeline (grey timer / blue alarm), recording search, segment playback
+- **Events** — notification inbox with AI-type filters (person/vehicle/pet/visitor/motion), detection polling, jump-to-playback, unread badge
+- **Device Settings** — Display/Encoding/Recording/Detection/Network/Storage/System pages with `Get*`/`Set*` wiring, admin-gated writes
+- **Extras** — battery/solar status, doorbell answer surface, multi-monitor pop-out windows, fisheye dewarp shader, manual MP4 recording (stream-copy)
+
+Backend-complete but pending validation against real Reolink hardware: PTZ/snapshot/settings `Set` operations, NVR playback streams, two-way talk and doorbell answer (need the Baichuan port-9000 protocol — the M12 spike), and UID/P2P remote access.
 
 ### Building
 
-```
-cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Debug
+```sh
+cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ./build/reolink-client
 ```
 
-Requires: Qt 6.5+ (base/declarative/multimedia/tools), FFmpeg dev headers, libcurl, libsecret, sqlite. Tests: `ctest --test-dir build`.
+Requires: Qt 6.5+ (base/declarative/multimedia/shadertools/tools), FFmpeg dev headers, libcurl, libsecret, sqlite. Run tests with `ctest --test-dir build`. Compare hardware vs software decode with `tools/bench.sh`.
 
-Next per the [roadmap](docs/DESIGN.md): M2 feasibility spikes (hardware decode bench, P2P/UID, battery bridge), M3 live-view completion (PTZ, snapshot, stream-quality toggle), M4 manual recording.
+### Packaging
+
+- **Flatpak:** `flatpak-builder --user --install --force-clean build-flatpak packaging/flatpak/io.github.todesengelx.ReolinkLinux.yml`
+- **AppImage:** `packaging/appimage/build-appimage.sh` (needs `linuxdeploy` + the Qt plugin)
+- **System install:** `cmake --install build --prefix /usr/local` (installs the binary, `.desktop`, icon, and AppStream metadata)
+
+A GitHub Actions CI config (build + test) is provided at [packaging/ci/github-actions-ci.yml](packaging/ci/github-actions-ci.yml) — copy it to `.github/workflows/ci.yml` to activate (adding a workflow requires a token with the `workflow` scope).
 
 ## Licensing
 

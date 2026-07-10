@@ -2,6 +2,7 @@
 
 #include "Log.h"
 
+#include <QFile>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
@@ -42,6 +43,10 @@ bool Database::open()
         qCCritical(lcCore) << "Failed to open database" << m_filePath << ":" << m_lastError;
         return false;
     }
+    // Owner-only permissions: no secrets live here (credentials are in the
+    // keyring), but the device list / event history is still private.
+    QFile::setPermissions(m_filePath, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+
     QSqlQuery pragma(database);
     pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
     pragma.exec(QStringLiteral("PRAGMA foreign_keys=ON"));

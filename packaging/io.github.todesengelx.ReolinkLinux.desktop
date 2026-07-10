@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Reolink Linux Client
+GenericName=NVR Client
+Comment=Native Linux client for Reolink cameras and NVRs
+Exec=reolink-client
+Icon=io.github.todesengelx.ReolinkLinux
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=camera;nvr;surveillance;reolink;rtsp;security;
+StartupNotify=true
