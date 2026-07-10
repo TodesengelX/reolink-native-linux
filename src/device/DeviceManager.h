@@ -72,11 +72,19 @@ public:
     // Capture a JPEG snapshot; emits snapshotSaved/snapshotFailed.
     Q_INVOKABLE void snapshot(int row);
 
+    // Playback: search a day's recordings (emits recordingsFound with a list of
+    // {start,end,type,name} where start/end are seconds into the day), and build
+    // a playable URL for a recording file handle.
+    Q_INVOKABLE void searchRecordings(int row, int year, int month, int day);
+    Q_INVOKABLE QString playbackUrl(int row, const QString &fileName);
+
 signals:
     void countChanged();
     void deviceError(const QString &addr, const QString &message);
     void snapshotSaved(int row, const QString &path);
     void snapshotFailed(int row, const QString &error);
+    void recordingsFound(int row, const QVariantList &segments);
+    void recordingsFailed(int row, const QString &error);
 
 private:
     struct Entry {

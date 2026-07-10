@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QRegularExpression>
 #include <QUrl>
+#include <QVariant>
 #include <QtConcurrent/QtConcurrent>
 
 namespace rl {
@@ -392,6 +393,80 @@ void DeviceManager::snapshot(int row)
             },
             Qt::QueuedConnection);
     }));
+}
+
+void DeviceManager::searchRecordings(int row, int year, int month, int day)
+{
+    auto client = clientFor(row);
+    const QDate date(year, month, day);
+    if (!client || !date.isValid()) {
+        emit recordingsFailed(row, tr("device not ready"));
+        return;
+    }
+    const QDateTime start(date, QTime(0, 0, 0));
+    const QDateTime end(date, QTime(23, 59, 59));
+    m_pending.addFuture(QtConcurrent::run([this, client, row, start, end, date] {
+        const api::BatchResult batch =
+            client->call(Json::array({api::searchBody(0, start, end, QStringLiteral("sub"))}));
+        QVariantList segments;
+        QString error;
+        if (batch.transportOk && !batch.results.isEmpty() && batch.results.first().ok) {
+            const api::SearchResult sr = api::parseSearch(batch.results.first().value);
+            for (const api::RecordingFile &f : sr.files) {
+                if (!f.start.isValid())
+                    continue;
+                // Seconds into the query day (clamped to [0, 86400]).
+                const qint64 dayStart = date.startOfDay().secsTo(f.start);
+                const qint64 dayEnd = date.startOfDay().secsTo(f.end);
+                const qint64 s = qBound(qint64(0), dayStart, qint64(86400));
+                const qint64 e = qBound(s, dayEnd, qint64(86400));
+                QVariantMap seg;
+                seg["start"] = static_cast<double>(s);
+                seg["end"] = static_cast<double>(e);
+                // "md"/AI types are alarm recordings; everything else is timer.
+                seg["type"] = f.type.contains(QStringLiteral("md"), Qt::CaseInsensitive) ||
+                                      f.type.contains(QStringLiteral("ai"), Qt::CaseInsensitive)
+                                  ? QStringLiteral("alarm")
+                                  : QStringLiteral("timer");
+                seg["name"] = f.name;
+                segments.append(seg);
+            }
+        } else {
+            error = batch.error.isEmpty() ? tr("search failed") : batch.error;
+        }
+        QMetaObject::invokeMethod(
+            this,
+            [this, row, segments, error] {
+                if (error.isEmpty())
+                    emit recordingsFound(row, segments);
+                else
+                    emit recordingsFailed(row, error);
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
+QString DeviceManager::playbackUrl(int row, const QString &fileName)
+{
+    if (row < 0 || row >= m_entries.size() || fileName.isEmpty())
+        return {};
+    const Entry &e = m_entries.at(row);
+    if (e.rec.kind == QLatin1String("stream") || !e.primed)
+        return {};
+    // HTTP-FLV playback with credentials in the query (openable directly by
+    // libavformat). Firmware-dependent — verify against a real NVR (DESIGN §6.3).
+    const QString enc = QString::fromUtf8(QUrl::toPercentEncoding(fileName));
+    const QString user = QString::fromUtf8(QUrl::toPercentEncoding(e.rec.username));
+    const QString pass = QString::fromUtf8(QUrl::toPercentEncoding(e.password));
+    const QString scheme = e.rec.https ? QStringLiteral("https") : QStringLiteral("http");
+    QString host = e.rec.addr;
+    if (host.contains(u':') && !host.startsWith(u'['))
+        host = u'[' + host + u']';
+    return QStringLiteral("%1://%2:%3/cgi-bin/api.cgi?cmd=Playback&channel=0&source=%4&output=%4"
+                          "&user=%5&password=%6")
+        .arg(scheme, host)
+        .arg(e.rec.port)
+        .arg(enc, user, pass);
 }
 
 QString DeviceManager::nameAt(int row) const

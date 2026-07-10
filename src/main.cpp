@@ -8,6 +8,7 @@
 #include <QCommandLineParser>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTimer>
@@ -90,6 +91,11 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Devices", &devices);
 
     QQmlApplicationEngine engine;
+    // Lets tests/screenshots open a specific page (0=Live,1=Playback,2=Events,3=Settings).
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("initialPage"), qEnvironmentVariableIntValue("RL_INITIAL_PAGE"));
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("mockRecordings"), qEnvironmentVariableIsSet("RL_MOCK_RECORDINGS"));
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("ReolinkApp", "Main");
