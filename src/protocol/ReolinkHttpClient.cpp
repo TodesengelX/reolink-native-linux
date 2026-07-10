@@ -174,6 +174,12 @@ QByteArray ReolinkHttpClient::fetchSnapshot(int channel, QString *error)
     return {};
 }
 
+QString ReolinkHttpClient::token()
+{
+    QMutexLocker lock(&m_mutex);
+    return tokenValidLocked() ? m_token : QString();
+}
+
 bool ReolinkHttpClient::tokenValidLocked() const
 {
     return !m_token.isEmpty() && m_tokenExpiry > QDateTime::currentDateTimeUtc();

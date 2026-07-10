@@ -388,19 +388,24 @@ SearchResult parseSearch(const Json &value)
 }
 
 QString playbackFlvUrl(const QString &host, int port, bool https, int channel, bool mainStream,
-                       const QDateTime &start, const QString &username, const QString &password)
+                       const QDateTime &start, const QString &username, const QString &password,
+                       const QString &token)
 {
     Q_UNUSED(port); // the flv endpoint is on the web port; app=bcs handles routing
     const QString scheme = https ? QStringLiteral("https") : QStringLiteral("http");
     const QString ts = start.toString(QStringLiteral("yyyyMMddHHmmss"));
-    const QString user = QString::fromUtf8(QUrl::toPercentEncoding(username));
-    const QString pass = QString::fromUtf8(QUrl::toPercentEncoding(password));
-    return QStringLiteral("%1://%2/flv?port=1935&app=bcs&stream=playback.bcs&channel=%3"
-                          "&type=%4&start=%5&seek=0&user=%6&password=%7")
-        .arg(scheme, hostForUrl(host))
-        .arg(channel)
-        .arg(mainStream ? 1 : 0)
-        .arg(ts, user, pass);
+    QString base = QStringLiteral("%1://%2/flv?port=1935&app=bcs&stream=playback.bcs&channel=%3"
+                                  "&type=%4&start=%5&seek=0")
+                       .arg(scheme, hostForUrl(host))
+                       .arg(channel)
+                       .arg(mainStream ? 1 : 0)
+                       .arg(ts);
+    if (!token.isEmpty())
+        return base + QStringLiteral("&token=") +
+               QString::fromUtf8(QUrl::toPercentEncoding(token));
+    return base + QStringLiteral("&user=%1&password=%2")
+                      .arg(QString::fromUtf8(QUrl::toPercentEncoding(username)),
+                           QString::fromUtf8(QUrl::toPercentEncoding(password)));
 }
 
 } // namespace api

@@ -690,8 +690,11 @@ QString DeviceManager::playbackUrl(int row, qint64 startEpoch, bool mainStream)
     if (e.rec.kind == QLatin1String("stream") || !e.primed)
         return {};
     const QDateTime start = QDateTime::fromSecsSinceEpoch(startEpoch);
+    // Reuse the app's existing session token so the NVR doesn't reject a second
+    // login for the playback stream. Falls back to user/password if no token yet.
+    const QString token = e.client ? e.client->token() : QString();
     return api::playbackFlvUrl(e.rec.addr, e.rec.port, e.rec.https, e.channel, mainStream, start,
-                               e.rec.username, e.password);
+                               e.rec.username, e.password, token);
 }
 
 void DeviceManager::fetchSettings(int row, const QStringList &getCommands)

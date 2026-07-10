@@ -190,9 +190,11 @@ SearchResult parseSearch(const Json &value);
 //     &type=0|1&start=YYYYMMDDHHMMSS&seek=0&user=U&password=P
 // mainStream picks type=1 (main) vs type=0 (sub). Credentials are embedded
 // (openable directly by libavformat) — callers must redact them from logs.
+// When token is non-empty it is used (reuses the app's session, avoiding a
+// second login the NVR may reject); otherwise user/password are embedded.
 QString playbackFlvUrl(const QString &host, int port, bool https, int channel,
                        bool mainStream, const QDateTime &start, const QString &username,
-                       const QString &password);
+                       const QString &password, const QString &token = {});
 
 } // namespace api
 } // namespace rl

@@ -133,8 +133,10 @@ ApplicationWindow {
             doorbell.camera = "Front Door";
             doorbell.active = true;
         }
-        // First run: no devices yet → open Add Device and scan the network,
-        // just like the official client does on install.
+        // First run: no devices yet → open Add Device and scan the network, like
+        // the official client on install. Decide here (the DB count is stable at
+        // startup); don't re-check in the timer, where an NVR mid-fan-out briefly
+        // reports 0 as its placeholder row is swapped for channel rows.
         if (Devices.count === 0)
             firstRunTimer.start();
     }
@@ -142,7 +144,7 @@ ApplicationWindow {
     Timer {
         id: firstRunTimer
         interval: 400
-        onTriggered: if (Devices.count === 0) addDeviceDialog.openAndScan()
+        onTriggered: addDeviceDialog.openAndScan()
     }
 
     // Detached camera windows for multi-monitor viewing.

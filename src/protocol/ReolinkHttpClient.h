@@ -33,6 +33,8 @@ public:
     void logout();
 
     QString host() const { return m_host; }
+    // Current session token (may be empty if not logged in / expired). Thread-safe.
+    QString token();
 
 private:
     struct HttpResponse {
