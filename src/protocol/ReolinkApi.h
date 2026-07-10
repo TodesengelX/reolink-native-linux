@@ -174,6 +174,11 @@ struct RecordingFile {
     QString name;      // file handle (empty on NVR firmware — identify by start)
     QDateTime start;
     QDateTime end;
+    // The NVR's playback reference time for this file. It differs from `start`
+    // (wall-clock) by the device's UTC offset, and is the value the HTTP-FLV
+    // playback endpoint expects as its `start=` — passing wall-clock `start`
+    // makes the NVR silently drop the connection. See playbackFlvUrl.
+    QDateTime playbackTime;
     QString streamType; // "main"/"sub" (NOT the trigger type on NVR firmware)
     qint64 size = 0;
 };
@@ -188,6 +193,9 @@ SearchResult parseSearch(const Json &value);
 // HTTP-FLV playback stream for an NVR recording (verified on RLN8-410):
 //   <scheme>://host/flv?port=1935&app=bcs&stream=playback.bcs&channel=N
 //     &type=0|1&start=YYYYMMDDHHMMSS&seek=0&user=U&password=P
+// `start` MUST be the file's PlaybackTime (RecordingFile::playbackTime), i.e. the
+// NVR's playback reference clock — passing the wall-clock StartTime makes the NVR
+// accept the request then immediately close the socket (empty response).
 // mainStream picks type=1 (main) vs type=0 (sub). Credentials are embedded
 // (openable directly by libavformat) — callers must redact them from logs.
 // When token is non-empty it is used (reuses the app's session, avoiding a

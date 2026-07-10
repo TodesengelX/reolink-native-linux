@@ -137,6 +137,10 @@ private:
         bool talk = false;                          // channel supports two-way audio
         bool isAdmin = false;                       // logged-in user may edit settings
         api::BatteryInfo battery;                   // battery/solar state (if any)
+        // Seconds to add to a wall-clock epoch to get the NVR's playback reference
+        // clock (PlaybackTime − StartTime), learned from the last recording search.
+        // The HTTP-FLV playback endpoint seeks by this reference, not wall-clock.
+        qint64 playbackOffsetSecs = 0;
         // Persistent authenticated client for the host, shared by its channels.
         std::shared_ptr<ReolinkHttpClient> client;
     };

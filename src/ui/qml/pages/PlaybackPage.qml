@@ -59,23 +59,23 @@ Item {
         }
     }
 
+    property real _pendingPlayEpoch: 0  // play this once the day's search returns
+
     // Called when an event is clicked in the Events inbox: jump to that exact
-    // camera, date, and moment, and start playing.
+    // camera, date, and moment. Runs ONE search, then plays when it returns —
+    // firing search+search+playback at once overwhelms a connection-limited NVR.
     function openAt(hostId, channel, timestamp) {
-        var row = Devices.rowOfHostChannel(hostId, channel);
-        if (row >= 0)
-            deviceCombo.currentIndex = row;
         var d = new Date(timestamp * 1000);
         page.selYear = d.getFullYear();
         page.selMonth = d.getMonth() + 1;
         page.selDay = d.getDate();
-        page.refresh();
         page.playheadSecs = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
-        var url = Devices.playbackUrl(row, timestamp, true);
-        if (url.length > 0) {
-            player.source = url;
-            player.start();
-        }
+        page._pendingPlayEpoch = timestamp;
+        var row = Devices.rowOfHostChannel(hostId, channel);
+        if (deviceCombo.currentIndex !== row)
+            deviceCombo.currentIndex = row; // triggers the (single) refresh
+        else
+            page.refresh();
     }
 
     Connections {
@@ -84,6 +84,13 @@ Item {
             if (row === page.deviceRow) {
                 timeline.segments = segments;
                 statusText.text = segments.length + qsTr(" recordings");
+                // Event jump: play the requested moment now that recordings loaded.
+                if (page._pendingPlayEpoch > 0) {
+                    var ep = page._pendingPlayEpoch;
+                    page._pendingPlayEpoch = 0;
+                    var url = Devices.playbackUrl(page.deviceRow, ep, true);
+                    if (url.length > 0) { player.source = url; player.start(); }
+                }
                 // Test hook: auto-play the first recording ONCE to verify the video path.
                 if (typeof playbackAutoplay !== "undefined" && playbackAutoplay
                     && segments.length > 0 && !page._autoplayed) {

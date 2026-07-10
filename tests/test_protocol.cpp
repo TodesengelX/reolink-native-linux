@@ -310,6 +310,10 @@ private slots:
         QCOMPARE(sr.files.size(), 1);
         QVERIFY(sr.files[0].name.isEmpty()); // NVR firmware has no file handle
         QCOMPARE(sr.files[0].start, QDateTime(QDate(2026, 7, 9), QTime(8, 30)));
+        // PlaybackTime is captured separately — it is the HTTP-FLV playback seek
+        // reference (leads wall-clock StartTime by the NVR's UTC offset). The FLV
+        // endpoint rejects a wall-clock start, so this field must survive parsing.
+        QCOMPARE(sr.files[0].playbackTime, QDateTime(QDate(2026, 7, 9), QTime(4, 59, 58)));
         QCOMPARE(sr.files[0].size, qint64(10485760)); // string coerced to int
         QCOMPARE(sr.files[0].streamType, QStringLiteral("sub"));
         // Status bitmap -> days 6,7,8,9 have recordings.

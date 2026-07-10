@@ -370,6 +370,7 @@ SearchResult parseSearch(const Json &value)
         rf.name = QString::fromStdString(jsonStr(f, "name")); // empty on NVR firmware
         rf.start = parseTimeObj(jsonObj(f, "StartTime"));
         rf.end = parseTimeObj(jsonObj(f, "EndTime"));
+        rf.playbackTime = parseTimeObj(jsonObj(f, "PlaybackTime")); // FLV seek reference
         rf.streamType = QString::fromStdString(jsonStr(f, "type")); // "main"/"sub"
         rf.size = jsonInt(f, "size", 0); // arrives as a string on NVR firmware
         out.files.append(rf);

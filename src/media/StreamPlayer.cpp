@@ -11,9 +11,12 @@
 #include <QVideoFrame>
 #include <QVideoFrameFormat>
 
+#include <cmath>
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/display.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/time.h>
@@ -60,6 +63,50 @@ QString redacted(const QString &source)
         return source;
     u.setQuery(q);
     return u.toDisplayString(QUrl::RemoveUserInfo);
+}
+
+// Determine how the sink should rotate a stream's frames for upright display.
+//
+// Two cases, in priority order:
+//  1. A display-matrix in the stream side-data (standard rotation signalling).
+//  2. Reolink ultra-wide (Duo/panoramic) cameras, whose main stream carries NO
+//     rotation metadata: the true image is 32:9 landscape (GetEnc reports e.g.
+//     7680x2160) but it is transmitted rotated 90° CCW to 2160x7680 so the coded
+//     width stays within HEVC encoder limits. We detect that extreme-portrait
+//     signature and rotate back (verified on an RLN8-410: Clockwise270 restores
+//     it upright). The threshold (height > 2x width) sits well above a deliberate
+//     9:16 portrait mount (1.78x) so normal cameras are never touched.
+QtVideo::Rotation streamRotation(const AVStream *stream)
+{
+    const AVPacketSideData *sd =
+        stream->codecpar->coded_side_data
+            ? av_packet_side_data_get(stream->codecpar->coded_side_data,
+                                      stream->codecpar->nb_coded_side_data,
+                                      AV_PKT_DATA_DISPLAYMATRIX)
+            : nullptr;
+    if (sd && sd->size >= 9 * static_cast<int>(sizeof(int32_t))) {
+        // av_display_rotation_get returns the CCW angle; the clockwise display
+        // rotation is its negation, normalized to [0,360).
+        int cw = static_cast<int>(std::llround(-av_display_rotation_get(
+            reinterpret_cast<const int32_t *>(sd->data))));
+        cw = ((cw % 360) + 360) % 360;
+        switch (cw) {
+        case 90:
+            return QtVideo::Rotation::Clockwise90;
+        case 180:
+            return QtVideo::Rotation::Clockwise180;
+        case 270:
+            return QtVideo::Rotation::Clockwise270;
+        default:
+            return QtVideo::Rotation::None;
+        }
+    }
+
+    const int w = stream->codecpar->width;
+    const int h = stream->codecpar->height;
+    if (w > 0 && h > w * 2)
+        return QtVideo::Rotation::Clockwise270; // rotated ultra-wide → landscape
+    return QtVideo::Rotation::None;
 }
 
 QVideoFrameFormat::PixelFormat mapPixelFormat(int avFormat)
@@ -236,7 +283,7 @@ void abortableSleepUs(Session *s, qint64 waitUs)
 // Convert one AVFrame to a QVideoFrame and hand it to the sink. Returns false on
 // an unrecoverable mapping failure (frame dropped).
 bool emitFrame(const std::shared_ptr<Session> &s, AVFrame *out,
-               QVideoFrameFormat::PixelFormat outFormat)
+               QVideoFrameFormat::PixelFormat outFormat, QtVideo::Rotation rotation)
 {
     QVideoFrameFormat format(QSize(out->width, out->height), outFormat);
     // Full-range (JPEG) YUV must be tagged or the sink renders it as limited range.
@@ -244,6 +291,11 @@ bool emitFrame(const std::shared_ptr<Session> &s, AVFrame *out,
         format.setColorRange(QVideoFrameFormat::ColorRange_Full);
 
     QVideoFrame videoFrame(format);
+    // Rotation is honored at the frame level by the sink/renderer (the format's
+    // rotation is not); set it here so cameras that transmit the main stream
+    // rotated (portrait) are presented upright.
+    if (rotation != QtVideo::Rotation::None)
+        videoFrame.setRotation(rotation);
     if (!videoFrame.map(QVideoFrame::WriteOnly))
         return false;
     for (int plane = 0; plane < videoFrame.planeCount(); ++plane) {
@@ -357,6 +409,7 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         return false;
     }
     AVStream *stream = fmt->streams[videoIndex];
+    const QtVideo::Rotation rotation = streamRotation(stream);
 
     const AVCodec *codec = avcodec_find_decoder(stream->codecpar->codec_id);
     if (!codec) {
@@ -485,7 +538,7 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
                     abortableSleepUs(s.get(), waitUs);
             }
 
-            if (emitFrame(s, out, outFormat)) {
+            if (emitFrame(s, out, outFormat, rotation)) {
                 const qint64 n = s->framesDecoded.fetch_add(1) + 1;
                 if (!streaming) {
                     streaming = true;
