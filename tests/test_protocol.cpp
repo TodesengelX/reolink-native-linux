@@ -186,6 +186,26 @@ private slots:
         QVERIFY(!api::parseAbility(Json::array()).valid);
     }
 
+    void jsonVariantRoundTrip()
+    {
+        const QByteArray body = R"({"Enc":{"channel":0,"audio":1,"mainStream":{"size":"2560*1440",
+            "bitRate":4096,"frameRate":25,"vType":"h265"},"flags":[1,2,3]}})";
+        const Json j = Json::parse(body.constData(), body.constData() + body.size(), nullptr, false);
+        const QVariant v = api::toVariant(j);
+        const QVariantMap enc = v.toMap().value("Enc").toMap();
+        QCOMPARE(enc.value("audio").toInt(), 1);
+        QCOMPARE(enc.value("mainStream").toMap().value("bitRate").toInt(), 4096);
+        QCOMPARE(enc.value("mainStream").toMap().value("vType").toString(), QStringLiteral("h265"));
+        QCOMPARE(enc.value("flags").toList().size(), 3);
+
+        // Round-trip back to JSON preserves types.
+        const Json back = api::toJson(v);
+        QCOMPARE(back["Enc"]["mainStream"]["bitRate"].get<int>(), 4096);
+        QCOMPARE(QString::fromStdString(back["Enc"]["mainStream"]["vType"].get<std::string>()),
+                 QStringLiteral("h265"));
+        QVERIFY(back["Enc"]["flags"].is_array());
+    }
+
     void detectionStates()
     {
         auto parse = [](const char *s) {

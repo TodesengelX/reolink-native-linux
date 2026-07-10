@@ -530,6 +530,72 @@ QString DeviceManager::playbackUrl(int row, const QString &fileName)
         .arg(enc, user, pass);
 }
 
+void DeviceManager::fetchSettings(int row, const QStringList &getCommands)
+{
+    auto client = clientFor(row);
+    if (!client || getCommands.isEmpty()) {
+        emit settingsFailed(row, tr("device not ready"));
+        return;
+    }
+    Json cmds = Json::array();
+    for (const QString &c : getCommands)
+        cmds.push_back(api::command(c, Json{{"channel", 0}}, /*action=*/1));
+
+    m_pending.addFuture(QtConcurrent::run([this, client, row, cmds] {
+        const api::BatchResult batch = client->call(cmds);
+        QVariantMap values;
+        QString error;
+        if (batch.transportOk) {
+            for (const api::CommandResult &r : batch.results) {
+                if (r.ok)
+                    values.insert(r.cmd, api::toVariant(r.value));
+            }
+        } else {
+            error = batch.error.isEmpty() ? tr("settings fetch failed") : batch.error;
+        }
+        QMetaObject::invokeMethod(
+            this,
+            [this, row, values, error] {
+                if (error.isEmpty())
+                    emit settingsLoaded(row, values);
+                else
+                    emit settingsFailed(row, error);
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::applySetting(int row, const QString &setCommand, const QVariantMap &param)
+{
+    auto client = clientFor(row);
+    if (!client) {
+        emit settingApplied(row, setCommand, false, tr("device not ready"));
+        return;
+    }
+    if (row < m_entries.size() && !m_entries.at(row).isAdmin) {
+        emit settingApplied(row, setCommand, false, tr("requires an administrator account"));
+        return;
+    }
+    const Json p = api::toJson(param);
+    m_pending.addFuture(QtConcurrent::run([this, client, row, setCommand, p] {
+        const api::CommandResult r = client->callOne(setCommand, p, /*action=*/0);
+        const bool ok = r.ok;
+        const QString error = ok ? QString()
+                                 : (r.detail.isEmpty() ? tr("failed") : r.detail);
+        QMetaObject::invokeMethod(
+            this,
+            [this, row, setCommand, ok, error] {
+                emit settingApplied(row, setCommand, ok, error);
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::reboot(int row)
+{
+    applySetting(row, QStringLiteral("Reboot"), {});
+}
+
 QString DeviceManager::nameAt(int row) const
 {
     return row >= 0 && row < m_entries.size() ? m_entries.at(row).rec.name : QString();

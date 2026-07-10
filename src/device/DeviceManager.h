@@ -67,6 +67,10 @@ public:
     Q_INVOKABLE QString liveUrl(int row, bool mainStream = true);
     Q_INVOKABLE QString nameAt(int row) const;
     Q_INVOKABLE int rowOfHost(qint64 hostId) const { return rowForHostId(hostId); }
+    Q_INVOKABLE bool isAdminAt(int row) const
+    {
+        return row >= 0 && row < m_entries.size() && m_entries.at(row).isAdmin;
+    }
 
     // Live controls (channel 0). Fire-and-forget on the worker pool.
     Q_INVOKABLE void ptzMove(int row, const QString &op, int speed = 32);
@@ -81,6 +85,12 @@ public:
     Q_INVOKABLE void searchRecordings(int row, int year, int month, int day);
     Q_INVOKABLE QString playbackUrl(int row, const QString &fileName);
 
+    // Settings: fetch a batch of Get* commands (emits settingsLoaded with a map
+    // of cmd -> value) and apply one Set* command (emits settingApplied).
+    Q_INVOKABLE void fetchSettings(int row, const QStringList &getCommands);
+    Q_INVOKABLE void applySetting(int row, const QString &setCommand, const QVariantMap &param);
+    Q_INVOKABLE void reboot(int row);
+
 signals:
     void countChanged();
     void deviceError(const QString &addr, const QString &message);
@@ -88,6 +98,9 @@ signals:
     void snapshotFailed(int row, const QString &error);
     void recordingsFound(int row, const QVariantList &segments);
     void recordingsFailed(int row, const QString &error);
+    void settingsLoaded(int row, const QVariantMap &values);
+    void settingsFailed(int row, const QString &error);
+    void settingApplied(int row, const QString &command, bool ok, const QString &error);
     // Emitted on each detection 0->1 transition (feeds the event inbox).
     void detectionEvent(qint64 hostId, int channel, const QString &type, const QString &camera);
 

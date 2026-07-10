@@ -4,6 +4,7 @@
 
 #include <QDateTime>
 #include <QString>
+#include <QVariant>
 #include <QVector>
 
 namespace rl {
@@ -44,6 +45,11 @@ struct BatchResult {
 
 Json command(const QString &cmd, Json param = Json::object(), int action = 0);
 Json loginBody(const QString &username, const QString &password);
+
+// JSON <-> QVariant bridge so QML settings panels can bind directly to device
+// config without a typed parser per command.
+QVariant toVariant(const Json &j);
+Json toJson(const QVariant &v);
 
 QString apiUrl(const QString &host, int port, bool https, const QString &firstCmd,
                const QString &token = {});

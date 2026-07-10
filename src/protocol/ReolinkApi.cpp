@@ -27,6 +27,66 @@ Json command(const QString &cmd, Json param, int action)
     return Json{{"cmd", cmd.toStdString()}, {"action", action}, {"param", std::move(param)}};
 }
 
+QVariant toVariant(const Json &j)
+{
+    switch (j.type()) {
+    case Json::value_t::object: {
+        QVariantMap m;
+        for (auto it = j.begin(); it != j.end(); ++it)
+            m.insert(QString::fromStdString(it.key()), toVariant(it.value()));
+        return m;
+    }
+    case Json::value_t::array: {
+        QVariantList l;
+        for (const Json &e : j)
+            l.append(toVariant(e));
+        return l;
+    }
+    case Json::value_t::string:
+        return QString::fromStdString(j.get<std::string>());
+    case Json::value_t::boolean:
+        return j.get<bool>();
+    case Json::value_t::number_integer:
+    case Json::value_t::number_unsigned:
+        return static_cast<qlonglong>(j.get<qint64>());
+    case Json::value_t::number_float:
+        return j.get<double>();
+    default:
+        return {};
+    }
+}
+
+Json toJson(const QVariant &v)
+{
+    switch (v.typeId()) {
+    case QMetaType::QVariantMap: {
+        Json o = Json::object();
+        const QVariantMap m = v.toMap();
+        for (auto it = m.begin(); it != m.end(); ++it)
+            o[it.key().toStdString()] = toJson(it.value());
+        return o;
+    }
+    case QMetaType::QVariantList: {
+        Json a = Json::array();
+        for (const QVariant &e : v.toList())
+            a.push_back(toJson(e));
+        return a;
+    }
+    case QMetaType::Bool:
+        return v.toBool();
+    case QMetaType::Int:
+    case QMetaType::LongLong:
+        return static_cast<qint64>(v.toLongLong());
+    case QMetaType::Double:
+    case QMetaType::Float:
+        return v.toDouble();
+    case QMetaType::QString:
+        return v.toString().toStdString();
+    default:
+        return v.isNull() ? Json() : Json(v.toString().toStdString());
+    }
+}
+
 Json loginBody(const QString &username, const QString &password)
 {
     Json user = {{"Version", "0"},
