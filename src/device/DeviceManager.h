@@ -45,6 +45,8 @@ public:
         HasBatteryRole,
         HasTalkRole,
         IsAdminRole,
+        BatteryPercentRole,
+        BatteryChargingRole,
     };
 
     DeviceManager(Database *db, CredentialStore *credentials, QObject *parent = nullptr);
@@ -118,6 +120,7 @@ private:
         api::ChannelCaps caps;                      // channel 0 capabilities
         bool talk = false;                          // host supports two-way audio
         bool isAdmin = false;                       // logged-in user may edit settings
+        api::BatteryInfo battery;                   // battery/solar state (if any)
         // Persistent authenticated client for live control (PTZ, snapshot, …),
         // created lazily. Shared so worker tasks can hold it past a model edit.
         std::shared_ptr<ReolinkHttpClient> client;
@@ -133,6 +136,7 @@ private:
         int channelNum = 0;
         QString password;
         api::Capabilities caps;
+        api::BatteryInfo battery;
         std::shared_ptr<ReolinkHttpClient> client;
     };
 

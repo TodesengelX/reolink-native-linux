@@ -27,6 +27,8 @@ Rectangle {
     property bool capAudio: false
     property bool capSiren: false
     property bool capFloodlight: false
+    property bool capTalk: false
+    property bool talkActive: false
 
     // User stream-quality preference: false = Fluent (sub), true = Clear (main).
     property bool qualityMain: false
@@ -260,9 +262,17 @@ Rectangle {
                 glyph: "⇅"; active: root.ptzOpen; enabledTool: root.capPtz
                 onActivated: root.ptzOpen = !root.ptzOpen
             }
+            // Two-way talk (push-to-hold). Baichuan talk path is the primary
+            // transport (DESIGN §5.4) and wires in with the M12 protocol work;
+            // this toggles the UI state and mic intent today.
             ToolButton {
-                glyph: "🔊"; enabledTool: root.capSiren
-                onActivated: Devices.ptzMove(root.deviceRow, "Stop", 0) // placeholder: siren wires in M10
+                glyph: "🎙"; active: root.talkActive; enabledTool: root.capTalk
+                onActivated: root.talkActive = !root.talkActive
+            }
+            ToolButton {
+                glyph: "📢"; enabledTool: root.capSiren
+                onActivated: Devices.applySetting(root.deviceRow, "AudioAlarmPlay",
+                    { "AudioAlarmPlay": { "channel": 0, "manual": 1, "alarm_mode": "manul" } })
             }
             ToolButton {
                 glyph: "💡"; enabledTool: root.capFloodlight

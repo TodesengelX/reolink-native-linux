@@ -277,6 +277,22 @@ DetectionState parseAiState(const Json &value)
     return d;
 }
 
+BatteryInfo parseBatteryInfo(const Json &value)
+{
+    // GetBatteryInfo -> {"Battery":{"batteryPercent":N,"chargeStatus":0/1,...}} or
+    // the fields directly under value on some firmware.
+    BatteryInfo b;
+    const Json bat = value.contains("Battery") ? jsonObj(value, "Battery") : value;
+    if (!bat.is_object() || !bat.contains("batteryPercent"))
+        return b;
+    b.present = true;
+    b.percent = qBound(0, jsonInt(bat, "batteryPercent", 0), 100);
+    // chargeStatus: 0 none, 1 charging, 2 charge-complete; adapterStatus also seen.
+    const int cs = jsonInt(bat, "chargeStatus", 0);
+    b.charging = cs == 1 || jsonInt(bat, "adapterStatus", 0) == 1;
+    return b;
+}
+
 static Json timeObj(const QDateTime &dt)
 {
     const QDate d = dt.date();

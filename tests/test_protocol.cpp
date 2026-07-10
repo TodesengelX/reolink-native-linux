@@ -224,6 +224,24 @@ private slots:
         QVERIFY(d.pet);
     }
 
+    void batteryInfo()
+    {
+        auto parse = [](const char *s) {
+            const QByteArray b(s);
+            return Json::parse(b.constData(), b.constData() + b.size(), nullptr, false);
+        };
+        const api::BatteryInfo b = api::parseBatteryInfo(
+            parse(R"({"Battery":{"batteryPercent":73,"chargeStatus":1}})"));
+        QVERIFY(b.present);
+        QCOMPARE(b.percent, 73);
+        QVERIFY(b.charging);
+
+        // Mains device: no battery fields -> not present.
+        QVERIFY(!api::parseBatteryInfo(parse(R"({"Enc":{}})")).present);
+        // Clamp out-of-range percent.
+        QCOMPARE(api::parseBatteryInfo(parse(R"({"batteryPercent":150})")).percent, 100);
+    }
+
     void searchRoundTrip()
     {
         const QDateTime start(QDate(2026, 7, 9), QTime(0, 0));

@@ -59,6 +59,8 @@ Rectangle {
                 required property string status
                 required property string model
                 required property bool online
+                required property int batteryPercent
+                required property bool batteryCharging
 
                 width: ListView.view.width
                 height: 52
@@ -91,6 +93,44 @@ Rectangle {
                             color: Theme.textMuted
                             font.pixelSize: 11
                             elide: Text.ElideRight
+                        }
+                    }
+
+                    // Battery badge (battery/solar cameras only).
+                    Row {
+                        visible: batteryPercent >= 0
+                        spacing: 3
+                        Text {
+                            text: batteryCharging ? "⚡" : ""
+                            color: Theme.online
+                            font.pixelSize: 11
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Rectangle {
+                            width: 22; height: 11; radius: 2
+                            border.color: Theme.textMuted
+                            color: "transparent"
+                            anchors.verticalCenter: parent.verticalCenter
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 1
+                                anchors.verticalCenter: parent.verticalCenter
+                                height: 7
+                                width: Math.max(1, (parent.width - 2) * batteryPercent / 100)
+                                radius: 1
+                                color: batteryPercent > 20 ? Theme.online : Theme.danger
+                            }
+                            Rectangle { // terminal
+                                anchors.left: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 2; height: 5; color: Theme.textMuted
+                            }
+                        }
+                        Text {
+                            text: batteryPercent + "%"
+                            color: Theme.textMuted
+                            font.pixelSize: 10
+                            anchors.verticalCenter: parent.verticalCenter
                         }
                     }
                 }

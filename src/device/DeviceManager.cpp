@@ -146,6 +146,10 @@ QVariant DeviceManager::data(const QModelIndex &index, int role) const
         return e.talk;
     case IsAdminRole:
         return e.isAdmin;
+    case BatteryPercentRole:
+        return e.battery.present ? e.battery.percent : -1;
+    case BatteryChargingRole:
+        return e.battery.charging;
     }
     return {};
 }
@@ -169,6 +173,8 @@ QHash<int, QByteArray> DeviceManager::roleNames() const
         {HasBatteryRole, "hasBattery"},
         {HasTalkRole, "hasTalk"},
         {IsAdminRole, "isAdmin"},
+        {BatteryPercentRole, "batteryPercent"},
+        {BatteryChargingRole, "batteryCharging"},
     };
 }
 
@@ -282,6 +288,7 @@ void DeviceManager::applyValidation(qint64 hostId, const Validation &v)
             e.rec.kind = QStringLiteral("nvr");
         e.talk = v.caps.talk;
         e.isAdmin = v.caps.isAdmin;
+        e.battery = v.battery;
         if (!v.caps.channels.isEmpty())
             e.caps = v.caps.channels.first();
         m_db->updateHost(e.rec);
@@ -348,6 +355,8 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
             api::command(QStringLiteral("GetEnc")),
             api::command(QStringLiteral("GetAbility"),
                          Json{{"User", {{"userName", rec.username.toStdString()}}}}),
+            // Harmless on mains-powered devices (returns an error we ignore).
+            api::command(QStringLiteral("GetBatteryInfo"), Json{{"channel", 0}}),
         }));
 
         Validation v;
@@ -368,6 +377,8 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
                     v.codec = QString::fromStdString(jsonStr(mainStream, "vType", "h264"));
                 } else if (r.cmd == QLatin1String("GetAbility") && r.ok) {
                     v.caps = api::parseAbility(r.value);
+                } else if (r.cmd == QLatin1String("GetBatteryInfo") && r.ok) {
+                    v.battery = api::parseBatteryInfo(r.value);
                 }
             }
         }

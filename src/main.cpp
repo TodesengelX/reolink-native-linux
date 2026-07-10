@@ -99,6 +99,8 @@ int main(int argc, char *argv[])
         QStringLiteral("initialPage"), qEnvironmentVariableIntValue("RL_INITIAL_PAGE"));
     engine.rootContext()->setContextProperty(
         QStringLiteral("mockRecordings"), qEnvironmentVariableIsSet("RL_MOCK_RECORDINGS"));
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("mockDoorbell"), qEnvironmentVariableIsSet("RL_MOCK_DOORBELL"));
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("ReolinkApp", "Main");

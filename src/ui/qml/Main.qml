@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import ReolinkApp
+import ReolinkApp.Core
 
 ApplicationWindow {
     id: window
@@ -102,5 +103,33 @@ ApplicationWindow {
     AddDeviceDialog {
         id: addDeviceDialog
         anchors.centerIn: parent
+    }
+
+    // Doorbell visitor-press surface (raised on a "visitor" detection).
+    DoorbellOverlay {
+        id: doorbell
+        anchors.centerIn: parent
+        z: 100
+        onAnswered: {
+            // Answering opens the doorbell's live view; talk wires in with M12.
+            active = false;
+            nav.currentIndex = 0;
+        }
+    }
+    Connections {
+        target: Devices
+        function onDetectionEvent(hostId, channel, type, camera) {
+            if (type === "visitor") {
+                doorbell.deviceRow = Devices.rowOfHost(hostId);
+                doorbell.camera = camera;
+                doorbell.active = true;
+            }
+        }
+    }
+    Component.onCompleted: {
+        if (typeof mockDoorbell !== "undefined" && mockDoorbell) {
+            doorbell.camera = "Front Door";
+            doorbell.active = true;
+        }
     }
 }

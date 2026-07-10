@@ -54,6 +54,7 @@ set(APP_QML_FILES
     src/ui/qml/components/Timeline.qml
     src/ui/qml/components/MonthCalendar.qml
     src/ui/qml/components/SettingRow.qml
+    src/ui/qml/components/DoorbellOverlay.qml
     src/ui/qml/pages/LiveViewPage.qml
     src/ui/qml/pages/PlaybackPage.qml
     src/ui/qml/pages/EventsPage.qml

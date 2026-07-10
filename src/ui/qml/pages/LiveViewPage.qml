@@ -123,6 +123,7 @@ Item {
                         required property bool hasAudio
                         required property bool hasSiren
                         required property bool hasFloodlight
+                        required property bool hasTalk
 
                         visible: index < page.preset &&
                                  (page.maximizedIndex === -1 || page.maximizedIndex === index)
@@ -140,6 +141,7 @@ Item {
                         capAudio: hasAudio
                         capSiren: hasSiren
                         capFloodlight: hasFloodlight
+                        capTalk: hasTalk
                         onToggleMaximize: (idx) => {
                             page.maximizedIndex = page.maximizedIndex === idx ? -1 : idx;
                         }

@@ -142,6 +142,14 @@ struct DetectionState {
 bool parseMdState(const Json &value);              // GetMdState -> motion bool
 DetectionState parseAiState(const Json &value);    // GetAiState -> per-type flags
 
+// ---- Battery (GetBatteryInfo, battery/solar cameras) ----------------------
+struct BatteryInfo {
+    bool present = false;
+    int percent = 0;
+    bool charging = false; // adapter or solar input active
+};
+BatteryInfo parseBatteryInfo(const Json &value);
+
 // ---- Playback search ------------------------------------------------------
 // Search recorded files for a channel in [start,end]. streamType is "main"/"sub".
 Json searchBody(int channel, const QDateTime &start, const QDateTime &end,
