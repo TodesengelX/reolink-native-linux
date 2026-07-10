@@ -84,17 +84,14 @@ Item {
                 spacing: 6
 
                 Text { text: qsTr("Camera:"); color: Theme.textMuted; font.pixelSize: 11 }
-                ComboBox {
+                CameraComboBox {
                     id: deviceCombo
                     Layout.fillWidth: true
-                    model: Devices
-                    textRole: "name"
                     onCurrentIndexChanged: {
                         page.deviceRow = currentIndex;
                         page.isAdmin = currentIndex >= 0 ? Devices.isAdminAt(currentIndex) : false;
                         page.fetch();
                     }
-                    Component.onCompleted: if (Devices.count > 0) currentIndex = 0;
                 }
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }

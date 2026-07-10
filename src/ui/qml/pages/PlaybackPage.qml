@@ -16,6 +16,14 @@ Item {
     property int selMonth: 7
     property int selDay: 9
 
+    // Default the date to today.
+    Component.onCompleted: {
+        var now = new Date();
+        selYear = now.getFullYear();
+        selMonth = now.getMonth() + 1;
+        selDay = now.getDate();
+    }
+
     function refresh() {
         if (page.deviceRow >= 0)
             Devices.searchRecordings(page.deviceRow, page.selYear, page.selMonth, page.selDay);
@@ -76,16 +84,10 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 Text { text: qsTr("Camera:"); color: Theme.textMuted; font.pixelSize: 12 }
-                ComboBox {
+                CameraComboBox {
                     id: deviceCombo
-                    Layout.preferredWidth: 220
-                    model: Devices
-                    textRole: "name"
+                    Layout.preferredWidth: 240
                     onCurrentIndexChanged: { page.deviceRow = currentIndex; page.refresh(); }
-                    Component.onCompleted: if (Devices.count > 0) {
-                        page.deviceRow = 0;
-                        page.refresh();
-                    }
                 }
                 Item { Layout.fillWidth: true }
                 Text {
