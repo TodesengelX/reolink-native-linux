@@ -33,6 +33,7 @@ Window {
     Component.onCompleted: {
         var url = Devices.liveUrl(win.deviceRow, true); // main stream in a big window
         if (url.length > 0) {
+            player.expectedSize = Devices.declaredSize(win.deviceRow, true); // main
             player.source = url;
             player.start();
         }

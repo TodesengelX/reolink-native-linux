@@ -67,16 +67,24 @@ QString redacted(const QString &source)
 
 // Determine how the sink should rotate a stream's frames for upright display.
 //
-// Two cases, in priority order:
-//  1. A display-matrix in the stream side-data (standard rotation signalling).
-//  2. Reolink ultra-wide (Duo/panoramic) cameras, whose main stream carries NO
-//     rotation metadata: the true image is 32:9 landscape (GetEnc reports e.g.
-//     7680x2160) but it is transmitted rotated 90° CCW to 2160x7680 so the coded
-//     width stays within HEVC encoder limits. We detect that extreme-portrait
-//     signature and rotate back (verified on an RLN8-410: Clockwise270 restores
-//     it upright). The threshold (height > 2x width) sits well above a deliberate
-//     9:16 portrait mount (1.78x) so normal cameras are never touched.
-QtVideo::Rotation streamRotation(const AVStream *stream)
+// Priority order:
+//  1. A display-matrix in the stream side-data (standard rotation signalling;
+//     Reolink sends none, but other sources may).
+//  2. Declared-vs-decoded swap test [primary]. Some Reolink cameras (Duo 3-class)
+//     transmit the main stream transposed — the true image is landscape (GetEnc
+//     declares e.g. 7680x2160) but it decodes as 2160x7680 portrait, so the coded
+//     width stays within the HEVC level cap. No orientation metadata rides along
+//     on RTSP/FLV, so we reconcile the two: if the decoded frame is exactly the
+//     declared size transposed, the stream is rotated and we correct it. This is
+//     self-calibrating — it leaves already-landscape sub streams and genuine
+//     corridor-mode portrait feeds (declared == decoded) untouched, unlike a
+//     resolution threshold. `expected` is the GetEnc size for THIS stream.
+//  3. Extreme-portrait heuristic [fallback], for raw-URL playback with no NVR
+//     session to supply a declared size.
+//
+// Direction is Clockwise270 (verified on an RLN8-410). Nothing on the wire
+// encodes winding direction, so this is a per-model constant, not inferred.
+QtVideo::Rotation streamRotation(const AVStream *stream, QSize expected)
 {
     const AVPacketSideData *sd =
         stream->codecpar->coded_side_data
@@ -104,8 +112,19 @@ QtVideo::Rotation streamRotation(const AVStream *stream)
 
     const int w = stream->codecpar->width;
     const int h = stream->codecpar->height;
+
+    // When the NVR told us the declared size, it is authoritative: rotate iff the
+    // decoded frame is its exact transpose (and no rotation otherwise).
+    if (expected.isValid()) {
+        if (w > 0 && h > 0 && expected.width() == h && expected.height() == w)
+            return QtVideo::Rotation::Clockwise270;
+        return QtVideo::Rotation::None;
+    }
+
+    // No declared size: fall back to the extreme-portrait signature. The 2x
+    // threshold sits above a deliberate 9:16 portrait mount (1.78x).
     if (w > 0 && h > w * 2)
-        return QtVideo::Rotation::Clockwise270; // rotated ultra-wide → landscape
+        return QtVideo::Rotation::Clockwise270;
     return QtVideo::Rotation::None;
 }
 
@@ -409,7 +428,7 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         return false;
     }
     AVStream *stream = fmt->streams[videoIndex];
-    const QtVideo::Rotation rotation = streamRotation(stream);
+    const QtVideo::Rotation rotation = streamRotation(stream, s->expectedSize);
 
     const AVCodec *codec = avcodec_find_decoder(stream->codecpar->codec_id);
     if (!codec) {
@@ -740,6 +759,14 @@ void StreamPlayer::setSource(const QString &source)
     emit sourceChanged();
 }
 
+void StreamPlayer::setExpectedSize(const QSize &size)
+{
+    if (m_expectedSize == size)
+        return;
+    m_expectedSize = size;
+    emit expectedSizeChanged();
+}
+
 QVideoSink *StreamPlayer::videoSink() const
 {
     return m_session ? m_session->sink.data() : m_pendingSink.data();
@@ -791,6 +818,7 @@ void StreamPlayer::start()
     auto s = std::make_shared<Session>();
     s->player = this;
     s->source = m_source;
+    s->expectedSize = m_expectedSize;
     s->loop.store(m_loop);
     s->retryOnError.store(m_retryOnError);
     {

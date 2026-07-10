@@ -57,6 +57,7 @@ Item {
         // ultra-wide cameras, rotated — reserved for a future HD-playback toggle.)
         var url = Devices.playbackUrl(page.deviceRow, epochAt(sec), false);
         if (url.length > 0) {
+            player.expectedSize = Devices.declaredSize(page.deviceRow, false); // sub
             player.source = url;
             player.start();
         }
@@ -92,7 +93,11 @@ Item {
                     var ep = page._pendingPlayEpoch;
                     page._pendingPlayEpoch = 0;
                     var url = Devices.playbackUrl(page.deviceRow, ep, false); // sub stream
-                    if (url.length > 0) { player.source = url; player.start(); }
+                    if (url.length > 0) {
+                        player.expectedSize = Devices.declaredSize(page.deviceRow, false);
+                        player.source = url;
+                        player.start();
+                    }
                 }
                 // Test hook: auto-play the first recording ONCE to verify the video path.
                 if (typeof playbackAutoplay !== "undefined" && playbackAutoplay

@@ -14,6 +14,18 @@
 
 namespace rl {
 
+namespace {
+// Declared display size of a GetEnc stream ("mainStream"/"subStream"), e.g.
+// 7680x2160. Empty if absent/zero. Used to detect transmitted-rotated streams.
+QSize encStreamSize(const Json &enc, const char *stream)
+{
+    const Json s = jsonObj(enc, stream);
+    const int w = jsonInt(s, "width", 0);
+    const int h = jsonInt(s, "height", 0);
+    return (w > 0 && h > 0) ? QSize(w, h) : QSize();
+}
+} // namespace
+
 DeviceManager::DeviceManager(Database *db, CredentialStore *credentials, QObject *parent)
     : QAbstractListModel(parent), m_db(db), m_credentials(credentials)
 {
@@ -369,6 +381,8 @@ void DeviceManager::applyValidation(qint64 hostId, const Validation &v)
         e.online = ch.online;
         e.status = ch.online ? tr("online") : tr("offline");
         e.mainCodec = ch.codec.isEmpty() ? QStringLiteral("h264") : ch.codec;
+        e.mainSize = ch.mainSize;
+        e.subSize = ch.subSize;
         e.caps = ch.caps;
         e.talk = ch.caps.talk;
         e.isAdmin = v.isAdmin;
@@ -457,6 +471,7 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
         api::Capabilities caps;
         QVector<api::ChannelInfo> channels;
         QString ch0codec = QStringLiteral("h264");
+        QSize ch0MainSize, ch0SubSize;
 
         if (b1.transportOk) {
             for (const api::CommandResult &r : b1.results) {
@@ -469,8 +484,11 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
                     v.status = tr("online");
                     v.client = client;
                 } else if (r.cmd == QLatin1String("GetEnc") && r.ok) {
+                    const Json enc = jsonObj(r.value, "Enc");
                     ch0codec = QString::fromStdString(
-                        jsonStr(jsonObj(jsonObj(r.value, "Enc"), "mainStream"), "vType", "h264"));
+                        jsonStr(jsonObj(enc, "mainStream"), "vType", "h264"));
+                    ch0MainSize = encStreamSize(enc, "mainStream");
+                    ch0SubSize = encStreamSize(enc, "subStream");
                 } else if (r.cmd == QLatin1String("GetAbility") && r.ok) {
                     caps = api::parseAbility(r.value);
                 } else if (r.cmd == QLatin1String("GetBatteryInfo") && r.ok) {
@@ -499,6 +517,8 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
             cr.name = v.hostName;
             cr.online = true;
             cr.codec = ch0codec;
+            cr.mainSize = ch0MainSize;
+            cr.subSize = ch0SubSize;
             cr.caps = capsFor(0);
             v.talk = cr.caps.talk;
             v.channels.append(cr);
@@ -511,6 +531,8 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
                     online.append(c);
 
             QHash<int, QString> codecByChannel;
+            QHash<int, QSize> mainSizeByChannel;
+            QHash<int, QSize> subSizeByChannel;
             if (!online.isEmpty()) {
                 Json encCmds = Json::array();
                 for (const api::ChannelInfo &c : online)
@@ -521,8 +543,11 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
                     for (const api::CommandResult &r : b2.results)
                         if (r.cmd == QLatin1String("GetEnc") && r.ok) {
                             const Json enc = jsonObj(r.value, "Enc");
-                            codecByChannel[jsonInt(enc, "channel", 0)] = QString::fromStdString(
+                            const int ch = jsonInt(enc, "channel", 0);
+                            codecByChannel[ch] = QString::fromStdString(
                                 jsonStr(jsonObj(enc, "mainStream"), "vType", "h264"));
+                            mainSizeByChannel[ch] = encStreamSize(enc, "mainStream");
+                            subSizeByChannel[ch] = encStreamSize(enc, "subStream");
                         }
             }
             for (const api::ChannelInfo &c : online) {
@@ -531,6 +556,8 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
                 cr.name = c.name;
                 cr.online = true;
                 cr.codec = codecByChannel.value(c.channel, QStringLiteral("h264"));
+                cr.mainSize = mainSizeByChannel.value(c.channel);
+                cr.subSize = subSizeByChannel.value(c.channel);
                 cr.caps = capsFor(c.channel);
                 v.talk = v.talk || cr.caps.talk;
                 v.channels.append(cr);
@@ -692,6 +719,14 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
             },
             Qt::QueuedConnection);
     }));
+}
+
+QSize DeviceManager::declaredSize(int row, bool mainStream) const
+{
+    if (row < 0 || row >= m_entries.size())
+        return {};
+    const Entry &e = m_entries.at(row);
+    return mainStream ? e.mainSize : e.subSize;
 }
 
 QString DeviceManager::playbackUrl(int row, qint64 startEpoch, bool mainStream)

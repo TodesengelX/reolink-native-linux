@@ -7,6 +7,7 @@
 #include <QAbstractListModel>
 #include <QFutureSynchronizer>
 #include <QHash>
+#include <QSize>
 #include <QTimer>
 
 #include <memory>
@@ -68,6 +69,11 @@ public:
 
     // Playable URL for a device row; empty when credentials aren't loaded yet.
     Q_INVOKABLE QString liveUrl(int row, bool mainStream = true);
+
+    // GetEnc-declared display size for a channel's main/sub stream (e.g. main
+    // 7680x2160). Lets StreamPlayer detect a transmitted-rotated stream by
+    // comparing this against the decoded frame size. Invalid if not yet primed.
+    Q_INVOKABLE QSize declaredSize(int row, bool mainStream) const;
     Q_INVOKABLE QString nameAt(int row) const;
     Q_INVOKABLE int rowOfHost(qint64 hostId) const { return rowForHostId(hostId); }
     // The exact camera row for a host+channel (an NVR shares a host across cameras).
@@ -131,6 +137,8 @@ private:
         bool online = false;
         QString status;
         QString mainCodec = QStringLiteral("h264"); // sub stream is always h264
+        QSize mainSize;                             // GetEnc-declared main resolution
+        QSize subSize;                              // GetEnc-declared sub resolution
         QString password;                           // in-memory only (keyring at rest)
         bool primed = false;                        // password loaded?
         api::ChannelCaps caps;                      // this channel's capabilities
@@ -151,6 +159,8 @@ private:
         QString name;
         bool online = false;
         QString codec = QStringLiteral("h264");
+        QSize mainSize; // GetEnc-declared main/sub resolution (for rotation detection)
+        QSize subSize;
         api::ChannelCaps caps;
     };
 

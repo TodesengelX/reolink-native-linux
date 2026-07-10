@@ -78,6 +78,9 @@ Rectangle {
                        && !root.sourceUrl.startsWith("rtmp://")
                        && !root.sourceUrl.startsWith("tcp://")
                        && !root.sourceUrl.startsWith("udp://");
+            // Declared size for the stream we're opening, so a transmitted-rotated
+            // main stream (e.g. Duo 3) is presented upright.
+            player.expectedSize = Devices.declaredSize(root.deviceRow, root.effectiveMain);
             player.source = root.sourceUrl;
             player.start();
         } else {

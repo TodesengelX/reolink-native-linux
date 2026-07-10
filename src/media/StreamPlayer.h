@@ -3,6 +3,7 @@
 #include <QMutex>
 #include <QObject>
 #include <QPointer>
+#include <QSize>
 #include <QString>
 #include <QVideoSink>
 
@@ -28,6 +29,10 @@ class StreamPlayer : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString source READ source WRITE setSource NOTIFY sourceChanged)
+    // GetEnc-declared display size of the stream being opened (optional). When the
+    // decoded frame is this size transposed, the stream was transmitted rotated and
+    // is corrected for display. Set alongside `source`; unset ⇒ heuristic fallback.
+    Q_PROPERTY(QSize expectedSize READ expectedSize WRITE setExpectedSize NOTIFY expectedSizeChanged)
     Q_PROPERTY(QVideoSink *videoSink READ videoSink WRITE setVideoSink NOTIFY videoSinkChanged)
     Q_PROPERTY(State state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString errorString READ errorString NOTIFY errorStringChanged)
@@ -46,6 +51,7 @@ public:
         std::atomic<bool> loop{false};
         std::atomic<qint64> framesDecoded{0};
         QString source;
+        QSize expectedSize; // declared size for rotation detection (see property)
 
         // Retry on connection error even for non-live sources (playback FLV on a
         // connection-limited NVR often needs a couple of attempts).
@@ -73,6 +79,9 @@ public:
 
     QString source() const { return m_source; }
     void setSource(const QString &source);
+
+    QSize expectedSize() const { return m_expectedSize; }
+    void setExpectedSize(const QSize &size);
 
     QVideoSink *videoSink() const;
     void setVideoSink(QVideoSink *sink);
@@ -103,6 +112,7 @@ public:
 
 signals:
     void sourceChanged();
+    void expectedSizeChanged();
     void videoSinkChanged();
     void stateChanged();
     void errorStringChanged();
@@ -117,6 +127,7 @@ private:
     void applyState(State state, const QString &error);
 
     QString m_source;
+    QSize m_expectedSize;
     bool m_loop = false;
 
     State m_state = State::Idle;
