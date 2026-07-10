@@ -1,7 +1,16 @@
+#include "media/BcMediaParser.h"
 #include "protocol/BcCrypto.h"
 #include "protocol/ReolinkApi.h"
 
 #include <QtTest>
+
+static void putLE32(QByteArray &b, quint32 v)
+{
+    b.append(char(v & 0xFF));
+    b.append(char((v >> 8) & 0xFF));
+    b.append(char((v >> 16) & 0xFF));
+    b.append(char((v >> 24) & 0xFF));
+}
 
 using namespace rl;
 
@@ -399,6 +408,48 @@ private slots:
             "19a62165915a810dd1f9842104dbe1b4147050eee074ee5eb1228d9cd8e9");
         QCOMPARE(bc::aesCfb(pt, key, /*decrypt=*/false), ct);       // encrypt
         QCOMPARE(bc::aesCfb(ct, key, /*decrypt=*/true), pt);        // decrypt round-trips
+    }
+
+    void bcMediaParser()
+    {
+        // Info V1 (32 bytes): sets declared size. Then an H.264 I-frame carrying a
+        // 5-byte Annex-B payload. Frame spans the two appends to exercise buffering.
+        QByteArray info;
+        info.append("1001");            // magic
+        putLE32(info, 32);              // header_size
+        putLE32(info, 1536);            // width
+        putLE32(info, 432);             // height
+        info.append(QByteArray(16, 0)); // rest of the 32-byte header
+
+        const QByteArray nal = QByteArrayLiteral("\x00\x00\x00\x01\x65"); // 5 bytes
+        QByteArray iframe;
+        iframe.append("00dc");          // I-frame magic (channel 0)
+        iframe.append("H264");          // video_type
+        putLE32(iframe, nal.size());    // payload_size = 5
+        putLE32(iframe, 0);             // additional_header_size = 0 (NAL at 24)
+        putLE32(iframe, 12345);         // microseconds
+        putLE32(iframe, 0);             // unknown_b  -> base header = 24 bytes
+        iframe.append(nal);             // payload
+        iframe.append(QByteArray(3, 0)); // pad to 8: (8 - 5%8)%8 = 3
+
+        rl::BcMediaParser mp;
+        QList<rl::BcMediaParser::VideoFrame> frames;
+        mp.onVideo = [&](const rl::BcMediaParser::VideoFrame &f) { frames.append(f); };
+
+        mp.append(info);
+        QCOMPARE(mp.declaredWidth(), 1536);
+        QCOMPARE(mp.declaredHeight(), 432);
+        QCOMPARE(frames.size(), 0);
+
+        // Split the I-frame across two appends; no frame until it's complete.
+        mp.append(iframe.left(10));
+        QCOMPARE(frames.size(), 0);
+        mp.append(iframe.mid(10));
+        QCOMPARE(frames.size(), 1);
+        QVERIFY(frames[0].keyFrame);
+        QCOMPARE(int(frames[0].codec), int(rl::BcMediaParser::Codec::H264));
+        QCOMPARE(frames[0].microseconds, quint32(12345));
+        QCOMPARE(frames[0].annexB, nal);
     }
 };
 

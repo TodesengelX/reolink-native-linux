@@ -35,6 +35,7 @@ add_library(reolink_core STATIC
     src/device/DeviceDiscovery.h src/device/DeviceDiscovery.cpp
     src/device/EventManager.h src/device/EventManager.cpp
     src/media/StreamPlayer.h src/media/StreamPlayer.cpp
+    src/media/BcMediaParser.h src/media/BcMediaParser.cpp
 )
 target_include_directories(reolink_core PUBLIC src third_party)
 target_link_libraries(reolink_core PUBLIC
