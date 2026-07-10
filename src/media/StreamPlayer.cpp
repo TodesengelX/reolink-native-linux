@@ -7,6 +7,7 @@
 #include <QDeadlineTimer>
 #include <QThread>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QVideoFrame>
 #include <QVideoFrameFormat>
 
@@ -39,12 +40,25 @@ bool isLiveUrl(const QString &source)
            source.startsWith(QLatin1String("udp://"));
 }
 
-// Never log credentials embedded in an RTSP/RTMP URL (finding: password-in-logs).
+// Never log credentials — they appear both as userinfo (rtsp://user:pass@host)
+// and as query params (the http-flv playback URL: ...&user=X&password=Y).
 QString redacted(const QString &source)
 {
-    const QUrl u(source);
-    if (!u.isValid() || u.userInfo().isEmpty())
+    QUrl u(source);
+    if (!u.isValid())
         return source;
+    bool changed = !u.userInfo().isEmpty();
+    QUrlQuery q(u);
+    for (const QString &key : {QStringLiteral("user"), QStringLiteral("password"),
+                               QStringLiteral("token")}) {
+        if (q.hasQueryItem(key)) {
+            q.removeAllQueryItems(key);
+            changed = true;
+        }
+    }
+    if (!changed)
+        return source;
+    u.setQuery(q);
     return u.toDisplayString(QUrl::RemoveUserInfo);
 }
 

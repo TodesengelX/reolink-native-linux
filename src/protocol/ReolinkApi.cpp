@@ -352,14 +352,40 @@ SearchResult parseSearch(const Json &value)
     out.ok = true;
     for (const Json &f : jsonArr(sr, "File")) {
         RecordingFile rf;
-        rf.name = QString::fromStdString(jsonStr(f, "name"));
+        rf.name = QString::fromStdString(jsonStr(f, "name")); // empty on NVR firmware
         rf.start = parseTimeObj(jsonObj(f, "StartTime"));
         rf.end = parseTimeObj(jsonObj(f, "EndTime"));
-        rf.type = QString::fromStdString(jsonStr(f, "type"));
-        rf.size = jsonInt(f, "size", 0);
+        rf.streamType = QString::fromStdString(jsonStr(f, "type")); // "main"/"sub"
+        rf.size = jsonInt(f, "size", 0); // arrives as a string on NVR firmware
         out.files.append(rf);
     }
+    // Status[].table is a 31-char bitmap ("0000011110…"); char[day-1]=='1' means
+    // that day has recordings. Drives the calendar dots. Take the first month
+    // (a single-month query only returns one).
+    const Json status = jsonArr(sr, "Status");
+    if (!status.empty()) {
+        const std::string table = jsonStr(status.front(), "table");
+        for (int i = 0; i < static_cast<int>(table.size()); ++i)
+            if (table[i] == '1')
+                out.recordingDays.append(i + 1);
+    }
     return out;
+}
+
+QString playbackFlvUrl(const QString &host, int port, bool https, int channel, bool mainStream,
+                       const QDateTime &start, const QString &username, const QString &password)
+{
+    Q_UNUSED(port); // the flv endpoint is on the web port; app=bcs handles routing
+    const QString scheme = https ? QStringLiteral("https") : QStringLiteral("http");
+    const QString ts = start.toString(QStringLiteral("yyyyMMddHHmmss"));
+    const QString user = QString::fromUtf8(QUrl::toPercentEncoding(username));
+    const QString pass = QString::fromUtf8(QUrl::toPercentEncoding(password));
+    return QStringLiteral("%1://%2/flv?port=1935&app=bcs&stream=playback.bcs&channel=%3"
+                          "&type=%4&start=%5&seek=0&user=%6&password=%7")
+        .arg(scheme, hostForUrl(host))
+        .arg(channel)
+        .arg(mainStream ? 1 : 0)
+        .arg(ts, user, pass);
 }
 
 } // namespace api

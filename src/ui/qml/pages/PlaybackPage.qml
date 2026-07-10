@@ -33,6 +33,8 @@ Item {
         page.refresh();
     }
 
+    property var recordingDays: []
+
     Connections {
         target: Devices
         function onRecordingsFound(row, segments) {
@@ -40,6 +42,10 @@ Item {
                 timeline.segments = segments;
                 statusText.text = segments.length + qsTr(" recordings");
             }
+        }
+        function onRecordingDaysFound(row, year, month, days) {
+            if (row === page.deviceRow && year === page.selYear && month === page.selMonth)
+                page.recordingDays = days;
         }
         function onRecordingsFailed(row, error) {
             if (row === page.deviceRow) {
@@ -134,8 +140,8 @@ Item {
                 id: timeline
                 Layout.fillWidth: true
                 position: 0
-                onSegmentActivated: (name, seconds) => {
-                    var url = Devices.playbackUrl(page.deviceRow, name);
+                onSegmentActivated: (startEpoch, seconds) => {
+                    var url = Devices.playbackUrl(page.deviceRow, startEpoch, false);
                     if (url.length > 0) {
                         player.source = url;
                         player.start();
@@ -180,6 +186,7 @@ Item {
                 year: page.selYear
                 month: page.selMonth
                 selDay: page.selDay
+                markedDays: page.recordingDays
                 onDateSelected: (y, m, d) => {
                     page.selYear = y; page.selMonth = m; page.selDay = d;
                     page.refresh();

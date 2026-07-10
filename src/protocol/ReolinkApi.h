@@ -161,18 +161,28 @@ Json searchBody(int channel, const QDateTime &start, const QDateTime &end,
                 const QString &streamType = QStringLiteral("sub"));
 
 struct RecordingFile {
-    QString name;   // opaque handle for Download/Playback
+    QString name;      // file handle (empty on NVR firmware — identify by start)
     QDateTime start;
     QDateTime end;
-    QString type;   // "md" (motion/alarm) vs "" / other (timer/continuous)
+    QString streamType; // "main"/"sub" (NOT the trigger type on NVR firmware)
     qint64 size = 0;
 };
 struct SearchResult {
     bool ok = false;
     QVector<RecordingFile> files;
+    QVector<int> recordingDays; // days-of-month (1..31) with recordings, from Status
     QString error;
 };
 SearchResult parseSearch(const Json &value);
+
+// HTTP-FLV playback stream for an NVR recording (verified on RLN8-410):
+//   <scheme>://host/flv?port=1935&app=bcs&stream=playback.bcs&channel=N
+//     &type=0|1&start=YYYYMMDDHHMMSS&seek=0&user=U&password=P
+// mainStream picks type=1 (main) vs type=0 (sub). Credentials are embedded
+// (openable directly by libavformat) — callers must redact them from logs.
+QString playbackFlvUrl(const QString &host, int port, bool https, int channel,
+                       bool mainStream, const QDateTime &start, const QString &username,
+                       const QString &password);
 
 } // namespace api
 } // namespace rl

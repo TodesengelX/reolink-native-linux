@@ -273,17 +273,40 @@ private slots:
         QCOMPARE(s["StartTime"].value("year", 0), 2026);
         QCOMPARE(s["EndTime"].value("hour", 0), 23);
 
-        const QByteArray resp = R"({"SearchResult":{"channel":0,"File":[
-            {"name":"Mp4Record/2026-07-09/RecS02_x.mp4","size":1048576,"type":"main",
+        // Real RLN8-410 firmware: File entries have NO "name", size is a STRING,
+        // "type" is the stream ("sub"), and Status.table is the calendar bitmap.
+        const QByteArray resp = R"({"SearchResult":{"channel":0,
+            "Status":[{"mon":7,"year":2026,"table":"0000011110000000000000000000000"}],
+            "File":[
+            {"size":"10485760","type":"sub","frameRate":0,"width":0,"height":0,
              "StartTime":{"year":2026,"mon":7,"day":9,"hour":8,"min":30,"sec":0},
+             "PlaybackTime":{"year":2026,"mon":7,"day":9,"hour":4,"min":59,"sec":58},
              "EndTime":{"year":2026,"mon":7,"day":9,"hour":8,"min":31,"sec":0}}]}})";
         const Json value = Json::parse(resp.constData(), resp.constData() + resp.size(),
                                        nullptr, false);
         const api::SearchResult sr = api::parseSearch(value);
         QVERIFY(sr.ok);
         QCOMPARE(sr.files.size(), 1);
+        QVERIFY(sr.files[0].name.isEmpty()); // NVR firmware has no file handle
         QCOMPARE(sr.files[0].start, QDateTime(QDate(2026, 7, 9), QTime(8, 30)));
-        QCOMPARE(sr.files[0].size, qint64(1048576));
+        QCOMPARE(sr.files[0].size, qint64(10485760)); // string coerced to int
+        QCOMPARE(sr.files[0].streamType, QStringLiteral("sub"));
+        // Status bitmap -> days 6,7,8,9 have recordings.
+        QCOMPARE(sr.recordingDays, QVector<int>({6, 7, 8, 9}));
+    }
+
+    void playbackFlvUrlFormat()
+    {
+        const QDateTime start(QDate(2026, 7, 9), QTime(0, 0, 0));
+        const QString url = api::playbackFlvUrl(QStringLiteral("10.0.0.5"), 443, true,
+                                                0, /*mainStream=*/true, start,
+                                                QStringLiteral("admin"), QStringLiteral("pw"));
+        QVERIFY(url.startsWith(
+            QStringLiteral("https://10.0.0.5/flv?port=1935&app=bcs&stream=playback.bcs")));
+        QVERIFY(url.contains(QStringLiteral("channel=0")));
+        QVERIFY(url.contains(QStringLiteral("type=1")));           // main
+        QVERIFY(url.contains(QStringLiteral("start=20260709000000")));
+        QVERIFY(url.contains(QStringLiteral("user=admin")));
     }
 };
 

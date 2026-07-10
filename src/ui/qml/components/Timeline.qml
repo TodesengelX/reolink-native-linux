@@ -19,7 +19,7 @@ Rectangle {
     property real viewStart: 0           // left edge, seconds
 
     signal seekRequested(real seconds)
-    signal segmentActivated(string name, real seconds)
+    signal segmentActivated(var startEpoch, real seconds)
 
     readonly property real visibleSpan: duration / zoom
     function xForSec(sec) { return (sec - viewStart) / visibleSpan * width; }
@@ -109,7 +109,7 @@ Rectangle {
             for (var i = 0; i < root.segments.length; i++) {
                 var seg = root.segments[i];
                 if (sec >= seg.start && sec <= seg.end) {
-                    root.segmentActivated(seg.name, sec);
+                    root.segmentActivated(seg.startEpoch, sec);
                     return;
                 }
             }

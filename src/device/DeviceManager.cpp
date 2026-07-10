@@ -477,10 +477,11 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
     }
     const QDateTime start(date, QTime(0, 0, 0));
     const QDateTime end(date, QTime(23, 59, 59));
-    m_pending.addFuture(QtConcurrent::run([this, client, row, start, end, date] {
+    m_pending.addFuture(QtConcurrent::run([this, client, row, start, end, date, year, month] {
         const api::BatchResult batch =
             client->call(Json::array({api::searchBody(0, start, end, QStringLiteral("sub"))}));
         QVariantList segments;
+        QVariantList days;
         QString error;
         if (batch.transportOk && !batch.results.isEmpty() && batch.results.first().ok) {
             const api::SearchResult sr = api::parseSearch(batch.results.first().value);
@@ -495,50 +496,44 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
                 QVariantMap seg;
                 seg["start"] = static_cast<double>(s);
                 seg["end"] = static_cast<double>(e);
-                // "md"/AI types are alarm recordings; everything else is timer.
-                seg["type"] = f.type.contains(QStringLiteral("md"), Qt::CaseInsensitive) ||
-                                      f.type.contains(QStringLiteral("ai"), Qt::CaseInsensitive)
-                                  ? QStringLiteral("alarm")
-                                  : QStringLiteral("timer");
-                seg["name"] = f.name;
+                // NVR Search reports the stream type, not the trigger — so we can't
+                // tell timer from alarm here. Two-tone alarm coloring needs the
+                // event log (GetEvents/Baichuan, future); default to timer.
+                seg["type"] = QStringLiteral("timer");
+                seg["startEpoch"] = static_cast<double>(f.start.toSecsSinceEpoch());
                 segments.append(seg);
             }
+            for (int d : sr.recordingDays)
+                days.append(d);
         } else {
             error = batch.error.isEmpty() ? tr("search failed") : batch.error;
         }
         QMetaObject::invokeMethod(
             this,
-            [this, row, segments, error] {
-                if (error.isEmpty())
+            [this, row, segments, days, year, month, error] {
+                if (error.isEmpty()) {
                     emit recordingsFound(row, segments);
-                else
+                    emit recordingDaysFound(row, year, month, days);
+                } else {
                     emit recordingsFailed(row, error);
+                }
             },
             Qt::QueuedConnection);
     }));
 }
 
-QString DeviceManager::playbackUrl(int row, const QString &fileName)
+QString DeviceManager::playbackUrl(int row, qint64 startEpoch, bool mainStream)
 {
-    if (row < 0 || row >= m_entries.size() || fileName.isEmpty())
+    if (row < 0 || row >= m_entries.size() || startEpoch <= 0)
         return {};
     const Entry &e = m_entries.at(row);
     if (e.rec.kind == QLatin1String("stream") || !e.primed)
         return {};
-    // HTTP-FLV playback with credentials in the query (openable directly by
-    // libavformat). Firmware-dependent — verify against a real NVR (DESIGN §6.3).
-    const QString enc = QString::fromUtf8(QUrl::toPercentEncoding(fileName));
-    const QString user = QString::fromUtf8(QUrl::toPercentEncoding(e.rec.username));
-    const QString pass = QString::fromUtf8(QUrl::toPercentEncoding(e.password));
-    const QString scheme = e.rec.https ? QStringLiteral("https") : QStringLiteral("http");
-    QString host = e.rec.addr;
-    if (host.contains(u':') && !host.startsWith(u'['))
-        host = u'[' + host + u']';
-    return QStringLiteral("%1://%2:%3/cgi-bin/api.cgi?cmd=Playback&channel=0&source=%4&output=%4"
-                          "&user=%5&password=%6")
-        .arg(scheme, host)
-        .arg(e.rec.port)
-        .arg(enc, user, pass);
+    // HTTP-FLV playback by start time (verified on RLN8-410). Credentials are
+    // embedded and stripped from logs by StreamPlayer::redacted().
+    const QDateTime start = QDateTime::fromSecsSinceEpoch(startEpoch);
+    return api::playbackFlvUrl(e.rec.addr, e.rec.port, e.rec.https, /*channel=*/0, mainStream,
+                               start, e.rec.username, e.password);
 }
 
 void DeviceManager::fetchSettings(int row, const QStringList &getCommands)
