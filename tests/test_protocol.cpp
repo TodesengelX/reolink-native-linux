@@ -329,7 +329,7 @@ private slots:
         QVERIFY(url.startsWith(
             QStringLiteral("https://10.0.0.5/flv?port=1935&app=bcs&stream=playback.bcs")));
         QVERIFY(url.contains(QStringLiteral("channel=0")));
-        QVERIFY(url.contains(QStringLiteral("type=1")));           // main
+        QVERIFY(url.contains(QStringLiteral("type=0")));           // main = type 0 (EnumRTMPStreamType[CLEAR])
         QVERIFY(url.contains(QStringLiteral("start=20260709000000")));
         QVERIFY(url.contains(QStringLiteral("user=admin")));
     }

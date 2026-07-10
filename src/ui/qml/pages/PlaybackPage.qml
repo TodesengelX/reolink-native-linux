@@ -52,7 +52,10 @@ Item {
             player.stop();
             return;
         }
-        var url = Devices.playbackUrl(page.deviceRow, epochAt(sec), true); // type=1
+        // Scrub against the sub stream: it is light and always landscape, so the
+        // timeline stays responsive. (Main is a giant 4K keyframe stream and, on
+        // ultra-wide cameras, rotated — reserved for a future HD-playback toggle.)
+        var url = Devices.playbackUrl(page.deviceRow, epochAt(sec), false);
         if (url.length > 0) {
             player.source = url;
             player.start();
@@ -88,7 +91,7 @@ Item {
                 if (page._pendingPlayEpoch > 0) {
                     var ep = page._pendingPlayEpoch;
                     page._pendingPlayEpoch = 0;
-                    var url = Devices.playbackUrl(page.deviceRow, ep, true);
+                    var url = Devices.playbackUrl(page.deviceRow, ep, false); // sub stream
                     if (url.length > 0) { player.source = url; player.start(); }
                 }
                 // Test hook: auto-play the first recording ONCE to verify the video path.

@@ -395,11 +395,13 @@ QString playbackFlvUrl(const QString &host, int port, bool https, int channel, b
     Q_UNUSED(port); // the flv endpoint is on the web port; app=bcs handles routing
     const QString scheme = https ? QStringLiteral("https") : QStringLiteral("http");
     const QString ts = start.toString(QStringLiteral("yyyyMMddHHmmss"));
+    // The official web client maps stream -> wire `type` via EnumRTMPStreamType:
+    // main (CLEAR) => 0, sub (FLUENT) => 1. (Our earlier 1/0 was inverted.)
     QString base = QStringLiteral("%1://%2/flv?port=1935&app=bcs&stream=playback.bcs&channel=%3"
                                   "&type=%4&start=%5&seek=0")
                        .arg(scheme, hostForUrl(host))
                        .arg(channel)
-                       .arg(mainStream ? 1 : 0)
+                       .arg(mainStream ? 0 : 1)
                        .arg(ts);
     if (!token.isEmpty())
         return base + QStringLiteral("&token=") +

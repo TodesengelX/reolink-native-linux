@@ -195,8 +195,10 @@ SearchResult parseSearch(const Json &value);
 //     &type=0|1&start=YYYYMMDDHHMMSS&seek=0&user=U&password=P
 // `start` MUST be the file's PlaybackTime (RecordingFile::playbackTime), i.e. the
 // NVR's playback reference clock — passing the wall-clock StartTime makes the NVR
-// accept the request then immediately close the socket (empty response).
-// mainStream picks type=1 (main) vs type=0 (sub). Credentials are embedded
+// accept the request then immediately close the socket (empty response). Both the
+// PlaybackTime and the `type` mapping below were confirmed against the NVR's own
+// web client (PlayerPlayback.constructH5Url + EnumRTMPStreamType).
+// mainStream picks type=0 (main) vs type=1 (sub). Credentials are embedded
 // (openable directly by libavformat) — callers must redact them from logs.
 // When token is non-empty it is used (reuses the app's session, avoiding a
 // second login the NVR may reject); otherwise user/password are embedded.
