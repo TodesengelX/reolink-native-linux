@@ -53,6 +53,13 @@ Item {
                 statusText.text = error;
             }
         }
+        // Re-fetch once the selected device finishes connecting (its client
+        // isn't primed at page-load time, so the initial fetch returns empty).
+        function onDataChanged(topLeft, bottomRight) {
+            if (page.deviceRow >= topLeft.row && page.deviceRow <= bottomRight.row
+                && timeline.segments.length === 0)
+                page.refresh();
+        }
     }
 
     RowLayout {
@@ -75,7 +82,10 @@ Item {
                     model: Devices
                     textRole: "name"
                     onCurrentIndexChanged: { page.deviceRow = currentIndex; page.refresh(); }
-                    Component.onCompleted: if (Devices.count > 0) page.deviceRow = 0;
+                    Component.onCompleted: if (Devices.count > 0) {
+                        page.deviceRow = 0;
+                        page.refresh();
+                    }
                 }
                 Item { Layout.fillWidth: true }
                 Text {
