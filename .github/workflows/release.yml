@@ -31,16 +31,22 @@ jobs:
           cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
           cmake --build build -j"$(nproc)"
           DESTDIR="$PWD/AppDir" cmake --install build
-      - name: Package AppImage (linuxdeployqt)
+      - name: Package AppImage (linuxdeploy + qt plugin)
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
-          VERSION: ${{ github.ref_name }}
+          NO_STRIP: '1'
+          QML_SOURCES_PATHS: ${{ github.workspace }}/src/ui/qml
+          OUTPUT: reolink-native-linux-x86_64.AppImage
         run: |
-          wget -q https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage -O /tmp/linuxdeployqt
-          chmod +x /tmp/linuxdeployqt
-          /tmp/linuxdeployqt AppDir/usr/share/applications/io.github.todesengelx.ReolinkLinux.desktop \
-            -qmldir=src/ui/qml -appimage -unsupported-allow-new-glibc
-          mv ./*.AppImage reolink-native-linux-x86_64.AppImage
+          # The qt plugin locates Qt via $QMAKE — without it, it finds no
+          # modules ("Could not find Qt modules to deploy").
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          for t in linuxdeploy linuxdeploy-plugin-qt; do
+            wget -q "https://github.com/linuxdeploy/$t/releases/download/continuous/$t-x86_64.AppImage" -O "/tmp/$t"
+            chmod +x "/tmp/$t"
+          done
+          /tmp/linuxdeploy --appdir AppDir --plugin qt --output appimage \
+            -d AppDir/usr/share/applications/io.github.todesengelx.ReolinkLinux.desktop
       - uses: actions/upload-artifact@v4
         with: { name: appimage, path: '*.AppImage' }
 
