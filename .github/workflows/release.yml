@@ -41,6 +41,11 @@ jobs:
           # The qt plugin locates Qt via $QMAKE — without it, it finds no
           # modules ("Could not find Qt modules to deploy").
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          # The qt plugin bundles every SQL driver plugin; the Mimer and MySQL
+          # ones pull in proprietary client libs (libmimerapi.so / libmysqlclient)
+          # that aren't installed, which fails the whole run. We only use SQLite.
+          find "$QT_ROOT_DIR/plugins/sqldrivers" -name 'libqsql*.so' \
+            ! -name 'libqsqlite.so' -delete || true
           for t in linuxdeploy linuxdeploy-plugin-qt; do
             wget -q "https://github.com/linuxdeploy/$t/releases/download/continuous/$t-x86_64.AppImage" -O "/tmp/$t"
             chmod +x "/tmp/$t"
