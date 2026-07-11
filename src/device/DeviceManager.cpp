@@ -922,25 +922,33 @@ void DeviceManager::fetchSettings(int row, const QStringList &getCommands)
         QVariantMap values;
         QStringList failed;
         QString lastError;
-        for (const QString &c : getCommands) {
-            // Fetch each command on its own so one failure doesn't sink the panel.
-            // NVRs (e.g. RLN8-410) intermittently return HTTP 502 when proxying a
-            // camera's image/ISP/IR commands under load (streaming several cameras
-            // while a settings fetch lands). It's transient, so retry a few times
-            // with a short backoff, trying the lighter action=0 on the 2nd attempt
-            // (value only — the range query is heavier); only then give up.
+        // Fetch one command, retrying only transient transport failures: NVRs (e.g.
+        // RLN8-410) intermittently return HTTP 502 when proxying a camera command
+        // under load. Retry a few times with a short backoff (the lighter action=0
+        // on the 2nd try); a DEFINITIVE device error (rspCode set — e.g. -9 "not
+        // supported") stops immediately so we don't hammer the NVR for nothing.
+        auto fetchOne = [&](const QString &cmd) {
             api::CommandResult r;
             for (int attempt = 0; attempt < 3; ++attempt) {
-                r = client->callOne(c, Json{{"channel", ch}}, attempt == 1 ? 0 : 1);
-                // Stop on success, or on a DEFINITIVE device error (rspCode set —
-                // e.g. -9 "not supported"): only a transport-level failure (a
-                // transient gateway 502, where rspCode stays 0) is worth retrying.
-                // Retrying a command the device simply doesn't offer just hammers a
-                // connection-limited NVR for nothing.
+                r = client->callOne(cmd, Json{{"channel", ch}}, attempt == 1 ? 0 : 1);
                 if (r.ok || r.rspCode != 0)
                     break;
                 QThread::msleep(400);
             }
+            return r;
+        };
+        // Newer firmware renamed several commands with a "V20" suffix (a different
+        // schedule shape). If the device says the legacy name isn't supported, try
+        // the V20 variant and store it under the legacy key so panels bind uniformly.
+        static const QHash<QString, QString> v20Alt = {
+            {QStringLiteral("GetPush"), QStringLiteral("GetPushV20")},
+            {QStringLiteral("GetEmail"), QStringLiteral("GetEmailV20")},
+            {QStringLiteral("GetFtp"), QStringLiteral("GetFtpV20")},
+            {QStringLiteral("GetRec"), QStringLiteral("GetRecV20")}};
+        for (const QString &c : getCommands) {
+            api::CommandResult r = fetchOne(c);
+            if (!r.ok && r.rspCode != 0 && v20Alt.contains(c))
+                r = fetchOne(v20Alt.value(c));
             if (r.ok) {
                 values.insert(c, api::toVariant(r.value));
             } else {
