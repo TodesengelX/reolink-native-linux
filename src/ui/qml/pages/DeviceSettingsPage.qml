@@ -53,6 +53,14 @@ Item {
     property var img: ({})
     property bool imgReady: false
 
+    // Per-AI-type detection config over Baichuan (cmd 342), keyed by type
+    // (people/vehicle/dog_cat) -> flat map incl. sensitivity/stayTime.
+    property var aiSens: ({})
+    function aiBody(type) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<AiDetectCfg version=\"1.1\">\n<chn>"
+             + Devices.channelOf(page.deviceRow) + "</chn>\n<type>" + type + "</type>\n</AiDetectCfg>\n</body>\n";
+    }
+
     function fetch() {
         page.settings = ({});
         page.fetched = false;
@@ -62,6 +70,10 @@ Item {
             if (page.category === "detection") {
                 page.alerts = ({});
                 Devices.fetchAlerts(page.deviceRow);
+                page.aiSens = ({});
+                var aiTypes = ["people", "vehicle", "dog_cat"];
+                for (var i = 0; i < aiTypes.length; i++)
+                    Devices.fetchBcConfig(page.deviceRow, 342, page.aiBody(aiTypes[i]));
             }
             if (page.category === "image") {
                 page.img = ({});
@@ -108,15 +120,26 @@ Item {
                 Devices.fetchAlerts(page.deviceRow);
             if (command === "Set25")   // image write over Baichuan
                 Devices.fetchBcConfig(page.deviceRow, 26);
+            if (command === "Set343") {   // AI sensitivity write over Baichuan
+                var ts = ["people", "vehicle", "dog_cat"];
+                for (var i = 0; i < ts.length; i++)
+                    Devices.fetchBcConfig(page.deviceRow, 342, page.aiBody(ts[i]));
+            }
         }
         function onAlertsLoaded(row, values) {
             if (row === page.deviceRow)
                 page.alerts = values;
         }
         function onBcConfigLoaded(row, cmdId, values) {
-            if (row === page.deviceRow && cmdId === 26) {
+            if (row !== page.deviceRow)
+                return;
+            if (cmdId === 26) {
                 page.img = values;
                 page.imgReady = true;
+            } else if (cmdId === 342 && values.type !== undefined) {
+                var a = Object.assign({}, page.aiSens);
+                a[values.type] = values;
+                page.aiSens = a;
             }
         }
     }
@@ -398,18 +421,39 @@ Item {
                 onCommit: (v) => Devices.applySetting(page.deviceRow, "SetAiCfg",
                     { "channel": Devices.channelOf(page.deviceRow), "AiDetectType": { "people": v ? 1 : 0 } })
             }
+            SliderRow {
+                label: qsTr("  People sensitivity"); from: 0; to: 100; enabledCtl: page.isAdmin
+                visible: page.aiSens["people"] !== undefined
+                value: parseInt((page.aiSens["people"] && page.aiSens["people"].sensitivity) || "50")
+                onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 342, 343, { "sensitivity": v }, page.aiBody("people"))
+            }
+
             SwitchRow {
                 label: qsTr("Vehicles"); enabledCtl: page.isAdmin
                 checked: page.val("GetAiCfg","AiDetectType","vehicle") === 1
                 onCommit: (v) => Devices.applySetting(page.deviceRow, "SetAiCfg",
                     { "channel": Devices.channelOf(page.deviceRow), "AiDetectType": { "vehicle": v ? 1 : 0 } })
             }
+            SliderRow {
+                label: qsTr("  Vehicle sensitivity"); from: 0; to: 100; enabledCtl: page.isAdmin
+                visible: page.aiSens["vehicle"] !== undefined
+                value: parseInt((page.aiSens["vehicle"] && page.aiSens["vehicle"].sensitivity) || "50")
+                onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 342, 343, { "sensitivity": v }, page.aiBody("vehicle"))
+            }
+
             SwitchRow {
                 label: qsTr("Animals (pets)"); enabledCtl: page.isAdmin
                 checked: page.val("GetAiCfg","AiDetectType","dog_cat") === 1
                 onCommit: (v) => Devices.applySetting(page.deviceRow, "SetAiCfg",
                     { "channel": Devices.channelOf(page.deviceRow), "AiDetectType": { "dog_cat": v ? 1 : 0 } })
             }
+            SliderRow {
+                label: qsTr("  Animal sensitivity"); from: 0; to: 100; enabledCtl: page.isAdmin
+                visible: page.aiSens["dog_cat"] !== undefined
+                value: parseInt((page.aiSens["dog_cat"] && page.aiSens["dog_cat"].sensitivity) || "50")
+                onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 342, 343, { "sensitivity": v }, page.aiBody("dog_cat"))
+            }
+
             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
             Text { text: qsTr("Alerts"); color: Theme.text; font.pixelSize: 13; font.bold: true }
             SwitchRow {
