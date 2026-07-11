@@ -4,3 +4,10 @@ compile_commands.json
 *.user
 .vscode/
 .build_trash/
+
+# Packaging build outputs
+AppDir/
+*.AppImage
+*.flatpak
+build-flatpak/
+.flatpak-builder/
