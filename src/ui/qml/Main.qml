@@ -70,6 +70,11 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 visible: !window.videoFullscreen
                 onAddRequested: addDeviceDialog.open()
+                // Clicking a camera jumps to Live View with it full-size.
+                onDeviceClicked: (row) => {
+                    nav.currentIndex = 0;
+                    liveViewPage.showCamera(row);
+                }
             }
 
             Rectangle { // divider
@@ -85,6 +90,7 @@ ApplicationWindow {
                 currentIndex: nav.currentIndex
 
                 LiveViewPage {
+                    id: liveViewPage
                     active: nav.currentIndex === 0
                     fullscreen: window.videoFullscreen
                     onFullscreenToggled: window.videoFullscreen = !window.videoFullscreen

@@ -10,6 +10,7 @@ Rectangle {
     color: Theme.surface
 
     signal addRequested()
+    signal deviceClicked(int row)
 
     ColumnLayout {
         anchors.fill: parent
@@ -139,8 +140,16 @@ Rectangle {
                     id: delegateArea
                     anchors.fill: parent
                     hoverEnabled: true
-                    acceptedButtons: Qt.RightButton
-                    onClicked: contextMenu.popup()
+                    cursorShape: Qt.PointingHandCursor
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    // Left-click opens the camera full-size in Live View;
+                    // right-click keeps the management menu.
+                    onClicked: (m) => {
+                        if (m.button === Qt.RightButton)
+                            contextMenu.popup();
+                        else
+                            root.deviceClicked(index);
+                    }
                 }
 
                 Menu {

@@ -17,6 +17,15 @@ Item {
     property int preset: 4
     property int maximizedIndex: -1
     property int selectedIndex: -1
+
+    // Sidebar click: show this camera alone, full-size (the maximized pane —
+    // same as double-clicking it — which also defaults it to HD).
+    function showCamera(row) {
+        if (row < 0 || row >= Devices.count)
+            return;
+        maximizedIndex = row;
+        selectedIndex = row;
+    }
     readonly property int cols: preset === 1 ? 1 : preset === 4 ? 2 : preset === 9 ? 3 : 4
 
     // Removing a device shifts row indices; keep maximized/selected pointing at the
@@ -148,8 +157,10 @@ Item {
                         required property bool hasFloodlight
                         required property bool hasTalk
 
-                        visible: index < page.preset &&
-                                 (page.maximizedIndex === -1 || page.maximizedIndex === index)
+                        // A maximized pane shows even when its index is beyond the
+                        // grid preset (e.g. camera 5 clicked while in the 4-grid).
+                        visible: page.maximizedIndex === index ||
+                                 (page.maximizedIndex === -1 && index < page.preset)
                         width: page.maximizedIndex === index ? gridArea.width : gridArea.cellWidth
                         height: page.maximizedIndex === index ? gridArea.height
                                                               : gridArea.cellHeight
