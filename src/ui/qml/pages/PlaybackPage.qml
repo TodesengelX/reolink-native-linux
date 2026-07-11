@@ -100,6 +100,7 @@ Item {
     }
 
     property real _pendingPlayEpoch: 0  // play this once the day's search returns
+    property real _pendingPlaySecs: -1  // resume here after a camera switch
 
     // Called when an event is clicked in the Events inbox: jump to that exact
     // camera, date, and moment. Runs ONE search, then plays when it returns —
@@ -130,12 +131,19 @@ Item {
                 if (page._pendingPlayEpoch > 0) {
                     var ep = page._pendingPlayEpoch;
                     page._pendingPlayEpoch = 0;
+                    page._pendingPlaySecs = -1;
                     var url = Devices.playbackUrl(page.deviceRow, ep, false); // sub stream
                     if (url.length > 0) {
                         player.expectedSize = Devices.declaredSize(page.deviceRow, false);
                         player.source = url;
                         player.start();
                     }
+                } else if (page._pendingPlaySecs >= 0) {
+                    // Camera switch: resume at the same playhead moment (playAt
+                    // respects SD/HD mode and stops if no recording covers it).
+                    var sec = page._pendingPlaySecs;
+                    page._pendingPlaySecs = -1;
+                    page.playAt(sec);
                 }
                 // Test hook: auto-play the first recording ONCE to verify the video path.
                 if (typeof playbackAutoplay !== "undefined" && playbackAutoplay
@@ -181,7 +189,17 @@ Item {
                 CameraComboBox {
                     id: deviceCombo
                     Layout.preferredWidth: 240
-                    onCurrentIndexChanged: { page.deviceRow = currentIndex; page.refresh(); }
+                    onCurrentIndexChanged: {
+                        // Switching cameras keeps the date and playhead: once the new
+                        // camera's recordings load, resume playing at this same moment
+                        // (the event-jump flow drives its own epoch instead).
+                        var resume = page.deviceRow >= 0 && page.playheadSecs > 0
+                                     && page._pendingPlayEpoch <= 0;
+                        page.deviceRow = currentIndex;
+                        if (resume)
+                            page._pendingPlaySecs = page.playheadSecs;
+                        page.refresh();
+                    }
                 }
                 Item { Layout.fillWidth: true }
                 Text {
