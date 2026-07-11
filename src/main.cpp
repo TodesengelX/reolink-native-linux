@@ -9,6 +9,7 @@
 
 #include <QCommandLineParser>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -21,6 +22,20 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName(QStringLiteral("reolink-linux"));
     QCoreApplication::setApplicationName(QStringLiteral("reolink-client"));
     QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+
+    // Give the app a real identity in the taskbar/dock. setDesktopFileName lets
+    // Wayland compositors match the window to the installed .desktop file and
+    // pull its icon (the fix for the generic fallback glyph); setWindowIcon
+    // supplies the icon directly for X11 and environments without the install.
+    QGuiApplication::setDesktopFileName(QStringLiteral("io.github.todesengelx.ReolinkLinux"));
+    {
+        QIcon icon;
+        for (const int size : {16, 24, 32, 48, 64, 128, 256})
+            icon.addFile(QStringLiteral(":/icons/reolink-%1.png").arg(size), QSize(size, size));
+        if (!icon.isNull())
+            QGuiApplication::setWindowIcon(icon);
+    }
+
     rl::installLogging();
 
     // All Controls are custom-drawn against Theme.qml; Basic avoids
