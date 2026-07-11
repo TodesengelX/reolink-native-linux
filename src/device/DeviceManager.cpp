@@ -4,6 +4,7 @@
 #include "core/Paths.h"
 #include "media/StreamPlayer.h"
 #include "protocol/BaichuanClient.h"
+#include "protocol/BaichuanControl.h"
 #include "protocol/ReolinkHttpClient.h"
 
 #include <QDateTime>
@@ -1118,6 +1119,82 @@ void DeviceManager::toggleFloodlight(int row)
 void DeviceManager::reboot(int row)
 {
     applySetting(row, QStringLiteral("Reboot"), {});
+}
+
+// Baichuan cmd_id pairs for the alert toggles (verified on the RLN8-410).
+static bool alertCmds(const QString &kind, quint32 &getCmd, quint32 &setCmd)
+{
+    if (kind == QLatin1String("push")) { getCmd = 219; setCmd = 218; return true; }
+    if (kind == QLatin1String("email")) { getCmd = 217; setCmd = 216; return true; }
+    if (kind == QLatin1String("ftp")) { getCmd = 70; setCmd = 71; return true; }
+    return false;
+}
+
+void DeviceManager::fetchAlerts(int row)
+{
+    if (row < 0 || row >= m_entries.size()) {
+        emit alertsLoaded(row, {});
+        return;
+    }
+    const Entry &e = m_entries.at(row);
+    if (e.rec.kind == QLatin1String("stream") || !e.primed) {
+        emit alertsLoaded(row, {});
+        return;
+    }
+    BaichuanControl::Params p;
+    p.host = e.rec.addr;
+    p.username = e.rec.username;
+    p.password = e.password;
+    const int ch = e.channel;
+    m_pending.addFuture(QtConcurrent::run([this, row, p, ch] {
+        QVariantMap m;
+        BaichuanControl bc(p);
+        if (bc.open()) {
+            const int push = bc.readEnable(219, ch);
+            const int email = bc.readEnable(217, ch);
+            const int ftp = bc.readEnable(70, ch);
+            bc.close();
+            m[QStringLiteral("ok")] = (push >= 0 || email >= 0 || ftp >= 0);
+            m[QStringLiteral("push")] = push;
+            m[QStringLiteral("email")] = email;
+            m[QStringLiteral("ftp")] = ftp;
+        } else {
+            m[QStringLiteral("ok")] = false;
+        }
+        QMetaObject::invokeMethod(
+            this, [this, row, m] { emit alertsLoaded(row, m); }, Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::setAlertEnable(int row, const QString &kind, bool enable)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    const Entry &e = m_entries.at(row);
+    if (!e.isAdmin) {
+        emit settingApplied(row, kind, false, tr("requires an administrator account"));
+        return;
+    }
+    quint32 getCmd = 0, setCmd = 0;
+    if (!alertCmds(kind, getCmd, setCmd))
+        return;
+    BaichuanControl::Params p;
+    p.host = e.rec.addr;
+    p.username = e.rec.username;
+    p.password = e.password;
+    const int ch = e.channel;
+    m_pending.addFuture(QtConcurrent::run([this, row, p, ch, kind, getCmd, setCmd, enable] {
+        BaichuanControl bc(p);
+        const bool ok = bc.open() && bc.writeEnable(getCmd, setCmd, ch, enable);
+        bc.close();
+        QMetaObject::invokeMethod(
+            this,
+            [this, row, kind, ok] {
+                emit settingApplied(row, kind, ok,
+                                    ok ? QString() : tr("couldn't reach the device"));
+            },
+            Qt::QueuedConnection);
+    }));
 }
 
 QString DeviceManager::nameAt(int row) const

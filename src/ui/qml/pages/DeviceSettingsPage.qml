@@ -28,7 +28,7 @@ Item {
         { key: "display",   label: qsTr("Display / OSD"),    cmds: ["GetOsd"] },
         { key: "encoding",  label: qsTr("Encoding"),        cmds: ["GetEnc"] },
         { key: "recording", label: qsTr("Recording"),       cmds: ["GetRec"] },
-        { key: "detection", label: qsTr("Detection / Alerts"), cmds: ["GetMdAlarm", "GetAiCfg", "GetPush", "GetEmail", "GetFtp"] },
+        { key: "detection", label: qsTr("Detection / Alerts"), cmds: ["GetMdAlarm", "GetAiCfg"] },
         { key: "network",   label: qsTr("Network"),         cmds: ["GetLocalLink", "GetNetPort"] },
         { key: "storage",   label: qsTr("Storage"),         cmds: ["GetHddInfo"] },
         { key: "users",     label: qsTr("Users"),           cmds: ["GetUser"] },
@@ -44,22 +44,9 @@ Item {
     property bool fetched: false     // a fetch has completed (values may be partial)
     function has(cmd) { return page.settings.hasOwnProperty(cmd); }
 
-    // Alert toggles are read/written in two firmware dialects: newer devices expose
-    // Push/Email/Ftp/Buzzer.scheduleEnable and a SetXxxV20 command; older ones use
-    // schedule.enable and SetXxx. Detect from the fetched value and match on write.
-    function alertOn(getCmd, key) {
-        var se = page.val(getCmd, key, "scheduleEnable");
-        if (se !== undefined) return se === 1;
-        return page.val(getCmd, key, "schedule", "enable") === 1;
-    }
-    function setAlert(key, cmdBase, getCmd, on) {
-        var ch = Devices.channelOf(page.deviceRow);
-        var v20 = page.val(getCmd, key, "scheduleEnable") !== undefined;
-        var param = {};
-        param[key] = v20 ? { "scheduleEnable": on ? 1 : 0, "schedule": { "channel": ch } }
-                         : { "schedule": { "enable": on ? 1 : 0, "channel": ch } };
-        Devices.applySetting(page.deviceRow, v20 ? cmdBase + "V20" : cmdBase, param);
-    }
+    // Alert enables (push/email/ftp) come over native Baichuan, not the flaky
+    // HTTP-CGI — keys ok/push/email/ftp, each 0/1 or -1. Empty until loaded.
+    property var alerts: ({})
 
     function fetch() {
         page.settings = ({});
@@ -67,6 +54,10 @@ Item {
         if (page.deviceRow >= 0) {
             page.status = qsTr("Loading…");
             Devices.fetchSettings(page.deviceRow, cmdsFor(page.category));
+            if (page.category === "detection") {
+                page.alerts = ({});
+                Devices.fetchAlerts(page.deviceRow);
+            }
         } else {
             page.status = qsTr("Select a device");
         }
@@ -101,6 +92,14 @@ Item {
             // Reflect user add/remove/password changes immediately.
             if (ok && (command === "AddUser" || command === "DelUser" || command === "ModifyUser"))
                 page.fetch();
+            // Re-read alert enables after a Baichuan toggle so the switch reflects
+            // the device's confirmed state.
+            if (command === "push" || command === "email" || command === "ftp")
+                Devices.fetchAlerts(page.deviceRow);
+        }
+        function onAlertsLoaded(row, values) {
+            if (row === page.deviceRow)
+                page.alerts = values;
         }
     }
 
@@ -419,19 +418,27 @@ Item {
             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
             Text { text: qsTr("Alerts"); color: Theme.text; font.pixelSize: 13; font.bold: true }
             SwitchRow {
-                label: qsTr("Push notifications"); enabledCtl: page.isAdmin
-                checked: page.alertOn("GetPush", "Push")
-                onCommit: (v) => page.setAlert("Push", "SetPush", "GetPush", v)
+                label: qsTr("Push notifications")
+                enabledCtl: page.isAdmin && page.alerts.ok === true
+                checked: page.alerts.push === 1
+                onCommit: (v) => Devices.setAlertEnable(page.deviceRow, "push", v)
             }
             SwitchRow {
-                label: qsTr("Email on alarm"); enabledCtl: page.isAdmin
-                checked: page.alertOn("GetEmail", "Email")
-                onCommit: (v) => page.setAlert("Email", "SetEmail", "GetEmail", v)
+                label: qsTr("Email on alarm")
+                enabledCtl: page.isAdmin && page.alerts.ok === true
+                checked: page.alerts.email === 1
+                onCommit: (v) => Devices.setAlertEnable(page.deviceRow, "email", v)
             }
             SwitchRow {
-                label: qsTr("FTP upload on alarm"); enabledCtl: page.isAdmin
-                checked: page.alertOn("GetFtp", "Ftp")
-                onCommit: (v) => page.setAlert("Ftp", "SetFtp", "GetFtp", v)
+                label: qsTr("FTP upload on alarm")
+                enabledCtl: page.isAdmin && page.alerts.ok === true
+                checked: page.alerts.ftp === 1
+                onCommit: (v) => Devices.setAlertEnable(page.deviceRow, "ftp", v)
+            }
+            Text {
+                visible: page.alerts.ok === false
+                text: qsTr("Alert settings couldn't be read from the device.")
+                color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap
             }
             Item { Layout.fillHeight: true }
             Text {

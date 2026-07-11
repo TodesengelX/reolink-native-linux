@@ -154,6 +154,15 @@ public:
     Q_INVOKABLE void toggleFloodlight(int row);
     Q_INVOKABLE void reboot(int row);
 
+    // Alert-action config (push / email / ftp enable) over the native Baichuan
+    // protocol (TCP 9000). The NVR's HTTP-CGI 502s on these commands under load,
+    // but the app-native BC transport the official clients use is reliable.
+    // fetchAlerts reads the current enables (emits alertsLoaded with keys
+    // ok/push/email/ftp, each 0/1 or -1); setAlertEnable toggles one over BC and
+    // emits settingApplied(kind, ...). kind = "push" | "email" | "ftp".
+    Q_INVOKABLE void fetchAlerts(int row);
+    Q_INVOKABLE void setAlertEnable(int row, const QString &kind, bool enable);
+
 signals:
     void countChanged();
     void deviceError(const QString &addr, const QString &message);
@@ -167,6 +176,7 @@ signals:
     void settingsLoaded(int row, const QVariantMap &values);
     void settingsFailed(int row, const QString &error);
     void settingApplied(int row, const QString &command, bool ok, const QString &error);
+    void alertsLoaded(int row, const QVariantMap &values);
     // Emitted on each detection 0->1 transition (feeds the event inbox).
     void detectionEvent(qint64 hostId, int channel, const QString &type, const QString &camera);
 
