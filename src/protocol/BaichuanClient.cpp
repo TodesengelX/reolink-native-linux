@@ -213,7 +213,10 @@ bool BaichuanClient::connectAndLogin(QTcpSocket &sock, QByteArray &aesKey)
     };
 
     // Step 1: legacy-upgrade requesting AES (this firmware refuses BCEncrypt).
-    sock.write(frame(1, m_p.channel, 0, 1, 0xDC12, 0x6514, QByteArray()));
+    // The login handshake is connection-level, ALWAYS channel 0 — the NVR rejects
+    // a login framed with a camera channel. The camera is selected later by the
+    // stream request (header channel byte + <channelId> in its XML).
+    sock.write(frame(1, 0, 0, 1, 0xDC12, 0x6514, QByteArray()));
     sock.flush();
     Msg nonceMsg;
     if (!recvMatch(1, nonceMsg))
@@ -233,7 +236,7 @@ bool BaichuanClient::connectAndLogin(QTcpSocket &sock, QByteArray &aesKey)
                        "<userName>" + user + "</userName>\n<password>" + pass +
                        "</password>\n<userVer>1</userVer>\n</LoginUser>\n"
                        "<LoginNet version=\"1.1\"><type>LAN</type><udpPort>0</udpPort></LoginNet>\n</body>\n";
-    sock.write(frame(1, m_p.channel, 0, 1, 0, 0x6414, bc::xorCrypt(login, 0)));
+    sock.write(frame(1, 0, 0, 1, 0, 0x6414, bc::xorCrypt(login, 0)));
     sock.flush();
     Msg loginReply;
     if (!recvMatch(1, loginReply))
@@ -386,7 +389,7 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
             if (!sock.waitForReadyRead(300)) {
                 if (++stalls >= 4) {
                     stalls = 0;
-                    sock.write(frame(93, m_p.channel, 0, 99, 0, 0x6414, QByteArray()));
+                    sock.write(frame(93, 0, 0, 99, 0, 0x6414, QByteArray())); // keep-alive: connection-level
                     sock.flush();
                 }
                 continue;
