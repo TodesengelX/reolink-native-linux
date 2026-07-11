@@ -28,7 +28,7 @@ Item {
         { key: "display",   label: qsTr("Display / OSD"),    cmds: ["GetOsd"] },
         { key: "encoding",  label: qsTr("Encoding"),        cmds: ["GetEnc"] },
         { key: "recording", label: qsTr("Recording"),       cmds: ["GetRec"] },
-        { key: "detection", label: qsTr("Detection / Alerts"), cmds: ["GetMdAlarm", "GetAiCfg", "GetPush"] },
+        { key: "detection", label: qsTr("Detection / Alerts"), cmds: ["GetMdAlarm", "GetAiCfg", "GetPush", "GetEmail", "GetFtp"] },
         { key: "network",   label: qsTr("Network"),         cmds: ["GetLocalLink", "GetNetPort"] },
         { key: "storage",   label: qsTr("Storage"),         cmds: ["GetHddInfo"] },
         { key: "users",     label: qsTr("Users"),           cmds: ["GetUser"] },
@@ -43,6 +43,23 @@ Item {
     }
     property bool fetched: false     // a fetch has completed (values may be partial)
     function has(cmd) { return page.settings.hasOwnProperty(cmd); }
+
+    // Alert toggles are read/written in two firmware dialects: newer devices expose
+    // Push/Email/Ftp/Buzzer.scheduleEnable and a SetXxxV20 command; older ones use
+    // schedule.enable and SetXxx. Detect from the fetched value and match on write.
+    function alertOn(getCmd, key) {
+        var se = page.val(getCmd, key, "scheduleEnable");
+        if (se !== undefined) return se === 1;
+        return page.val(getCmd, key, "schedule", "enable") === 1;
+    }
+    function setAlert(key, cmdBase, getCmd, on) {
+        var ch = Devices.channelOf(page.deviceRow);
+        var v20 = page.val(getCmd, key, "scheduleEnable") !== undefined;
+        var param = {};
+        param[key] = v20 ? { "scheduleEnable": on ? 1 : 0, "schedule": { "channel": ch } }
+                         : { "schedule": { "enable": on ? 1 : 0, "channel": ch } };
+        Devices.applySetting(page.deviceRow, v20 ? cmdBase + "V20" : cmdBase, param);
+    }
 
     function fetch() {
         page.settings = ({});
@@ -207,6 +224,22 @@ Item {
 
     // Add-user / change-password dialog for the Users panel.
     UserEditDialog { id: userDialog; deviceRow: page.deviceRow }
+
+    // Confirmation sheet for destructive actions (e.g. disk format).
+    ConfirmDialog {
+        id: confirmDialog
+        onConfirmed: (payload) => {
+            if (payload && payload.action === "format")
+                Devices.applySetting(page.deviceRow, "Format", { "HddInfo": { "id": [payload.id] } });
+        }
+    }
+    function confirmFormat(diskId, label) {
+        confirmDialog.message = qsTr("Format %1?").arg(label);
+        confirmDialog.detail = qsTr("This permanently erases ALL recordings on the disk and cannot be undone.");
+        confirmDialog.confirmLabel = qsTr("Format disk");
+        confirmDialog.payload = { action: "format", id: diskId };
+        confirmDialog.open();
+    }
     function openUserDialog(mode, name) {
         userDialog.mode = mode;
         userDialog.userName = name || "";
@@ -375,9 +408,18 @@ Item {
             Text { text: qsTr("Alerts"); color: Theme.text; font.pixelSize: 13; font.bold: true }
             SwitchRow {
                 label: qsTr("Push notifications"); enabledCtl: page.isAdmin
-                checked: page.val("GetPush","Push","enable") === 1 || page.val("GetPush","Push","schedule","enable") === 1
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetPush",
-                    { "Push": { "channel": Devices.channelOf(page.deviceRow), "enable": v ? 1 : 0 } })
+                checked: page.alertOn("GetPush", "Push")
+                onCommit: (v) => page.setAlert("Push", "SetPush", "GetPush", v)
+            }
+            SwitchRow {
+                label: qsTr("Email on alarm"); enabledCtl: page.isAdmin
+                checked: page.alertOn("GetEmail", "Email")
+                onCommit: (v) => page.setAlert("Email", "SetEmail", "GetEmail", v)
+            }
+            SwitchRow {
+                label: qsTr("FTP upload on alarm"); enabledCtl: page.isAdmin
+                checked: page.alertOn("GetFtp", "Ftp")
+                onCommit: (v) => page.setAlert("Ftp", "SetFtp", "GetFtp", v)
             }
             Item { Layout.fillHeight: true }
             Text {
@@ -576,22 +618,37 @@ Item {
             spacing: Theme.spacing
             Repeater {
                 model: page.val("GetHddInfo","HddInfo") || []
-                delegate: ColumnLayout {
+                delegate: RowLayout {
                     required property var modelData
                     Layout.fillWidth: true
-                    InfoRow { label: qsTr("Disk %1").arg((modelData.number !== undefined ? modelData.number : 0) + 1)
+                    spacing: Theme.spacing
+                    InfoRow {
+                        Layout.fillWidth: true
+                        label: qsTr("Disk %1").arg((modelData.number !== undefined ? modelData.number : 0) + 1)
                         value: (modelData.storageType || qsTr("Disk"))
                              + "  ·  " + Math.round((modelData.capacity || 0) / 1024) + qsTr(" GB")
                              + "  ·  " + Math.round((modelData.size || 0) / 1024) + qsTr(" GB free")
                              + (modelData.mount ? "" : qsTr("  ·  not mounted"))
-                             + (modelData.format ? "" : qsTr("  ·  unformatted")) }
+                             + (modelData.format ? "" : qsTr("  ·  unformatted"))
+                    }
+                    Rectangle {
+                        visible: page.isAdmin
+                        implicitWidth: fmtTxt.implicitWidth + 16; implicitHeight: 24; radius: 4
+                        color: fmtHover.hovered ? Theme.danger : Theme.surfaceAlt
+                        border.color: Theme.danger
+                        Text { id: fmtTxt; anchors.centerIn: parent; text: qsTr("Format"); color: Theme.text; font.pixelSize: 11 }
+                        HoverHandler { id: fmtHover }
+                        TapHandler { onTapped: page.confirmFormat(modelData.number || 0,
+                            qsTr("Disk %1").arg((modelData.number !== undefined ? modelData.number : 0) + 1)) }
+                    }
                 }
             }
             Text { visible: (page.val("GetHddInfo","HddInfo") || []).length === 0
                    text: page.status === "" ? qsTr("No storage reported.") : qsTr("Loading…")
                    color: Theme.textMuted; font.pixelSize: 12 }
             Item { Layout.fillHeight: true }
-            Text { text: qsTr("Formatting a disk (which erases all recordings) will land behind a confirmation step.")
+            Text { visible: !page.isAdmin
+                   text: qsTr("Formatting a disk requires an administrator account.")
                    color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
         }
     }
