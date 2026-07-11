@@ -27,10 +27,14 @@ Item {
     property var recordingDays: []
     property real playheadSecs: 0    // playhead position (seconds into the day)
     property bool _autoplayed: false // test hook guard
-    // HD mode plays the full-resolution main stream by downloading the clip (the
-    // FLV path can't carry HEVC); off = light sub-stream scrubbing.
+    // HD mode streams the full-resolution main stream over native Baichuan; off =
+    // light sub-stream (FLV) scrubbing.
     property bool hdMode: false
-    property bool hdLoading: false
+
+    // False when the Playback page isn't on screen — stop streaming so a Baichuan
+    // session (or FLV stream) isn't left running on the connection-limited NVR.
+    property bool active: true
+    onActiveChanged: if (!active) player.stop()
 
     function refresh() {
         if (page.deviceRow >= 0)
@@ -130,22 +134,6 @@ Item {
             if (row === page.deviceRow && year === page.selYear && month === page.selMonth)
                 page.recordingDays = days;
         }
-        function onHdClipReady(row, path, epoch) {
-            if (row !== page.deviceRow)
-                return;
-            page.hdLoading = false;
-            statusText.text = qsTr("HD");
-            player.expectedSize = Devices.declaredSize(page.deviceRow, true); // main
-            player.loop = true; // short clip — replay until the user scrubs away
-            player.source = path;
-            player.start();
-        }
-        function onHdClipFailed(row, error) {
-            if (row !== page.deviceRow)
-                return;
-            page.hdLoading = false;
-            statusText.text = error;
-        }
         function onRecordingsFailed(row, error) {
             if (row === page.deviceRow) {
                 timeline.segments = [];
@@ -212,15 +200,14 @@ Item {
                     visible: player.state !== StreamPlayer.Streaming
                     BusyIndicator {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        running: player.state === StreamPlayer.Connecting || page.hdLoading
+                        running: player.state === StreamPlayer.Connecting
                         visible: running; width: 32; height: 32
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         color: player.state === StreamPlayer.Error ? Theme.danger : Theme.textMuted
                         font.pixelSize: 12
-                        text: page.hdLoading ? qsTr("Downloading HD clip…")
-                            : player.state === StreamPlayer.Error ? player.errorString
+                        text: player.state === StreamPlayer.Error ? player.errorString
                             : qsTr("Click a recording on the timeline to play")
                     }
                 }
@@ -263,14 +250,15 @@ Item {
                     HoverHandler { id: cHover }
                     TapHandler { onTapped: parent.activated() }
                 }
+                // Play/pause resumes at the current playhead in the active quality
+                // (a StreamPlayer session is one-shot, so "play" re-opens the stream).
                 Ctl { glyph: player.state === StreamPlayer.Streaming ? "⏸" : "▶"
-                      onActivated: player.state === StreamPlayer.Streaming ? player.stop() : player.start() }
+                      onActivated: player.state === StreamPlayer.Streaming
+                                   ? player.stop() : page.playAt(page.playheadSecs) }
                 Ctl { glyph: "⏹"; onActivated: player.stop() }
                 Item { Layout.fillWidth: true }
-                Text { text: qsTr("Downloading…"); color: Theme.textMuted; font.pixelSize: 11
-                       visible: page.hdLoading }
-                // Quality toggle: SD = light sub-stream scrubbing; HD = full-res
-                // main stream (downloaded per clip).
+                // Quality toggle: SD = light sub-stream (FLV) scrubbing; HD = full-res
+                // main stream over native Baichuan.
                 Rectangle {
                     width: 52; height: 30; radius: Theme.radius
                     color: page.hdMode ? Theme.accent : (hdHover.hovered ? Theme.surfaceAlt : Theme.surface)
@@ -286,7 +274,8 @@ Item {
                         onTapped: {
                             page.hdMode = !page.hdMode;
                             // Re-play the current moment in the newly selected quality.
-                            if (player.state === StreamPlayer.Streaming || page.hdLoading)
+                            if (player.state === StreamPlayer.Streaming
+                                || player.state === StreamPlayer.Connecting)
                                 page.playAt(page.playheadSecs);
                         }
                     }

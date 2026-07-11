@@ -3,7 +3,9 @@
 #include "protocol/BcCrypto.h"
 
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QTcpSocket>
+#include <QThread>
 #include <QtEndian>
 
 extern "C" {
@@ -281,6 +283,11 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
 {
     BcMediaParser parser;
     bool started = false;
+    // Recorded playback is delivered faster than realtime; pace it to 1x from the
+    // frame timestamps so it doesn't fast-forward. Live preview is not paced.
+    const bool pace = m_p.startEpoch > 0;
+    QElapsedTimer clock;
+    quint32 firstMicros = 0;
     parser.onVideo = [&](const BcMediaParser::VideoFrame &f) {
         if (f.codec != BcMediaParser::Codec::Unknown) {
             QMutexLocker lock(&m_mutex);
@@ -292,6 +299,22 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
             if (!f.keyFrame)
                 return; // recorded playback opens mid-GOP; wait for the first I-frame
             started = true;
+        }
+        if (pace && f.microseconds) {
+            if (!clock.isValid()) {
+                clock.start();
+                firstMicros = f.microseconds;
+            }
+            const qint64 targetMs = (qint64(f.microseconds) - qint64(firstMicros)) / 1000;
+            const qint64 elapsed = clock.elapsed();
+            if (targetMs < 0 || targetMs - elapsed > 10000) {
+                clock.restart(); // timestamp discontinuity/seek — rebase
+                firstMicros = f.microseconds;
+            } else {
+                for (qint64 wait = targetMs - elapsed; wait > 0 && !m_abort.load();
+                     wait = targetMs - clock.elapsed())
+                    QThread::msleep(static_cast<unsigned long>(qMin<qint64>(wait, 50)));
+            }
         }
         pushAnnexB(f.annexB);
     };

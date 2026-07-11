@@ -90,7 +90,7 @@ ApplicationWindow {
                     onFullscreenToggled: window.videoFullscreen = !window.videoFullscreen
                     onPopOut: (row, lbl) => window.openPopout(row, lbl)
                 }
-                PlaybackPage { id: playbackPage }
+                PlaybackPage { id: playbackPage; active: nav.currentIndex === 1 }
                 EventsPage {
                     onJumpToPlayback: (hostId, channel, timestamp) => {
                         nav.currentIndex = 1;
