@@ -969,6 +969,77 @@ void DeviceManager::applySetting(int row, const QString &setCommand, const QVari
     }));
 }
 
+QVariantMap DeviceManager::hostInfo(qint64 hostId) const
+{
+    QVariantMap m;
+    int channelCount = 0, onlineCount = 0, firstRow = -1;
+    const Entry *host = nullptr;
+    for (int i = 0; i < m_entries.size(); ++i) {
+        const Entry &e = m_entries.at(i);
+        if (e.rec.id != hostId)
+            continue;
+        if (!host) { host = &e; firstRow = i; }
+        ++channelCount;
+        if (e.online)
+            ++onlineCount;
+    }
+    if (!host)
+        return m;
+    m["name"] = host->rec.name;
+    m["kind"] = host->rec.kind;
+    m["model"] = host->rec.model;
+    m["addr"] = host->rec.addr;
+    m["port"] = host->rec.port;
+    m["https"] = host->rec.https;
+    m["username"] = host->rec.username;
+    m["online"] = onlineCount > 0;
+    m["channelCount"] = channelCount;
+    m["onlineCount"] = onlineCount;
+    m["isAdmin"] = host->isAdmin;
+    m["firstRow"] = firstRow;
+    return m;
+}
+
+QVariantMap DeviceManager::cameraInfo(int row) const
+{
+    QVariantMap m;
+    if (row < 0 || row >= m_entries.size())
+        return m;
+    const Entry &e = m_entries.at(row);
+    const auto dim = [](const QSize &s) {
+        return s.isValid() ? QStringLiteral("%1×%2").arg(s.width()).arg(s.height()) : QString();
+    };
+    m["name"] = e.chanName.isEmpty() ? e.rec.name : e.chanName;
+    m["hostName"] = e.rec.name;
+    m["hostId"] = e.rec.id;
+    m["channel"] = e.channel;
+    m["kind"] = e.rec.kind;
+    m["model"] = e.rec.model;
+    m["codec"] = e.mainCodec;
+    m["mainSize"] = dim(e.mainSize);
+    m["subSize"] = dim(e.subSize);
+    m["uid"] = e.uid;
+    m["online"] = e.online;
+    m["isAdmin"] = e.isAdmin;
+    m["capPtz"] = e.caps.ptz;
+    m["capZoom"] = e.caps.zoom;
+    m["capAudio"] = e.caps.audio;
+    m["capSiren"] = e.caps.siren;
+    m["capFloodlight"] = e.caps.floodlight;
+    m["capBattery"] = e.caps.battery;
+    m["capTalk"] = e.talk;
+    return m;
+}
+
+QVariantList DeviceManager::hostIds() const
+{
+    QVariantList ids;
+    for (const Entry &e : m_entries)
+        if (!ids.contains(e.rec.id))
+            ids.append(e.rec.id);
+    return ids;
+}
+
 void DeviceManager::toggleFloodlight(int row)
 {
     const QString cmd = QStringLiteral("SetWhiteLed");

@@ -10,7 +10,10 @@ Rectangle {
     color: Theme.surface
 
     signal addRequested()
-    signal deviceClicked(int row)
+    signal deviceClicked(int row)      // open this camera in Live View
+    signal openSettings(int row)       // open Device Settings for this row
+    signal cameraProperties(int row)   // show the camera properties dialog
+    signal nvrProperties(var host)     // show the NVR properties dialog (hostInfo map)
 
     ColumnLayout {
         anchors.fill: parent
@@ -54,22 +57,96 @@ Rectangle {
             clip: true
             spacing: 2
 
+            // Group channels under their host. The header renders only for NVRs
+            // (a standalone camera is its own host — no redundant parent row).
+            section.property: "hostId"
+            section.criteria: ViewSection.FullString
+            section.delegate: Rectangle {
+                id: nvrHeader
+                required property string section
+                property var host: Devices.hostInfo(parseInt(section))
+                property bool isNvr: host && host.kind === "nvr"
+                width: ListView.view.width
+                height: isNvr ? 40 : 0
+                visible: isNvr
+                color: nvrHover.hovered ? Theme.surfaceAlt : "transparent"
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Theme.spacing
+                    anchors.rightMargin: Theme.spacing
+                    spacing: 8
+                    Text { text: "▾"; color: Theme.textMuted; font.pixelSize: 10 }
+                    Rectangle { // online dot
+                        width: 8; height: 8; radius: 4
+                        color: nvrHeader.host && nvrHeader.host.online ? Theme.online : Theme.textMuted
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Text {
+                            Layout.fillWidth: true
+                            text: nvrHeader.host ? nvrHeader.host.name : ""
+                            color: Theme.text; font.pixelSize: 13; font.bold: true
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: nvrHeader.host
+                                ? (nvrHeader.host.model + " · " + nvrHeader.host.onlineCount
+                                   + "/" + nvrHeader.host.channelCount + qsTr(" cameras"))
+                                : ""
+                            color: Theme.textMuted; font.pixelSize: 10
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+                HoverHandler { id: nvrHover }
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: nvrMenu.popup()
+                }
+                Menu {
+                    id: nvrMenu
+                    MenuItem { text: qsTr("Properties")
+                               onTriggered: root.nvrProperties(nvrHeader.host) }
+                    MenuItem { text: qsTr("Settings")
+                               onTriggered: root.openSettings(nvrHeader.host.firstRow) }
+                    MenuSeparator {}
+                    MenuItem { text: qsTr("Reboot NVR")
+                               enabled: nvrHeader.host && nvrHeader.host.isAdmin
+                               onTriggered: Devices.reboot(nvrHeader.host.firstRow) }
+                    MenuItem { text: qsTr("Remove NVR")
+                               onTriggered: Devices.removeDevice(nvrHeader.host.firstRow) }
+                }
+            }
+
             delegate: Rectangle {
+                id: camRow
                 required property int index
                 required property string name
                 required property string status
                 required property string model
+                required property string kind
                 required property bool online
                 required property int batteryPercent
                 required property bool batteryCharging
 
+                readonly property bool underNvr: kind === "nvr"
+
                 width: ListView.view.width
-                height: 52
+                height: 48
                 color: delegateArea.containsMouse ? Theme.surfaceAlt : "transparent"
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.margins: Theme.spacing
+                    anchors.leftMargin: camRow.underNvr ? Theme.spacing * 2 + 6 : Theme.spacing
+                    anchors.rightMargin: Theme.spacing
+                    anchors.topMargin: 4
+                    anchors.bottomMargin: 4
                     spacing: Theme.spacing
 
                     Rectangle { // online dot
@@ -90,7 +167,8 @@ Rectangle {
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: model.length > 0 ? model + " · " + status : status
+                            text: camRow.underNvr ? status
+                                : (model.length > 0 ? model + " · " + status : status)
                             color: Theme.textMuted
                             font.pixelSize: 11
                             elide: Text.ElideRight
@@ -143,20 +221,27 @@ Rectangle {
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     // Left-click opens the camera full-size in Live View;
-                    // right-click keeps the management menu.
+                    // right-click opens its management menu.
                     onClicked: (m) => {
                         if (m.button === Qt.RightButton)
-                            contextMenu.popup();
+                            camMenu.popup();
                         else
-                            root.deviceClicked(index);
+                            root.deviceClicked(camRow.index);
                     }
                 }
 
                 Menu {
-                    id: contextMenu
+                    id: camMenu
+                    MenuItem { text: qsTr("Properties")
+                               onTriggered: root.cameraProperties(camRow.index) }
+                    MenuItem { text: qsTr("Settings")
+                               onTriggered: root.openSettings(camRow.index) }
+                    MenuSeparator {}
+                    // Standalone cameras are their own host and can be removed here;
+                    // an NVR's channels are managed on the NVR (remove it whole).
                     MenuItem {
-                        text: qsTr("Remove device")
-                        onTriggered: Devices.removeDevice(index)
+                        text: camRow.underNvr ? qsTr("Remove NVR…") : qsTr("Remove device")
+                        onTriggered: Devices.removeDevice(camRow.index)
                     }
                 }
             }

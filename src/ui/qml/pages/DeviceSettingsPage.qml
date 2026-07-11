@@ -17,6 +17,12 @@ Item {
     property bool isAdmin: false
     property string status: ""
 
+    // Called from the sidebar's Settings action: focus this device row.
+    function showDevice(row) {
+        if (row >= 0 && row < Devices.count)
+            deviceCombo.currentIndex = row;
+    }
+
     readonly property var categories: [
         { key: "display",   label: qsTr("Display / Image"), cmds: ["GetOsd", "GetImage", "GetIsp"] },
         { key: "encoding",  label: qsTr("Encoding"),        cmds: ["GetEnc"] },

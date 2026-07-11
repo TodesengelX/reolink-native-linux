@@ -18,6 +18,10 @@ Item {
     property int maximizedIndex: -1
     property int selectedIndex: -1
 
+    // A maximized pane is effectively the single ("1") view, so light that button
+    // up in the layout toolbar rather than the underlying grid preset.
+    readonly property int activePreset: maximizedIndex >= 0 ? 1 : preset
+
     // Sidebar click: show this camera alone, full-size (the maximized pane —
     // same as double-clicking it — which also defaults it to HD).
     function showCamera(row) {
@@ -62,13 +66,13 @@ Item {
                     width: 34
                     height: 26
                     radius: Theme.radius
-                    color: page.preset === modelData ? Theme.accentDim
+                    color: page.activePreset === modelData ? Theme.accentDim
                          : presetArea.containsMouse ? Theme.surfaceAlt : Theme.surface
                     border.color: Theme.border
                     Text {
                         anchors.centerIn: parent
                         text: parent.modelData
-                        color: page.preset === parent.modelData ? Theme.text : Theme.textMuted
+                        color: page.activePreset === parent.modelData ? Theme.text : Theme.textMuted
                         font.pixelSize: 12
                     }
                     MouseArea {

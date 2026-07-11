@@ -98,6 +98,18 @@ public:
         return (row >= 0 && row < m_entries.size()) ? m_entries.at(row).channel : 0;
     }
 
+    // Host-level summary (an NVR or a standalone camera), keyed by hostId — feeds
+    // the sidebar's NVR header and the NVR properties dialog. Keys: name, kind,
+    // model, addr, port, https, username, online, channelCount, onlineCount,
+    // isAdmin, firstRow.
+    Q_INVOKABLE QVariantMap hostInfo(qint64 hostId) const;
+    // Per-camera summary for the camera properties dialog. Keys: name, hostName,
+    // hostId, channel, kind, model, codec, mainSize, subSize, uid, online, isAdmin,
+    // and cap* booleans (ptz/zoom/audio/siren/floodlight/battery/talk).
+    Q_INVOKABLE QVariantMap cameraInfo(int row) const;
+    // Distinct host ids in list order (NVRs and standalone cameras), for grouping.
+    Q_INVOKABLE QVariantList hostIds() const;
+
     // Live controls (channel 0). Fire-and-forget on the worker pool.
     Q_INVOKABLE void ptzMove(int row, const QString &op, int speed = 32);
     Q_INVOKABLE void ptzStop(int row);

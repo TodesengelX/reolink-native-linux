@@ -75,6 +75,12 @@ ApplicationWindow {
                     nav.currentIndex = 0;
                     liveViewPage.showCamera(row);
                 }
+                onOpenSettings: (row) => {
+                    nav.currentIndex = 3;
+                    settingsPage.showDevice(row);
+                }
+                onCameraProperties: (row) => window.showCameraProperties(row)
+                onNvrProperties: (host) => window.showNvrProperties(host)
             }
 
             Rectangle { // divider
@@ -103,7 +109,7 @@ ApplicationWindow {
                         playbackPage.openAt(hostId, channel, timestamp);
                     }
                 }
-                DeviceSettingsPage {}
+                DeviceSettingsPage { id: settingsPage }
             }
         }
     }
@@ -151,6 +157,63 @@ ApplicationWindow {
         id: firstRunTimer
         interval: 400
         onTriggered: addDeviceDialog.openAndScan()
+    }
+
+    // Device / camera "Properties" sheet, populated from the model.
+    PropertiesDialog {
+        id: propsDialog
+        onOpenSettings: (row) => { nav.currentIndex = 3; settingsPage.showDevice(row); }
+    }
+    function showCameraProperties(row) {
+        var c = Devices.cameraInfo(row);
+        if (!c || c.name === undefined)
+            return;
+        var caps = [];
+        if (c.capPtz) caps.push(qsTr("PTZ"));
+        if (c.capZoom) caps.push(qsTr("Zoom"));
+        if (c.capAudio) caps.push(qsTr("Audio"));
+        if (c.capTalk) caps.push(qsTr("Two-way talk"));
+        if (c.capSiren) caps.push(qsTr("Siren"));
+        if (c.capFloodlight) caps.push(qsTr("Floodlight"));
+        if (c.capBattery) caps.push(qsTr("Battery"));
+        propsDialog.heading = c.name;
+        propsDialog.subheading = c.kind === "nvr" ? qsTr("Camera on %1").arg(c.hostName)
+                                                  : qsTr("Camera");
+        propsDialog.rows = [
+            { label: qsTr("Status"), value: c.online ? qsTr("Online") : qsTr("Offline") },
+            { label: qsTr("Channel"), value: String(c.channel) },
+            { label: qsTr("Main stream"),
+              value: String(c.codec).toUpperCase() + (c.mainSize ? " · " + c.mainSize : "") },
+            { label: qsTr("Sub stream"), value: c.subSize || "—" },
+            { label: qsTr("Features"), value: caps.length ? caps.join(", ") : "—" },
+            { label: qsTr("UID"), value: c.uid || "—" }
+        ];
+        propsDialog.targetRow = row;
+        propsDialog.isAdmin = c.isAdmin;
+        propsDialog.showReboot = false;
+        propsDialog.showRemove = c.kind !== "nvr"; // NVR channels are removed as a whole
+        propsDialog.removeLabel = qsTr("Remove device");
+        propsDialog.open();
+    }
+    function showNvrProperties(host) {
+        if (!host || host.name === undefined)
+            return;
+        propsDialog.heading = host.name;
+        propsDialog.subheading = host.kind === "nvr" ? qsTr("Reolink NVR") : qsTr("Camera");
+        propsDialog.rows = [
+            { label: qsTr("Model"), value: host.model || "—" },
+            { label: qsTr("Address"),
+              value: host.addr + ":" + host.port + (host.https ? qsTr(" (HTTPS)") : "") },
+            { label: qsTr("Account"), value: host.username + (host.isAdmin ? qsTr(" · admin") : "") },
+            { label: qsTr("Cameras"),
+              value: host.onlineCount + " / " + host.channelCount + qsTr(" online") }
+        ];
+        propsDialog.targetRow = host.firstRow;
+        propsDialog.isAdmin = host.isAdmin;
+        propsDialog.showReboot = true;
+        propsDialog.showRemove = true;
+        propsDialog.removeLabel = host.kind === "nvr" ? qsTr("Remove NVR") : qsTr("Remove device");
+        propsDialog.open();
     }
 
     // Detached camera windows for multi-monitor viewing.
