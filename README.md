@@ -15,8 +15,8 @@ A fully **native Linux desktop client** for Reolink cameras and NVRs — built t
 Grab the latest `.AppImage` from the [**Releases**](../../releases) page, then:
 
 ```sh
-chmod +x Reolink_Native_Linux-*.AppImage
-./Reolink_Native_Linux-*.AppImage
+chmod +x reolink-native-linux-x86_64.AppImage
+./reolink-native-linux-x86_64.AppImage
 ```
 
 ### Flatpak
