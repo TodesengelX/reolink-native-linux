@@ -4,6 +4,9 @@ import ReolinkApp
 // 24-hour recording timeline: two-tone segments (grey = timer/continuous,
 // blue = alarm/AI), hour ticks, a draggable playhead, and click-to-seek.
 // Segments are {start,end,type,name} with start/end in seconds into the day.
+// Interactions: wheel zooms at the cursor; when zoomed, dragging the track pans
+// the view (Shift+wheel / horizontal scroll pan too); dragging the playhead
+// scrubs it; a plain click seeks.
 Rectangle {
     id: root
     height: 64
@@ -103,19 +106,64 @@ Rectangle {
     HoverHandler { id: hover }
 
     MouseArea {
+        id: track
         anchors.fill: parent
         preventStealing: true
         property real lastSec: 0
+        property real pressX: 0
+        property real pressViewStart: 0
+        // 0 = undecided (click seeks on release), 1 = scrub playhead, 2 = pan view
+        property int mode: 0
+        cursorShape: pressed && mode === 2 ? Qt.ClosedHandCursor
+                    : (root.zoom > 1 ? Qt.OpenHandCursor : Qt.ArrowCursor)
         function secAt(x) { return Math.max(0, Math.min(root.duration, root.secForX(x))); }
-        onPressed: (m) => { lastSec = secAt(m.x); root.seek(lastSec); }
-        onPositionChanged: (m) => { if (m.buttons & Qt.LeftButton) { lastSec = secAt(m.x); root.seek(lastSec); } }
-        onReleased: () => root.commit(lastSec)
+        function clampView(v) {
+            return Math.max(0, Math.min(root.duration - root.visibleSpan, v));
+        }
+        onPressed: (m) => {
+            pressX = m.x;
+            pressViewStart = root.viewStart;
+            // Grabbing the playhead scrubs it; dragging anywhere else pans the
+            // zoomed view; a motionless press-release is a click-to-seek.
+            mode = Math.abs(m.x - root.xForSec(root.position)) <= 8 ? 1 : 0;
+            if (mode === 1) { lastSec = secAt(m.x); root.seek(lastSec); }
+        }
+        onPositionChanged: (m) => {
+            if (!(m.buttons & Qt.LeftButton))
+                return;
+            if (mode === 0 && Math.abs(m.x - pressX) > 4)
+                mode = 2;
+            if (mode === 1) {
+                lastSec = secAt(m.x);
+                root.seek(lastSec);
+            } else if (mode === 2) {
+                root.viewStart = clampView(pressViewStart
+                                           - (m.x - pressX) / root.width * root.visibleSpan);
+            }
+        }
+        onReleased: (m) => {
+            if (mode === 1) {
+                root.commit(lastSec);
+            } else if (mode === 0) { // plain click: seek there
+                lastSec = secAt(m.x);
+                root.seek(lastSec);
+                root.commit(lastSec);
+            }
+        }
         onWheel: (w) => {
+            // Shift+wheel or a horizontal scroll (trackpads) pans the view.
+            var panTicks = Math.abs(w.angleDelta.x) > Math.abs(w.angleDelta.y)
+                         ? w.angleDelta.x
+                         : ((w.modifiers & Qt.ShiftModifier) ? w.angleDelta.y : 0);
+            if (panTicks !== 0) {
+                root.viewStart = clampView(root.viewStart
+                                           - panTicks / 120 * root.visibleSpan * 0.15);
+                return;
+            }
             var focus = root.secForX(w.x);
             root.zoom = Math.max(1, Math.min(48, root.zoom * (w.angleDelta.y > 0 ? 1.25 : 0.8)));
             // Keep the focus point under the cursor.
-            root.viewStart = Math.max(0, Math.min(root.duration - root.visibleSpan,
-                                                  focus - w.x / root.width * root.visibleSpan));
+            root.viewStart = clampView(focus - w.x / root.width * root.visibleSpan);
         }
     }
 
