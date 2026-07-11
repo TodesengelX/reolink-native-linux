@@ -432,14 +432,23 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         fmt->pb = avioCtx;
         fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
         ifmt = av_find_input_format(s->forcedFormat.toUtf8().constData());
-        // Raw elementary stream over non-seekable IO: give the parser room to find
-        // the SPS/VPS (an I-frame can be ~600 KB) so the size isn't "unspecified".
+        // Raw elementary stream over non-seekable IO: a big probesize lets the
+        // parser find the SPS/VPS in the first I-frame (can be ~600 KB) so the size
+        // isn't "unspecified". Keep analyzeduration SHORT — the codec params are all
+        // in the first IDR, and waiting to estimate the framerate over many frames
+        // adds seconds of startup latency on a realtime live stream (playback is
+        // unaffected since its frames arrive faster than realtime).
         av_dict_set(&opts, "probesize", "4000000", 0);
-        av_dict_set(&opts, "analyzeduration", "4000000", 0);
+        av_dict_set(&opts, "analyzeduration", "300000", 0);
     } else if (live) {
         av_dict_set(&opts, "rtsp_transport", "tcp", 0);
-        av_dict_set(&opts, "fflags", "nobuffer", 0);
-        av_dict_set(&opts, "flags", "low_delay", 0);
+        // Don't spend seconds estimating the framerate — the codec params arrive in
+        // the SDP/first IDR, so cap the probe to show live video sooner. Do NOT set
+        // fflags=nobuffer here: it discards the keyframe find_stream_info already
+        // read, forcing the decode loop to wait a whole extra GOP (~4s on the sub
+        // stream) for the next IDR before the first frame appears.
+        av_dict_set(&opts, "analyzeduration", "500000", 0);
+        av_dict_set(&opts, "probesize", "500000", 0);
     }
     int rc = avformat_open_input(&fmt, packetSource ? nullptr : url.constData(), ifmt, &opts);
     av_dict_free(&opts);

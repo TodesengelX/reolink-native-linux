@@ -112,6 +112,8 @@ Item {
         page.playheadSecs = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
         page._pendingPlayEpoch = timestamp;
         var row = Devices.rowOfHostChannel(hostId, channel);
+        if (row < 0)
+            return;
         if (deviceCombo.currentIndex !== row)
             deviceCombo.currentIndex = row; // triggers the (single) refresh
         else
