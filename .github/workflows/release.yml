@@ -1,11 +1,6 @@
 # Release automation: on a version tag (v*), build an AppImage and a Flatpak
-# bundle and attach both to the GitHub Release.
-#
-# To activate: this file must live at .github/workflows/release.yml. Pushing a
-# workflow file needs a token with the `workflow` scope:
-#   gh auth refresh -s workflow
-#   git mv packaging/ci/release.yml .github/workflows/release.yml && git commit && git push
-# Then cut a release:  git tag v0.1.0 && git push origin v0.1.0
+# bundle and attach both to the GitHub Release.  Cut a release with:
+#   git tag v0.1.0 && git push origin v0.1.0
 name: release
 on:
   push:
