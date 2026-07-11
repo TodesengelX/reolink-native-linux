@@ -152,4 +152,53 @@ ApplicationWindow {
     function openPopout(row, label) {
         popoutComponent.createObject(window, { deviceRow: row, label: label });
     }
+
+    // Transient status toast for one-shot camera actions (snapshot, siren,
+    // floodlight). These fire on the device but gave no on-screen confirmation,
+    // so they felt like dead buttons; this surfaces success/failure.
+    Rectangle {
+        id: toast
+        z: 300
+        property bool isError: false
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 48
+        radius: Theme.radius
+        color: isError ? Theme.danger : Theme.surfaceAlt
+        border.color: isError ? Theme.danger : Theme.border
+        width: Math.min(toastLabel.implicitWidth + 28, window.width - 80)
+        height: toastLabel.implicitHeight + 18
+        opacity: 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+        Text {
+            id: toastLabel
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, window.width - 108)
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+            color: Theme.text
+            font.pixelSize: 13
+        }
+        Timer { id: toastTimer; interval: 2600; onTriggered: toast.opacity = 0 }
+        function show(msg, err) {
+            toastLabel.text = msg;
+            toast.isError = err === true;
+            toast.opacity = 1.0;
+            toastTimer.restart();
+        }
+    }
+    Connections {
+        target: Devices
+        function onSnapshotSaved(row, path) { toast.show(qsTr("Snapshot saved"), false); }
+        function onSnapshotFailed(row, error) { toast.show(qsTr("Snapshot failed: %1").arg(error), true); }
+        function onSettingApplied(row, command, ok, error) {
+            if (command === "AudioAlarmPlay")
+                toast.show(ok ? qsTr("Siren triggered") : qsTr("Siren failed: %1").arg(error), !ok);
+            else if (command === "SetWhiteLed")
+                toast.show(ok ? qsTr("Floodlight toggled") : qsTr("Floodlight failed: %1").arg(error), !ok);
+            else if (!ok)
+                toast.show(qsTr("%1 failed: %2").arg(command).arg(error), true);
+        }
+    }
 }

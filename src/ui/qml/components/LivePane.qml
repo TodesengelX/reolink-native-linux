@@ -30,6 +30,7 @@ Rectangle {
     property bool capFloodlight: false
     property bool capTalk: false
     property bool talkActive: false
+    property bool floodOn: false // white-LED/floodlight on state (optimistic)
 
     // User stream-quality preference: false = Fluent (sub), true = Clear (main).
     // This alone decides which stream plays — so the SD/HD toolbar toggle works in
@@ -293,11 +294,14 @@ Rectangle {
             ToolButton {
                 glyph: "📢"; enabledTool: root.capSiren
                 onActivated: Devices.applySetting(root.deviceRow, "AudioAlarmPlay",
-                    { "AudioAlarmPlay": { "channel": 0, "manual": 1, "alarm_mode": "manul" } })
+                    { "AudioAlarmPlay": { "channel": Devices.channelOf(root.deviceRow), "manual": 1, "alarm_mode": "manul" } })
             }
             ToolButton {
-                glyph: "💡"; enabledTool: root.capFloodlight
-                onActivated: {} // floodlight toggle wires with SetWhiteLed (M9)
+                glyph: "💡"; active: root.floodOn; enabledTool: root.capFloodlight
+                onActivated: {
+                    root.floodOn = !root.floodOn;       // optimistic; toast confirms
+                    Devices.toggleFloodlight(root.deviceRow);
+                }
             }
             // Pop out into a detached window (drag to another monitor).
             ToolButton {

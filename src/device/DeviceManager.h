@@ -90,6 +90,13 @@ public:
     {
         return row >= 0 && row < m_entries.size() && m_entries.at(row).isAdmin;
     }
+    // This camera's channel index on its host (0 for a standalone camera; the NVR
+    // channel for a fanned-out one). Lets QML target a live action (siren, etc.) at
+    // the correct camera instead of a hardcoded channel 0.
+    Q_INVOKABLE int channelOf(int row) const
+    {
+        return (row >= 0 && row < m_entries.size()) ? m_entries.at(row).channel : 0;
+    }
 
     // Live controls (channel 0). Fire-and-forget on the worker pool.
     Q_INVOKABLE void ptzMove(int row, const QString &op, int speed = 32);
