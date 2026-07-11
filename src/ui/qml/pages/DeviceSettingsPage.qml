@@ -31,6 +31,8 @@ Item {
         { key: "detection", label: qsTr("Detection / Alerts"), cmds: ["GetMdAlarm", "GetAiCfg", "GetPush"] },
         { key: "network",   label: qsTr("Network"),         cmds: ["GetLocalLink", "GetNetPort"] },
         { key: "storage",   label: qsTr("Storage"),         cmds: ["GetHddInfo"] },
+        { key: "users",     label: qsTr("Users"),           cmds: ["GetUser"] },
+        { key: "time",      label: qsTr("Time"),            cmds: ["GetTime", "GetNtp"] },
         { key: "system",    label: qsTr("System"),          cmds: ["GetDevInfo", "GetTime"] }
     ]
 
@@ -176,6 +178,11 @@ Item {
                         case "encoding": return encodingPanel;
                         case "display": return displayPanel;
                         case "detection": return detectionPanel;
+                        case "recording": return recordingPanel;
+                        case "network": return networkPanel;
+                        case "storage": return storagePanel;
+                        case "users": return usersPanel;
+                        case "time": return timePanel;
                         case "system": return systemPanel;
                         default: return genericPanel;
                         }
@@ -460,6 +467,178 @@ Item {
                 HoverHandler { id: rebootHover; enabled: page.isAdmin }
                 TapHandler { enabled: page.isAdmin; onTapped: Devices.reboot(page.deviceRow) }
             }
+        }
+    }
+
+    // A read-only label:value row.
+    component InfoRow: RowLayout {
+        property string label: ""
+        property string value: ""
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        Text { text: parent.label; color: Theme.textMuted; font.pixelSize: 12; Layout.preferredWidth: 160 }
+        Text { text: parent.value.length ? parent.value : "—"; color: Theme.text; font.pixelSize: 12
+               Layout.fillWidth: true; wrapMode: Text.WrapAnywhere }
+    }
+
+    // ---- Recording panel (camera-level) ----
+    Component {
+        id: recordingPanel
+        ColumnLayout {
+            spacing: Theme.spacing
+            SwitchRow {
+                label: qsTr("Overwrite when full"); enabledCtl: page.isAdmin
+                checked: page.val("GetRec","Rec","overwrite") === 1
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetRec",
+                    { "Rec": { "channel": Devices.channelOf(page.deviceRow), "overwrite": v ? 1 : 0 } })
+            }
+            InfoRow { label: qsTr("Scheduled recording")
+                value: page.val("GetRec","Rec","schedule","enable") === 1 ? qsTr("On") : qsTr("Off") }
+            InfoRow { label: qsTr("Pre / post record")
+                value: (page.val("GetRec","Rec","preRec") !== undefined ? page.val("GetRec","Rec","preRec") + qsTr(" min pre") : "")
+                     + (page.val("GetRec","Rec","postRec") ? "  ·  " + page.val("GetRec","Rec","postRec") : "") }
+            Item { Layout.fillHeight: true }
+            Text { text: qsTr("Editing the weekly recording schedule grid is on the roadmap.")
+                   color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+        }
+    }
+
+    // ---- Network panel (host-level, read-only) ----
+    Component {
+        id: networkPanel
+        ColumnLayout {
+            spacing: Theme.spacing
+            InfoRow { label: qsTr("Connection"); value: page.val("GetLocalLink","LocalLink","activeLink") || "" }
+            InfoRow { label: qsTr("Addressing")
+                value: page.val("GetLocalLink","LocalLink","type") === "DHCP" ? qsTr("DHCP") : qsTr("Static") }
+            InfoRow { label: qsTr("IP address"); value: page.val("GetLocalLink","LocalLink","static","ip") || "" }
+            InfoRow { label: qsTr("Gateway"); value: page.val("GetLocalLink","LocalLink","static","gateway") || "" }
+            InfoRow { label: qsTr("Subnet mask"); value: page.val("GetLocalLink","LocalLink","static","mask") || "" }
+            InfoRow { label: qsTr("MAC address"); value: page.val("GetLocalLink","LocalLink","mac") || "" }
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+            Text { text: qsTr("Ports"); color: Theme.text; font.pixelSize: 13; font.bold: true }
+            InfoRow { label: qsTr("RTSP")
+                value: (page.val("GetNetPort","NetPort","rtspPort") || "—")
+                     + (page.val("GetNetPort","NetPort","rtspEnable") === 1 ? "" : qsTr("  (disabled)")) }
+            InfoRow { label: qsTr("ONVIF")
+                value: (page.val("GetNetPort","NetPort","onvifPort") || "—")
+                     + (page.val("GetNetPort","NetPort","onvifEnable") === 1 ? "" : qsTr("  (disabled)")) }
+            InfoRow { label: qsTr("HTTPS")
+                value: (page.val("GetNetPort","NetPort","httpsPort") || "—")
+                     + (page.val("GetNetPort","NetPort","httpsEnable") === 1 ? "" : qsTr("  (disabled)")) }
+            Item { Layout.fillHeight: true }
+            Text { text: qsTr("Port and IP changes are read-only here — editing them from the app could lock out access.")
+                   color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+        }
+    }
+
+    // ---- Storage panel (host-level, read-only) ----
+    Component {
+        id: storagePanel
+        ColumnLayout {
+            spacing: Theme.spacing
+            Repeater {
+                model: page.val("GetHddInfo","HddInfo") || []
+                delegate: ColumnLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    InfoRow { label: qsTr("Disk %1").arg((modelData.number !== undefined ? modelData.number : 0) + 1)
+                        value: (modelData.storageType || qsTr("Disk"))
+                             + "  ·  " + Math.round((modelData.capacity || 0) / 1024) + qsTr(" GB")
+                             + "  ·  " + Math.round((modelData.size || 0) / 1024) + qsTr(" GB free")
+                             + (modelData.mount ? "" : qsTr("  ·  not mounted"))
+                             + (modelData.format ? "" : qsTr("  ·  unformatted")) }
+                }
+            }
+            Text { visible: (page.val("GetHddInfo","HddInfo") || []).length === 0
+                   text: page.status === "" ? qsTr("No storage reported.") : qsTr("Loading…")
+                   color: Theme.textMuted; font.pixelSize: 12 }
+            Item { Layout.fillHeight: true }
+            Text { text: qsTr("Formatting a disk (which erases all recordings) will land behind a confirmation step.")
+                   color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+        }
+    }
+
+    // ---- Users panel (host-level, read-only list) ----
+    Component {
+        id: usersPanel
+        ColumnLayout {
+            spacing: Theme.spacing
+            Repeater {
+                model: page.val("GetUser","User") || []
+                delegate: RowLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    Text { text: "👤"; font.pixelSize: 12 }
+                    Text { text: modelData.userName || "—"; color: Theme.text; font.pixelSize: 13; Layout.fillWidth: true }
+                    Rectangle {
+                        radius: 3; color: Theme.surfaceAlt; border.color: Theme.border
+                        implicitWidth: lvl.implicitWidth + 12; implicitHeight: lvl.implicitHeight + 4
+                        Text { id: lvl; anchors.centerIn: parent
+                               text: modelData.level || ""; color: Theme.textMuted; font.pixelSize: 11 }
+                    }
+                }
+            }
+            Text { visible: (page.val("GetUser","User") || []).length === 0
+                   text: page.status === "" ? qsTr("No users reported.") : qsTr("Loading…")
+                   color: Theme.textMuted; font.pixelSize: 12 }
+            Item { Layout.fillHeight: true }
+            Text { text: qsTr("Adding/removing users and changing passwords is on the roadmap.")
+                   color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+        }
+    }
+
+    // ---- Time panel (host-level) ----
+    Component {
+        id: timePanel
+        ColumnLayout {
+            spacing: Theme.spacing
+            InfoRow { label: qsTr("Device time")
+                value: {
+                    var t = page.val("GetTime","Time");
+                    if (!t) return "";
+                    function pad(n) { return String(n).padStart(2, "0"); }
+                    return t.year + "-" + pad(t.mon) + "-" + pad(t.day) + "  "
+                         + pad(t.hour) + ":" + pad(t.min) + ":" + pad(t.sec);
+                } }
+            InfoRow { label: qsTr("Time zone")
+                value: {
+                    var tz = page.val("GetTime","Time","timeZone");
+                    if (tz === undefined) return "";
+                    var h = -tz / 3600; // Reolink stores seconds west of UTC
+                    return "UTC" + (h >= 0 ? "+" : "") + h;
+                } }
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+            Text { text: qsTr("Network time (NTP)"); color: Theme.text; font.pixelSize: 13; font.bold: true }
+            SwitchRow {
+                label: qsTr("Sync from NTP"); enabledCtl: page.isAdmin
+                checked: page.val("GetNtp","Ntp","enable") === 1
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetNtp",
+                    { "Ntp": { "enable": v ? 1 : 0,
+                               "server": page.val("GetNtp","Ntp","server") || "pool.ntp.org",
+                               "port": page.val("GetNtp","Ntp","port") || 123,
+                               "interval": page.val("GetNtp","Ntp","interval") || 1440 } })
+            }
+            RowLayout {
+                Layout.fillWidth: true; spacing: Theme.spacing
+                Text { text: qsTr("NTP server"); color: Theme.textMuted; font.pixelSize: 12; Layout.preferredWidth: 160 }
+                TextField {
+                    id: ntpServer
+                    Layout.fillWidth: true
+                    enabled: page.isAdmin
+                    text: page.val("GetNtp","Ntp","server") || ""
+                    color: Theme.text
+                    background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: 4 }
+                    onEditingFinished: if (text.length > 0) Devices.applySetting(page.deviceRow, "SetNtp",
+                        { "Ntp": { "enable": page.val("GetNtp","Ntp","enable") || 1, "server": text,
+                                   "port": page.val("GetNtp","Ntp","port") || 123,
+                                   "interval": page.val("GetNtp","Ntp","interval") || 1440 } })
+                }
+            }
+            Item { Layout.fillHeight: true }
+            Text { text: qsTr("Time zone / manual-clock editing is on the roadmap.")
+                   color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
         }
     }
 
