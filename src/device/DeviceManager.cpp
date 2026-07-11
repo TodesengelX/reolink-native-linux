@@ -932,7 +932,12 @@ void DeviceManager::fetchSettings(int row, const QStringList &getCommands)
             api::CommandResult r;
             for (int attempt = 0; attempt < 3; ++attempt) {
                 r = client->callOne(c, Json{{"channel", ch}}, attempt == 1 ? 0 : 1);
-                if (r.ok)
+                // Stop on success, or on a DEFINITIVE device error (rspCode set —
+                // e.g. -9 "not supported"): only a transport-level failure (a
+                // transient gateway 502, where rspCode stays 0) is worth retrying.
+                // Retrying a command the device simply doesn't offer just hammers a
+                // connection-limited NVR for nothing.
+                if (r.ok || r.rspCode != 0)
                     break;
                 QThread::msleep(400);
             }
