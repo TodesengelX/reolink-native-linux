@@ -206,7 +206,7 @@ Item {
                     checked: page.val("GetEnc","Enc","audio") === 1
                     enabled: page.isAdmin
                     onToggled: Devices.applySetting(page.deviceRow, "SetEnc",
-                        { "Enc": { "channel": 0, "audio": checked ? 1 : 0 } })
+                        { "Enc": { "channel": Devices.channelOf(page.deviceRow), "audio": checked ? 1 : 0 } })
                 }
             }
             Item { Layout.fillHeight: true }
@@ -228,7 +228,7 @@ Item {
                     checked: page.val("GetOsd","Osd","osdChannel","enable") === 1
                     enabled: page.isAdmin
                     onToggled: Devices.applySetting(page.deviceRow, "SetOsd",
-                        { "Osd": { "channel": 0, "osdChannel": { "enable": checked ? 1 : 0 } } })
+                        { "Osd": { "channel": Devices.channelOf(page.deviceRow), "osdChannel": { "enable": checked ? 1 : 0 } } })
                 }
             }
             SettingRow {
@@ -237,7 +237,7 @@ Item {
                     checked: page.val("GetOsd","Osd","osdTime","enable") === 1
                     enabled: page.isAdmin
                     onToggled: Devices.applySetting(page.deviceRow, "SetOsd",
-                        { "Osd": { "channel": 0, "osdTime": { "enable": checked ? 1 : 0 } } })
+                        { "Osd": { "channel": Devices.channelOf(page.deviceRow), "osdTime": { "enable": checked ? 1 : 0 } } })
                 }
             }
             SettingRow {
@@ -249,7 +249,7 @@ Item {
                     color: Theme.text
                     background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: 4 }
                     onEditingFinished: Devices.applySetting(page.deviceRow, "SetOsd",
-                        { "Osd": { "channel": 0, "osdChannel": { "name": text } } })
+                        { "Osd": { "channel": Devices.channelOf(page.deviceRow), "osdChannel": { "name": text } } })
                 }
             }
             Item { Layout.fillHeight: true }

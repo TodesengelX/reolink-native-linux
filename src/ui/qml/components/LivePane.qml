@@ -293,8 +293,11 @@ Rectangle {
             }
             ToolButton {
                 glyph: "📢"; enabledTool: root.capSiren
+                // AudioAlarmPlay takes its fields FLAT in param (verified on real
+                // firmware — a Set*-style wrapped object gets rspCode -4 "param
+                // error"). alarm_mode "times"/1 sounds a single blast.
                 onActivated: Devices.applySetting(root.deviceRow, "AudioAlarmPlay",
-                    { "AudioAlarmPlay": { "channel": Devices.channelOf(root.deviceRow), "manual": 1, "alarm_mode": "manul" } })
+                    { "alarm_mode": "times", "times": 1, "channel": Devices.channelOf(root.deviceRow) })
             }
             ToolButton {
                 glyph: "💡"; active: root.floodOn; enabledTool: root.capFloodlight
