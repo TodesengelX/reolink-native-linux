@@ -14,6 +14,7 @@
 #include <QSet>
 #include <QUrl>
 #include <QVariant>
+#include <QThread>
 #include <QtConcurrent/QtConcurrent>
 
 namespace rl {
@@ -917,28 +918,50 @@ void DeviceManager::fetchSettings(int row, const QStringList &getCommands)
         return;
     }
     const int ch = m_entries.at(row).channel;
-    Json cmds = Json::array();
-    for (const QString &c : getCommands)
-        cmds.push_back(api::command(c, Json{{"channel", ch}}, /*action=*/1));
-
-    m_pending.addFuture(QtConcurrent::run([this, client, row, cmds] {
-        const api::BatchResult batch = client->call(cmds);
+    m_pending.addFuture(QtConcurrent::run([this, client, row, ch, getCommands] {
         QVariantMap values;
-        QString error;
-        if (batch.transportOk) {
-            for (const api::CommandResult &r : batch.results)
+        QStringList failed;
+        QString lastError;
+        for (const QString &c : getCommands) {
+            // Fetch each command on its own so one failure doesn't sink the panel.
+            // NVRs (e.g. RLN8-410) intermittently return HTTP 502 when proxying a
+            // camera's image/ISP/IR commands under load (streaming several cameras
+            // while a settings fetch lands). It's transient, so retry a few times
+            // with a short backoff, trying the lighter action=0 on the 2nd attempt
+            // (value only — the range query is heavier); only then give up.
+            api::CommandResult r;
+            for (int attempt = 0; attempt < 3; ++attempt) {
+                r = client->callOne(c, Json{{"channel", ch}}, attempt == 1 ? 0 : 1);
                 if (r.ok)
-                    values.insert(r.cmd, api::toVariant(r.value));
-        } else {
-            error = batch.error.isEmpty() ? tr("settings fetch failed") : batch.error;
+                    break;
+                QThread::msleep(400);
+            }
+            if (r.ok) {
+                values.insert(c, api::toVariant(r.value));
+            } else {
+                failed.append(c);
+                if (!r.detail.isEmpty())
+                    lastError = r.detail;
+            }
         }
         QMetaObject::invokeMethod(
             this,
-            [this, row, values, error] {
-                if (error.isEmpty())
-                    emit settingsLoaded(row, values);
-                else
-                    emit settingsFailed(row, error);
+            [this, row, values, failed, lastError] {
+                if (values.isEmpty()) {
+                    emit settingsFailed(row, lastError.isEmpty() ? tr("settings fetch failed")
+                                                                 : lastError);
+                    return;
+                }
+                // Report which commands the device refused so panels can show an
+                // honest "unavailable" state instead of misleading defaults.
+                QVariantMap v = values;
+                if (!failed.isEmpty()) {
+                    QVariantList f;
+                    for (const QString &c : failed)
+                        f.append(c);
+                    v.insert(QStringLiteral("_failed"), f);
+                }
+                emit settingsLoaded(row, v);
             },
             Qt::QueuedConnection);
     }));

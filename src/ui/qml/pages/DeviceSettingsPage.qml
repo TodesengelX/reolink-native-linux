@@ -41,8 +41,12 @@ Item {
             if (categories[i].key === key) return categories[i].cmds;
         return [];
     }
+    property bool fetched: false     // a fetch has completed (values may be partial)
+    function has(cmd) { return page.settings.hasOwnProperty(cmd); }
+
     function fetch() {
         page.settings = ({});
+        page.fetched = false;
         if (page.deviceRow >= 0) {
             page.status = qsTr("Loading…");
             Devices.fetchSettings(page.deviceRow, cmdsFor(page.category));
@@ -63,10 +67,15 @@ Item {
     Connections {
         target: Devices
         function onSettingsLoaded(row, values) {
-            if (row === page.deviceRow) { page.settings = values; page.status = ""; }
+            if (row === page.deviceRow) {
+                page.settings = values;
+                page.fetched = true;
+                var f = values["_failed"] || [];
+                page.status = f.length > 0 ? qsTr("%1 unavailable on this device").arg(f.join(", ")) : "";
+            }
         }
         function onSettingsFailed(row, error) {
-            if (row === page.deviceRow) page.status = error;
+            if (row === page.deviceRow) { page.fetched = true; page.status = error; }
         }
         function onSettingApplied(row, command, ok, error) {
             if (row === page.deviceRow)
@@ -253,10 +262,25 @@ Item {
     // ---- Image panel (brightness/contrast/… + day-night + IR) -------------
     Component {
         id: imagePanel
-        ColumnLayout {
-            spacing: Theme.spacing
-            SliderRow {
-                label: qsTr("Brightness"); enabledCtl: page.isAdmin
+        Item {
+            // The NVR refused these camera commands (some proxy image/ISP poorly and
+            // return HTTP 502) — say so instead of showing fake default sliders.
+            ColumnLayout {
+                anchors.fill: parent
+                visible: page.fetched && !page.has("GetImage")
+                spacing: Theme.spacing
+                Text { text: qsTr("Image settings couldn't be loaded from this camera.")
+                       color: Theme.text; font.pixelSize: 14; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                Text { text: qsTr("The NVR returned an error proxying this camera's image/ISP commands (often HTTP 502). They may need to be changed on the camera directly or in the NVR's own menu.")
+                       color: Theme.textMuted; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                Item { Layout.fillHeight: true }
+            }
+            ColumnLayout {
+                anchors.fill: parent
+                visible: !(page.fetched && !page.has("GetImage"))
+                spacing: Theme.spacing
+                SliderRow {
+                    label: qsTr("Brightness"); enabledCtl: page.isAdmin
                 value: page.val("GetImage","Image","bright") || 128
                 onCommit: (v) => Devices.applySetting(page.deviceRow, "SetImage",
                     { "Image": { "channel": Devices.channelOf(page.deviceRow), "bright": v } })
@@ -295,9 +319,10 @@ Item {
                     { "IrLights": { "channel": Devices.channelOf(page.deviceRow), "state": v } })
             }
             Item { Layout.fillHeight: true }
-            Text {
-                text: qsTr("Changes apply on release. Options come from the camera's GetImage/GetIsp ranges.")
-                color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap
+                Text {
+                    text: qsTr("Changes apply on release. Options come from the camera's GetImage/GetIsp ranges.")
+                    color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap
+                }
             }
         }
     }
