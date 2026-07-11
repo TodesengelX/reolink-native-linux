@@ -27,7 +27,7 @@ Item {
         { key: "image",     label: qsTr("Image"),           cmds: [] },
         { key: "display",   label: qsTr("Display / OSD"),    cmds: ["GetOsd"] },
         { key: "encoding",  label: qsTr("Encoding"),        cmds: ["GetEnc"] },
-        { key: "recording", label: qsTr("Recording"),       cmds: ["GetRec"] },
+        { key: "recording", label: qsTr("Recording"),       cmds: [] },
         { key: "detection", label: qsTr("Detection / Alerts"), cmds: ["GetMdAlarm", "GetAiCfg"] },
         { key: "network",   label: qsTr("Network"),         cmds: ["GetLocalLink", "GetNetPort"] },
         { key: "storage",   label: qsTr("Storage"),         cmds: ["GetHddInfo"] },
@@ -56,6 +56,9 @@ Item {
     // Per-AI-type detection config over Baichuan (cmd 342), keyed by type
     // (people/vehicle/dog_cat) -> flat map incl. sensitivity/stayTime.
     property var aiSens: ({})
+    // Recording config over Baichuan (cmd 54 flat map).
+    property var rec: ({})
+    property bool recReady: false
     function aiBody(type) {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<AiDetectCfg version=\"1.1\">\n<chn>"
              + Devices.channelOf(page.deviceRow) + "</chn>\n<type>" + type + "</type>\n</AiDetectCfg>\n</body>\n";
@@ -79,6 +82,11 @@ Item {
                 page.img = ({});
                 page.imgReady = false;
                 Devices.fetchBcConfig(page.deviceRow, 26);
+            }
+            if (page.category === "recording") {
+                page.rec = ({});
+                page.recReady = false;
+                Devices.fetchBcConfig(page.deviceRow, 54);
             }
         } else {
             page.status = qsTr("Select a device");
@@ -120,6 +128,8 @@ Item {
                 Devices.fetchAlerts(page.deviceRow);
             if (command === "Set25")   // image write over Baichuan
                 Devices.fetchBcConfig(page.deviceRow, 26);
+            if (command === "Set55")   // recording write over Baichuan
+                Devices.fetchBcConfig(page.deviceRow, 54);
             if (command === "Set343") {   // AI sensitivity write over Baichuan
                 var ts = ["people", "vehicle", "dog_cat"];
                 for (var i = 0; i < ts.length; i++)
@@ -140,6 +150,9 @@ Item {
                 var a = Object.assign({}, page.aiSens);
                 a[values.type] = values;
                 page.aiSens = a;
+            } else if (cmdId === 54) {
+                page.rec = values;
+                page.recReady = true;
             }
         }
     }
@@ -392,9 +405,22 @@ Item {
                     checked: parseInt(page.img.flip || "0") === 1
                     onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 26, 25, { "flip": v ? 1 : 0 })
                 }
+                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+                EnumRow {
+                    label: qsTr("Day / Night"); enabledCtl: page.isAdmin
+                    options: ["auto", "color", "blackAndWhite"]
+                    value: page.img["DayNight/mode"] || "auto"
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 26, 25, { "DayNight/mode": v })
+                }
+                EnumRow {
+                    label: qsTr("Day/Night threshold"); enabledCtl: page.isAdmin
+                    options: ["low", "medium", "high"]
+                    value: page.img["DayNight/Threshold"] || "medium"
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 26, 25, { "DayNight/Threshold": v })
+                }
                 Item { Layout.fillHeight: true }
                 Text {
-                    text: qsTr("Over the native Baichuan protocol — no web-server timeouts. Day/Night and IR controls are coming.")
+                    text: qsTr("Over the native Baichuan protocol — no web-server timeouts.")
                     color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap
                 }
             }
@@ -621,22 +647,41 @@ Item {
     // ---- Recording panel (camera-level) ----
     Component {
         id: recordingPanel
-        ColumnLayout {
-            spacing: Theme.spacing
-            SwitchRow {
-                label: qsTr("Overwrite when full"); enabledCtl: page.isAdmin
-                checked: page.val("GetRec","Rec","overwrite") === 1
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetRec",
-                    { "Rec": { "channel": Devices.channelOf(page.deviceRow), "overwrite": v ? 1 : 0 } })
+        Item {
+            property bool noData: page.recReady && Object.keys(page.rec).length === 0
+            ColumnLayout {
+                anchors.fill: parent
+                visible: parent.noData
+                spacing: Theme.spacing
+                Text { text: qsTr("Recording settings couldn't be read from the device.")
+                       color: Theme.text; font.pixelSize: 14; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                Item { Layout.fillHeight: true }
             }
-            InfoRow { label: qsTr("Scheduled recording")
-                value: page.val("GetRec","Rec","schedule","enable") === 1 ? qsTr("On") : qsTr("Off") }
-            InfoRow { label: qsTr("Pre / post record")
-                value: (page.val("GetRec","Rec","preRec") !== undefined ? page.val("GetRec","Rec","preRec") + qsTr(" min pre") : "")
-                     + (page.val("GetRec","Rec","postRec") ? "  ·  " + page.val("GetRec","Rec","postRec") : "") }
-            Item { Layout.fillHeight: true }
-            Text { text: qsTr("Editing the weekly recording schedule grid is on the roadmap.")
-                   color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+            ColumnLayout {
+                anchors.fill: parent
+                visible: !parent.noData
+                spacing: Theme.spacing
+                SwitchRow {
+                    label: qsTr("Overwrite when full"); enabledCtl: page.isAdmin
+                    checked: parseInt(page.rec.cycle || "1") === 1
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 54, 55, { "cycle": v ? 1 : 0 })
+                }
+                SliderRow {
+                    label: qsTr("Pre-record (s)"); from: 0; to: 15; enabledCtl: page.isAdmin
+                    value: parseInt(page.rec.preRecordTime || "0")
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 54, 55, { "preRecordTime": v })
+                }
+                SliderRow {
+                    label: qsTr("Post-record (s)"); from: 0; to: 300; enabledCtl: page.isAdmin
+                    value: parseInt(page.rec.recordDelayTime || "0")
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 54, 55, { "recordDelayTime": v })
+                }
+                InfoRow { label: qsTr("File split")
+                    value: (page.rec.packageTime !== undefined ? page.rec.packageTime + qsTr(" min") : "") }
+                Item { Layout.fillHeight: true }
+                Text { text: qsTr("Over native Baichuan. The weekly schedule grid is on the roadmap.")
+                       color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+            }
         }
     }
 

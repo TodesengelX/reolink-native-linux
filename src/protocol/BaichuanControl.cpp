@@ -272,14 +272,26 @@ QVariantMap BaichuanControl::getConfigFlat(quint32 cmdId, int channel, const QBy
     if (xml.isEmpty())
         return out;
     QXmlStreamReader r(xml);
-    QString tag;
+    QStringList stack;
     while (!r.atEnd()) {
         const auto tok = r.readNext();
         if (tok == QXmlStreamReader::StartElement) {
-            tag = r.name().toString();
-        } else if (tok == QXmlStreamReader::Characters && !r.isWhitespace() && !tag.isEmpty()) {
-            if (!out.contains(tag)) // first occurrence wins
-                out.insert(tag, r.text().toString());
+            stack.append(r.name().toString());
+        } else if (tok == QXmlStreamReader::EndElement) {
+            if (!stack.isEmpty())
+                stack.removeLast();
+        } else if (tok == QXmlStreamReader::Characters && !r.isWhitespace() && !stack.isEmpty()) {
+            const QString tag = stack.last();
+            const QString text = r.text().toString();
+            // Flat leaf tag (first occurrence wins) AND a "parent/tag" path key, so
+            // ambiguous tags like DayNight/mode (vs anti-flicker mode) are reachable.
+            if (!out.contains(tag))
+                out.insert(tag, text);
+            if (stack.size() >= 2) {
+                const QString path = stack.at(stack.size() - 2) + '/' + tag;
+                if (!out.contains(path))
+                    out.insert(path, text);
+            }
         }
     }
     return out;
@@ -292,15 +304,32 @@ bool BaichuanControl::writeFields(quint32 getCmdId, quint32 setCmdId, int channe
     if (xml.isEmpty())
         return false;
     for (auto it = changes.constBegin(); it != changes.constEnd(); ++it) {
-        const QByteArray open = "<" + it.key().toUtf8() + ">";
-        const QByteArray close = "</" + it.key().toUtf8() + ">";
-        const int a = xml.indexOf(open);
+        const QByteArray key = it.key().toUtf8();
+        const QByteArray val = it.value().toString().toUtf8();
+        const int slash = key.indexOf('/');
+        int searchFrom = 0;
+        QByteArray child = key;
+        if (slash >= 0) {
+            // "parent/child": scope the search to inside the parent element so an
+            // ambiguous child tag (e.g. DayNight/mode) hits the right one.
+            const QByteArray parent = key.left(slash);
+            child = key.mid(slash + 1);
+            int p = xml.indexOf("<" + parent + ">");
+            if (p < 0)
+                p = xml.indexOf("<" + parent + " "); // element with attributes
+            if (p < 0)
+                continue;
+            searchFrom = p;
+        }
+        const QByteArray open = "<" + child + ">";
+        const QByteArray close = "</" + child + ">";
+        const int a = xml.indexOf(open, searchFrom);
         if (a < 0)
             continue;
         const int b = xml.indexOf(close, a + open.size());
         if (b < 0)
             continue;
-        xml = xml.left(a + open.size()) + it.value().toString().toUtf8() + xml.mid(b);
+        xml = xml.left(a + open.size()) + val + xml.mid(b);
     }
     quint16 status = 0;
     transact(setCmdId, channel, xml, &status);
