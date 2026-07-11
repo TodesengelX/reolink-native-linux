@@ -70,8 +70,13 @@ Item {
         page.settings = ({});
         page.fetched = false;
         if (page.deviceRow >= 0) {
-            page.status = qsTr("Loading…");
-            Devices.fetchSettings(page.deviceRow, cmdsFor(page.category));
+            // Baichuan-only categories (Image, Recording) have no HTTP Get*
+            // commands — don't fire an empty fetchSettings (it reports "device not
+            // ready"); their BC fetches below drive their own loading state.
+            var httpCmds = cmdsFor(page.category);
+            page.status = httpCmds.length > 0 ? qsTr("Loading…") : "";
+            if (httpCmds.length > 0)
+                Devices.fetchSettings(page.deviceRow, httpCmds);
             if (page.category === "detection") {
                 page.alerts = ({});
                 Devices.fetchAlerts(page.deviceRow);
