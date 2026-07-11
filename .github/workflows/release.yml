@@ -29,13 +29,25 @@ jobs:
         run: |
           cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
+      - name: Get linuxdeploy
+        run: |
+          cd /tmp
+          for tool in linuxdeploy linuxdeploy-plugin-qt; do
+            wget -q "https://github.com/linuxdeploy/$tool/releases/download/continuous/$tool-x86_64.AppImage" -O "$tool"
+            chmod +x "$tool"
+          done
+          echo "/tmp" >> "$GITHUB_PATH"
       - name: Package AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          OUTPUT: reolink-native-linux-x86_64.AppImage
         run: bash packaging/appimage/build-appimage.sh
       - uses: actions/upload-artifact@v4
         with: { name: appimage, path: '*.AppImage' }
 
   flatpak:
     runs-on: ubuntu-latest
+    continue-on-error: true
     container:
       image: bilelmoussaoui/flatpak-github-actions:kde-6.7
       options: --privileged
@@ -51,12 +63,15 @@ jobs:
 
   release:
     needs: [appimage, flatpak]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
+        with: { merge-multiple: true }
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            appimage/*.AppImage
-            flatpak/reolink-native-linux.flatpak
+            *.AppImage
+            *.flatpak
+          fail_on_unmatched_files: false
           generate_release_notes: true
