@@ -119,8 +119,13 @@ BaichuanClient::BaichuanClient(Params params) : m_p(std::move(params)) {}
 BaichuanClient::~BaichuanClient()
 {
     stop();
+    // Join (not detach): the worker touches our members, so it must finish before
+    // they are destroyed. It never holds a reference to us, so this can't
+    // self-deadlock, and every network wait is short + abort-checked, so the join
+    // is bounded (sub-second). The last owning reference is dropped by the
+    // StreamPlayer decode worker, so this runs off the GUI thread in practice.
     if (m_thread.joinable())
-        m_thread.detach(); // never block a caller thread on network teardown
+        m_thread.join();
 }
 
 void BaichuanClient::start()
@@ -194,11 +199,13 @@ bool BaichuanClient::connectAndLogin(QTcpSocket &sock, QByteArray &aesKey)
 
     QByteArray netBuf;
     auto recvMatch = [&](quint16 wantMsgNum, Msg &out) -> bool {
-        for (int i = 0; i < 20 && !m_abort.load(); ++i) {
+        // Short per-wait timeout so abort (destruction) is honored within ~0.3s;
+        // the loop count still allows several seconds total for a slow login.
+        for (int i = 0; i < 40 && !m_abort.load(); ++i) {
             while (parseMessage(netBuf, out))
                 if (out.msgNum == wantMsgNum)
                     return true;
-            if (!sock.waitForReadyRead(3000))
+            if (!sock.waitForReadyRead(300))
                 continue;
             netBuf.append(sock.readAll());
         }
@@ -321,14 +328,20 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
 
     QByteArray netBuf = m_streamTail;
     Msg m;
+    int stalls = 0;
     while (!m_abort.load()) {
         if (!parseMessage(netBuf, m)) {
-            if (!sock.waitForReadyRead(1200)) {
-                // Recorded playback bursts then stalls unless kept alive.
-                sock.write(frame(93, m_p.channel, 0, 99, 0, 0x6414, QByteArray()));
-                sock.flush();
+            // Short wait so abort is honored quickly; recorded playback bursts then
+            // stalls, so nudge it with a keep-alive after ~1s of silence.
+            if (!sock.waitForReadyRead(300)) {
+                if (++stalls >= 4) {
+                    stalls = 0;
+                    sock.write(frame(93, m_p.channel, 0, 99, 0, 0x6414, QByteArray()));
+                    sock.flush();
+                }
                 continue;
             }
+            stalls = 0;
             netBuf.append(sock.readAll());
             continue;
         }
