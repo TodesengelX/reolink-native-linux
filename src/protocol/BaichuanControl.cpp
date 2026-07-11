@@ -3,6 +3,7 @@
 #include "protocol/BcCrypto.h"
 
 #include <QTcpSocket>
+#include <QXmlStreamReader>
 #include <QtEndian>
 
 namespace rl {
@@ -262,6 +263,48 @@ int BaichuanControl::readEnable(quint32 getCmdId, int channel)
     if (b < 0)
         return -1;
     return xml.mid(a + 8, b - a - 8).trimmed().toInt();
+}
+
+QVariantMap BaichuanControl::getConfigFlat(quint32 cmdId, int channel, const QByteArray &reqBody)
+{
+    QVariantMap out;
+    const QByteArray xml = transact(cmdId, channel, reqBody);
+    if (xml.isEmpty())
+        return out;
+    QXmlStreamReader r(xml);
+    QString tag;
+    while (!r.atEnd()) {
+        const auto tok = r.readNext();
+        if (tok == QXmlStreamReader::StartElement) {
+            tag = r.name().toString();
+        } else if (tok == QXmlStreamReader::Characters && !r.isWhitespace() && !tag.isEmpty()) {
+            if (!out.contains(tag)) // first occurrence wins
+                out.insert(tag, r.text().toString());
+        }
+    }
+    return out;
+}
+
+bool BaichuanControl::writeFields(quint32 getCmdId, quint32 setCmdId, int channel,
+                                  const QVariantMap &changes, const QByteArray &getBody)
+{
+    QByteArray xml = transact(getCmdId, channel, getBody);
+    if (xml.isEmpty())
+        return false;
+    for (auto it = changes.constBegin(); it != changes.constEnd(); ++it) {
+        const QByteArray open = "<" + it.key().toUtf8() + ">";
+        const QByteArray close = "</" + it.key().toUtf8() + ">";
+        const int a = xml.indexOf(open);
+        if (a < 0)
+            continue;
+        const int b = xml.indexOf(close, a + open.size());
+        if (b < 0)
+            continue;
+        xml = xml.left(a + open.size()) + it.value().toString().toUtf8() + xml.mid(b);
+    }
+    quint16 status = 0;
+    transact(setCmdId, channel, xml, &status);
+    return status == 200 || status == 201 || status == 300;
 }
 
 bool BaichuanControl::writeEnable(quint32 getCmdId, quint32 setCmdId, int channel, bool enable)

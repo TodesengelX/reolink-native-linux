@@ -163,6 +163,15 @@ public:
     Q_INVOKABLE void fetchAlerts(int row);
     Q_INVOKABLE void setAlertEnable(int row, const QString &kind, bool enable);
 
+    // Generic settings over Baichuan: read a command's config into a flat
+    // { tag: value } map (emits bcConfigLoaded), and read-modify-write leaf tags
+    // (emits settingApplied("Set<setCmd>", ...)). reqBody is the optional GET
+    // request XML some commands need (e.g. AI detection selects an ai_type).
+    // These bypass the 502-prone HTTP-CGI, like the official apps.
+    Q_INVOKABLE void fetchBcConfig(int row, int cmdId, const QString &reqBody = QString());
+    Q_INVOKABLE void writeBcConfig(int row, int getCmd, int setCmd, const QVariantMap &changes,
+                                   const QString &reqBody = QString());
+
 signals:
     void countChanged();
     void deviceError(const QString &addr, const QString &message);
@@ -177,6 +186,7 @@ signals:
     void settingsFailed(int row, const QString &error);
     void settingApplied(int row, const QString &command, bool ok, const QString &error);
     void alertsLoaded(int row, const QVariantMap &values);
+    void bcConfigLoaded(int row, int cmdId, const QVariantMap &values);
     // Emitted on each detection 0->1 transition (feeds the event inbox).
     void detectionEvent(qint64 hostId, int channel, const QString &type, const QString &camera);
 

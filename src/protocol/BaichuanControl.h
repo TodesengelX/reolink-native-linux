@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QVariantMap>
 
 #include <cstdint>
 #include <memory>
@@ -52,6 +53,18 @@ public:
     // Read-modify-write the <enable> flag: GET getCmdId, flip <enable>, SET setCmdId.
     // Returns true on a success status (200/201/300).
     bool writeEnable(quint32 getCmdId, quint32 setCmdId, int channel, bool enable);
+
+    // Parse a command's config XML into a flat { leafTag: value } map (first
+    // occurrence of each tag wins — fine because a device config's scalar tags
+    // are unique). reqBody is an optional request XML some GETs need (e.g. AI
+    // detection selects an ai_type in an AiDetectCfg body).
+    QVariantMap getConfigFlat(quint32 cmdId, int channel, const QByteArray &reqBody = {});
+
+    // Read-modify-write several leaf tags in one config: GET, replace each
+    // <tag>…</tag> (first occurrence) with its new value, SET. Returns true on a
+    // success status. getBody is the optional GET request body (see above).
+    bool writeFields(quint32 getCmdId, quint32 setCmdId, int channel,
+                     const QVariantMap &changes, const QByteArray &getBody = {});
 
     // Low-level: send a raw (plaintext) XML body to cmdId and return the decrypted
     // reply. bodyXml empty => header-only GET. Used by the helpers above.

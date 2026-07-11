@@ -24,7 +24,7 @@ Item {
     }
 
     readonly property var categories: [
-        { key: "image",     label: qsTr("Image"),           cmds: ["GetImage", "GetIsp", "GetIrLights"] },
+        { key: "image",     label: qsTr("Image"),           cmds: [] },
         { key: "display",   label: qsTr("Display / OSD"),    cmds: ["GetOsd"] },
         { key: "encoding",  label: qsTr("Encoding"),        cmds: ["GetEnc"] },
         { key: "recording", label: qsTr("Recording"),       cmds: ["GetRec"] },
@@ -48,6 +48,11 @@ Item {
     // HTTP-CGI — keys ok/push/email/ftp, each 0/1 or -1. Empty until loaded.
     property var alerts: ({})
 
+    // Image config over native Baichuan (cmd 26 flat { tag: value } map, values as
+    // strings). imgReady flips true once the first fetch returns.
+    property var img: ({})
+    property bool imgReady: false
+
     function fetch() {
         page.settings = ({});
         page.fetched = false;
@@ -57,6 +62,11 @@ Item {
             if (page.category === "detection") {
                 page.alerts = ({});
                 Devices.fetchAlerts(page.deviceRow);
+            }
+            if (page.category === "image") {
+                page.img = ({});
+                page.imgReady = false;
+                Devices.fetchBcConfig(page.deviceRow, 26);
             }
         } else {
             page.status = qsTr("Select a device");
@@ -96,10 +106,18 @@ Item {
             // the device's confirmed state.
             if (command === "push" || command === "email" || command === "ftp")
                 Devices.fetchAlerts(page.deviceRow);
+            if (command === "Set25")   // image write over Baichuan
+                Devices.fetchBcConfig(page.deviceRow, 26);
         }
         function onAlertsLoaded(row, values) {
             if (row === page.deviceRow)
                 page.alerts = values;
+        }
+        function onBcConfigLoaded(row, cmdId, values) {
+            if (row === page.deviceRow && cmdId === 26) {
+                page.img = values;
+                page.imgReady = true;
+            }
         }
     }
 
@@ -303,80 +321,57 @@ Item {
         Item { Layout.fillWidth: true }
     }
 
-    // ---- Image panel (brightness/contrast/… + day-night + IR) -------------
+    // ---- Image panel (over native Baichuan — no HTTP 502) ----------------
     Component {
         id: imagePanel
         Item {
-            // The NVR refused these camera commands (some proxy image/ISP poorly and
-            // return HTTP 502) — say so instead of showing fake default sliders.
+            property bool noData: page.imgReady && Object.keys(page.img).length === 0
             ColumnLayout {
                 anchors.fill: parent
-                visible: page.fetched && !page.has("GetImage")
+                visible: parent.noData
                 spacing: Theme.spacing
-                Text { text: qsTr("Image settings couldn't be loaded from this camera.")
+                Text { text: qsTr("Image settings couldn't be read from the camera.")
                        color: Theme.text; font.pixelSize: 14; Layout.fillWidth: true; wrapMode: Text.WordWrap }
-                Text { text: qsTr("The NVR returned an error proxying this camera's image/ISP commands (often HTTP 502). They may need to be changed on the camera directly or in the NVR's own menu.")
-                       color: Theme.textMuted; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 Item { Layout.fillHeight: true }
             }
             ColumnLayout {
                 anchors.fill: parent
-                visible: !(page.fetched && !page.has("GetImage"))
+                visible: !parent.noData
                 spacing: Theme.spacing
                 SliderRow {
                     label: qsTr("Brightness"); enabledCtl: page.isAdmin
-                value: page.val("GetImage","Image","bright") || 128
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetImage",
-                    { "Image": { "channel": Devices.channelOf(page.deviceRow), "bright": v } })
-            }
-            SliderRow {
-                label: qsTr("Contrast"); enabledCtl: page.isAdmin
-                value: page.val("GetImage","Image","contrast") || 128
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetImage",
-                    { "Image": { "channel": Devices.channelOf(page.deviceRow), "contrast": v } })
-            }
-            SliderRow {
-                label: qsTr("Saturation"); enabledCtl: page.isAdmin
-                value: page.val("GetImage","Image","saturation") || 128
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetImage",
-                    { "Image": { "channel": Devices.channelOf(page.deviceRow), "saturation": v } })
-            }
-            SliderRow {
-                label: qsTr("Sharpness"); enabledCtl: page.isAdmin
-                value: page.val("GetImage","Image","sharpen") || 128
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetImage",
-                    { "Image": { "channel": Devices.channelOf(page.deviceRow), "sharpen": v } })
-            }
-            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
-            EnumRow {
-                label: qsTr("Day / Night"); enabledCtl: page.isAdmin
-                options: ["Auto", "Color", "Black&White"]
-                value: page.val("GetIsp","Isp","dayNight") || "Auto"
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetIsp",
-                    { "Isp": { "channel": Devices.channelOf(page.deviceRow), "dayNight": v } })
-            }
-            EnumRow {
-                label: qsTr("Infrared lights"); enabledCtl: page.isAdmin
-                options: ["Auto", "On", "Off"]
-                value: page.val("GetIrLights","IrLights","state") || "Auto"
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetIrLights",
-                    { "IrLights": { "channel": Devices.channelOf(page.deviceRow), "state": v } })
-            }
-            SwitchRow {
-                label: qsTr("Mirror (horizontal)"); enabledCtl: page.isAdmin
-                checked: page.val("GetIsp","Isp","mirror") === 1
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetIsp",
-                    { "Isp": { "channel": Devices.channelOf(page.deviceRow), "mirror": v ? 1 : 0 } })
-            }
-            SwitchRow {
-                label: qsTr("Flip (vertical)"); enabledCtl: page.isAdmin
-                checked: page.val("GetIsp","Isp","flip") === 1
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetIsp",
-                    { "Isp": { "channel": Devices.channelOf(page.deviceRow), "flip": v ? 1 : 0 } })
-            }
-            Item { Layout.fillHeight: true }
+                    value: parseInt(page.img.bright || "128")
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 26, 25, { "bright": v })
+                }
+                SliderRow {
+                    label: qsTr("Contrast"); enabledCtl: page.isAdmin
+                    value: parseInt(page.img.contrast || "128")
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 26, 25, { "contrast": v })
+                }
+                SliderRow {
+                    label: qsTr("Saturation"); enabledCtl: page.isAdmin
+                    value: parseInt(page.img.saturation || "128")
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 26, 25, { "saturation": v })
+                }
+                SliderRow {
+                    label: qsTr("Sharpness"); enabledCtl: page.isAdmin
+                    value: parseInt(page.img.sharpen || "128")
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 26, 25, { "sharpen": v })
+                }
+                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+                SwitchRow {
+                    label: qsTr("Mirror (horizontal)"); enabledCtl: page.isAdmin
+                    checked: parseInt(page.img.mirror || "0") === 1
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 26, 25, { "mirror": v ? 1 : 0 })
+                }
+                SwitchRow {
+                    label: qsTr("Flip (vertical)"); enabledCtl: page.isAdmin
+                    checked: parseInt(page.img.flip || "0") === 1
+                    onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 26, 25, { "flip": v ? 1 : 0 })
+                }
+                Item { Layout.fillHeight: true }
                 Text {
-                    text: qsTr("Changes apply on release. Options come from the camera's GetImage/GetIsp ranges.")
+                    text: qsTr("Over the native Baichuan protocol — no web-server timeouts. Day/Night and IR controls are coming.")
                     color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap
                 }
             }

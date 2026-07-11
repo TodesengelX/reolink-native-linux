@@ -1197,6 +1197,70 @@ void DeviceManager::setAlertEnable(int row, const QString &kind, bool enable)
     }));
 }
 
+void DeviceManager::fetchBcConfig(int row, int cmdId, const QString &reqBody)
+{
+    if (row < 0 || row >= m_entries.size()) {
+        emit bcConfigLoaded(row, cmdId, {});
+        return;
+    }
+    const Entry &e = m_entries.at(row);
+    if (e.rec.kind == QLatin1String("stream") || !e.primed) {
+        emit bcConfigLoaded(row, cmdId, {});
+        return;
+    }
+    BaichuanControl::Params p;
+    p.host = e.rec.addr;
+    p.username = e.rec.username;
+    p.password = e.password;
+    const int ch = e.channel;
+    const QByteArray body = reqBody.toUtf8();
+    m_pending.addFuture(QtConcurrent::run([this, row, cmdId, p, ch, body] {
+        QVariantMap m;
+        BaichuanControl bc(p);
+        if (bc.open()) {
+            m = bc.getConfigFlat(static_cast<quint32>(cmdId), ch, body);
+            bc.close();
+        }
+        QMetaObject::invokeMethod(
+            this, [this, row, cmdId, m] { emit bcConfigLoaded(row, cmdId, m); },
+            Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::writeBcConfig(int row, int getCmd, int setCmd, const QVariantMap &changes,
+                                  const QString &reqBody)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    const Entry &e = m_entries.at(row);
+    const QString label = QStringLiteral("Set%1").arg(setCmd);
+    if (!e.isAdmin) {
+        emit settingApplied(row, label, false, tr("requires an administrator account"));
+        return;
+    }
+    BaichuanControl::Params p;
+    p.host = e.rec.addr;
+    p.username = e.rec.username;
+    p.password = e.password;
+    const int ch = e.channel;
+    const QByteArray body = reqBody.toUtf8();
+    m_pending.addFuture(QtConcurrent::run(
+        [this, row, getCmd, setCmd, p, ch, changes, body, label] {
+            BaichuanControl bc(p);
+            const bool ok = bc.open()
+                && bc.writeFields(static_cast<quint32>(getCmd), static_cast<quint32>(setCmd), ch,
+                                  changes, body);
+            bc.close();
+            QMetaObject::invokeMethod(
+                this,
+                [this, row, label, ok] {
+                    emit settingApplied(row, label, ok,
+                                        ok ? QString() : tr("couldn't reach the device"));
+                },
+                Qt::QueuedConnection);
+        }));
+}
+
 QString DeviceManager::nameAt(int row) const
 {
     if (row < 0 || row >= m_entries.size())
