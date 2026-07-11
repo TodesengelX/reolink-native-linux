@@ -28,7 +28,7 @@ Item {
         { key: "display",   label: qsTr("Display / OSD"),    cmds: ["GetOsd"] },
         { key: "encoding",  label: qsTr("Encoding"),        cmds: ["GetEnc"] },
         { key: "recording", label: qsTr("Recording"),       cmds: [] },
-        { key: "detection", label: qsTr("Detection / Alerts"), cmds: ["GetMdAlarm", "GetAiCfg"] },
+        { key: "detection", label: qsTr("Detection / Alerts"), cmds: ["GetAiCfg"] },
         { key: "network",   label: qsTr("Network"),         cmds: ["GetLocalLink", "GetNetPort"] },
         { key: "storage",   label: qsTr("Storage"),         cmds: ["GetHddInfo"] },
         { key: "users",     label: qsTr("Users"),           cmds: ["GetUser"] },
@@ -59,6 +59,8 @@ Item {
     // Recording config over Baichuan (cmd 54 flat map).
     property var rec: ({})
     property bool recReady: false
+    // Motion detection config over Baichuan (cmd 46 flat map).
+    property var md: ({})
     function aiBody(type) {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<AiDetectCfg version=\"1.1\">\n<chn>"
              + Devices.channelOf(page.deviceRow) + "</chn>\n<type>" + type + "</type>\n</AiDetectCfg>\n</body>\n";
@@ -74,6 +76,8 @@ Item {
                 page.alerts = ({});
                 Devices.fetchAlerts(page.deviceRow);
                 page.aiSens = ({});
+                page.md = ({});
+                Devices.fetchBcConfig(page.deviceRow, 46);
                 var aiTypes = ["people", "vehicle", "dog_cat"];
                 for (var i = 0; i < aiTypes.length; i++)
                     Devices.fetchBcConfig(page.deviceRow, 342, page.aiBody(aiTypes[i]));
@@ -130,6 +134,8 @@ Item {
                 Devices.fetchBcConfig(page.deviceRow, 26);
             if (command === "Set55")   // recording write over Baichuan
                 Devices.fetchBcConfig(page.deviceRow, 54);
+            if (command === "Set47")   // motion write over Baichuan
+                Devices.fetchBcConfig(page.deviceRow, 46);
             if (command === "Set343") {   // AI sensitivity write over Baichuan
                 var ts = ["people", "vehicle", "dog_cat"];
                 for (var i = 0; i < ts.length; i++)
@@ -153,6 +159,8 @@ Item {
             } else if (cmdId === 54) {
                 page.rec = values;
                 page.recReady = true;
+            } else if (cmdId === 46) {
+                page.md = values;
             }
         }
     }
@@ -435,9 +443,9 @@ Item {
             Text { text: qsTr("Motion detection"); color: Theme.text; font.pixelSize: 13; font.bold: true }
             SliderRow {
                 label: qsTr("Sensitivity"); from: 1; to: 50; enabledCtl: page.isAdmin
-                value: page.val("GetMdAlarm","MdAlarm","sensitivity") || 25
-                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetMdAlarm",
-                    { "MdAlarm": { "channel": Devices.channelOf(page.deviceRow), "sensitivity": v } })
+                value: parseInt(page.md.sensitivity || "25")
+                onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 46, 47,
+                    { "sensitivityInfoList//sensitivity": v })
             }
             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
             Text { text: qsTr("Smart (AI) detection"); color: Theme.text; font.pixelSize: 13; font.bold: true }

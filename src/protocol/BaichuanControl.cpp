@@ -306,6 +306,45 @@ bool BaichuanControl::writeFields(quint32 getCmdId, quint32 setCmdId, int channe
     for (auto it = changes.constBegin(); it != changes.constEnd(); ++it) {
         const QByteArray key = it.key().toUtf8();
         const QByteArray val = it.value().toString().toUtf8();
+
+        // "parent//child": set EVERY <child> inside the first <parent> element —
+        // for list configs like motion's <sensitivityInfoList> where each time
+        // block carries its own <sensitivity>, without touching a sibling range.
+        const int dslash = key.indexOf("//");
+        if (dslash >= 0) {
+            const QByteArray parent = key.left(dslash);
+            const QByteArray child = key.mid(dslash + 2);
+            int pStart = xml.indexOf("<" + parent + ">");
+            if (pStart < 0)
+                pStart = xml.indexOf("<" + parent + " ");
+            if (pStart < 0)
+                continue;
+            int pEnd = xml.indexOf("</" + parent + ">", pStart);
+            if (pEnd < 0)
+                pEnd = xml.size();
+            const QByteArray inner = xml.mid(pStart, pEnd - pStart);
+            const QByteArray co = "<" + child + ">";
+            const QByteArray cc = "</" + child + ">";
+            QByteArray rebuilt;
+            int pos = 0;
+            while (true) {
+                const int o = inner.indexOf(co, pos);
+                if (o < 0) {
+                    rebuilt += inner.mid(pos);
+                    break;
+                }
+                const int c = inner.indexOf(cc, o + co.size());
+                if (c < 0) {
+                    rebuilt += inner.mid(pos);
+                    break;
+                }
+                rebuilt += inner.mid(pos, o + co.size() - pos) + val;
+                pos = c;
+            }
+            xml = xml.left(pStart) + rebuilt + xml.mid(pEnd);
+            continue;
+        }
+
         const int slash = key.indexOf('/');
         int searchFrom = 0;
         QByteArray child = key;
