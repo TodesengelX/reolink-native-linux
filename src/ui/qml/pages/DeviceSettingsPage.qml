@@ -363,6 +363,18 @@ Item {
                 onCommit: (v) => Devices.applySetting(page.deviceRow, "SetIrLights",
                     { "IrLights": { "channel": Devices.channelOf(page.deviceRow), "state": v } })
             }
+            SwitchRow {
+                label: qsTr("Mirror (horizontal)"); enabledCtl: page.isAdmin
+                checked: page.val("GetIsp","Isp","mirror") === 1
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetIsp",
+                    { "Isp": { "channel": Devices.channelOf(page.deviceRow), "mirror": v ? 1 : 0 } })
+            }
+            SwitchRow {
+                label: qsTr("Flip (vertical)"); enabledCtl: page.isAdmin
+                checked: page.val("GetIsp","Isp","flip") === 1
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetIsp",
+                    { "Isp": { "channel": Devices.channelOf(page.deviceRow), "flip": v ? 1 : 0 } })
+            }
             Item { Layout.fillHeight: true }
                 Text {
                     text: qsTr("Changes apply on release. Options come from the camera's GetImage/GetIsp ranges.")
