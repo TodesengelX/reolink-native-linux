@@ -211,18 +211,74 @@ Item {
             }
 
             Rectangle {
+                id: videoBox
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 color: Theme.paneBackground
                 border.color: Theme.border
 
-                VideoOutput {
-                    id: video
+                // Digital zoom on the footage: wheel to zoom, drag to pan when
+                // zoomed — the same interaction as a live pane's video.
+                property real zoom: 1.0
+                property real panX: 0
+                property real panY: 0
+
+                Item {
                     anchors.fill: parent
                     anchors.margins: 1
-                    fillMode: VideoOutput.PreserveAspectFit
-                    visible: player.state === StreamPlayer.Streaming
+                    clip: true
+
+                    VideoOutput {
+                        id: video
+                        anchors.fill: parent
+                        fillMode: VideoOutput.PreserveAspectFit
+                        visible: player.state === StreamPlayer.Streaming
+                        transform: [
+                            Scale {
+                                origin.x: video.width / 2
+                                origin.y: video.height / 2
+                                xScale: videoBox.zoom
+                                yScale: videoBox.zoom
+                            },
+                            Translate { x: videoBox.panX; y: videoBox.panY }
+                        ]
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton
+                        property real lastX: 0
+                        property real lastY: 0
+                        cursorShape: videoBox.zoom > 1.0 ? Qt.OpenHandCursor : Qt.ArrowCursor
+                        onPressed: (m) => { lastX = m.x; lastY = m.y; }
+                        onPositionChanged: (m) => {
+                            if (videoBox.zoom > 1.0 && (m.buttons & Qt.LeftButton)) {
+                                videoBox.panX += (m.x - lastX);
+                                videoBox.panY += (m.y - lastY);
+                                lastX = m.x; lastY = m.y;
+                            }
+                        }
+                        onWheel: (w) => {
+                            var z = videoBox.zoom * (w.angleDelta.y > 0 ? 1.15 : 0.87);
+                            videoBox.zoom = Math.max(1.0, Math.min(8.0, z));
+                            if (videoBox.zoom <= 1.0) { videoBox.panX = 0; videoBox.panY = 0; }
+                        }
+                    }
                 }
+
+                // Zoom badge
+                Rectangle {
+                    visible: videoBox.zoom > 1.01 && player.state === StreamPlayer.Streaming
+                    anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 6
+                    radius: 3; color: "#80000000"
+                    width: zoomBadge.implicitWidth + 12; height: zoomBadge.implicitHeight + 6
+                    Text {
+                        id: zoomBadge; anchors.centerIn: parent
+                        text: videoBox.zoom.toFixed(1) + "×"
+                        color: Theme.accent; font.pixelSize: 11
+                    }
+                }
+
                 // Retry on connection error: NVRs are connection-limited and may
                 // momentarily refuse the playback stream.
                 StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true }

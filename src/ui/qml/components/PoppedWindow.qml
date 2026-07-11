@@ -22,11 +22,51 @@ Window {
     color: Theme.paneBackground
     title: label + " — Reolink Client"
 
-    VideoOutput {
-        id: video
+    // Digital zoom: wheel to zoom, drag to pan when zoomed (as in a live pane).
+    property real zoom: 1.0
+    property real panX: 0
+    property real panY: 0
+
+    Item {
         anchors.fill: parent
-        fillMode: VideoOutput.PreserveAspectFit
-        visible: player.state === StreamPlayer.Streaming
+        clip: true
+
+        VideoOutput {
+            id: video
+            anchors.fill: parent
+            fillMode: VideoOutput.PreserveAspectFit
+            visible: player.state === StreamPlayer.Streaming
+            transform: [
+                Scale {
+                    origin.x: video.width / 2
+                    origin.y: video.height / 2
+                    xScale: win.zoom
+                    yScale: win.zoom
+                },
+                Translate { x: win.panX; y: win.panY }
+            ]
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            property real lastX: 0
+            property real lastY: 0
+            cursorShape: win.zoom > 1.0 ? Qt.OpenHandCursor : Qt.ArrowCursor
+            onPressed: (m) => { lastX = m.x; lastY = m.y; }
+            onPositionChanged: (m) => {
+                if (win.zoom > 1.0 && (m.buttons & Qt.LeftButton)) {
+                    win.panX += (m.x - lastX);
+                    win.panY += (m.y - lastY);
+                    lastX = m.x; lastY = m.y;
+                }
+            }
+            onWheel: (w) => {
+                var z = win.zoom * (w.angleDelta.y > 0 ? 1.15 : 0.87);
+                win.zoom = Math.max(1.0, Math.min(8.0, z));
+                if (win.zoom <= 1.0) { win.panX = 0; win.panY = 0; }
+            }
+        }
     }
     StreamPlayer {
         id: player
@@ -72,8 +112,16 @@ Window {
         visible: player.state === StreamPlayer.Streaming
         anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 8
         radius: 3; color: "#80000000"
-        width: nm.implicitWidth + 12; height: nm.implicitHeight + 6
-        Text { id: nm; anchors.centerIn: parent; text: win.label; color: "white"; font.pixelSize: 12 }
+        width: nmRow.implicitWidth + 12; height: nmRow.implicitHeight + 6
+        Row {
+            id: nmRow; anchors.centerIn: parent; spacing: 6
+            Text { text: win.label; color: "white"; font.pixelSize: 12 }
+            Text {
+                visible: win.zoom > 1.01
+                text: win.zoom.toFixed(1) + "×"
+                color: Theme.accent; font.pixelSize: 12
+            }
+        }
     }
 
     Shortcut { sequence: "Escape"; onActivated: win.close() }
