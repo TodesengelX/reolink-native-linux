@@ -954,6 +954,45 @@ void DeviceManager::applySetting(int row, const QString &setCommand, const QVari
     }));
 }
 
+void DeviceManager::toggleFloodlight(int row)
+{
+    const QString cmd = QStringLiteral("SetWhiteLed");
+    auto client = clientFor(row);
+    if (!client) {
+        emit settingApplied(row, cmd, false, tr("device not ready"));
+        return;
+    }
+    if (row < m_entries.size() && !m_entries.at(row).isAdmin) {
+        emit settingApplied(row, cmd, false, tr("requires an administrator account"));
+        return;
+    }
+    const int ch = m_entries.at(row).channel;
+    m_pending.addFuture(QtConcurrent::run([this, client, row, ch, cmd] {
+        // Read the current config so the toggle flips only on/off and leaves the
+        // user's brightness + auto/schedule mode intact.
+        const api::CommandResult got =
+            client->callOne(QStringLiteral("GetWhiteLed"), Json{{"channel", ch}}, /*action=*/1);
+        bool ok = false;
+        QString error;
+        if (got.ok) {
+            const Json wl = jsonObj(got.value, "WhiteLed");
+            Json set = Json{{"channel", ch}, {"state", jsonInt(wl, "state", 0) ? 0 : 1}};
+            for (const char *k : {"mode", "bright", "LightingSchedule"})
+                if (wl.contains(k))
+                    set[k] = jsonRef(wl, k); // preserve settable fields verbatim
+            const api::CommandResult put =
+                client->callOne(cmd, Json{{"WhiteLed", set}}, /*action=*/0);
+            ok = put.ok;
+            error = ok ? QString() : (put.detail.isEmpty() ? tr("failed") : put.detail);
+        } else {
+            error = got.detail.isEmpty() ? tr("floodlight not supported") : got.detail;
+        }
+        QMetaObject::invokeMethod(
+            this, [this, row, cmd, ok, error] { emit settingApplied(row, cmd, ok, error); },
+            Qt::QueuedConnection);
+    }));
+}
+
 void DeviceManager::reboot(int row)
 {
     applySetting(row, QStringLiteral("Reboot"), {});

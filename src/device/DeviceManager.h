@@ -122,6 +122,10 @@ public:
     // of cmd -> value) and apply one Set* command (emits settingApplied).
     Q_INVOKABLE void fetchSettings(int row, const QStringList &getCommands);
     Q_INVOKABLE void applySetting(int row, const QString &setCommand, const QVariantMap &param);
+    // Toggle the camera's white-LED / floodlight on<->off. Reads GetWhiteLed first
+    // so only the on/off state flips, leaving brightness and the auto/schedule mode
+    // untouched. Emits settingApplied("SetWhiteLed", ...) for UI feedback.
+    Q_INVOKABLE void toggleFloodlight(int row);
     Q_INVOKABLE void reboot(int row);
 
 signals:
