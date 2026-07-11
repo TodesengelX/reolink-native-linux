@@ -250,18 +250,28 @@ Item {
                         property real lastX: 0
                         property real lastY: 0
                         cursorShape: videoBox.zoom > 1.0 ? Qt.OpenHandCursor : Qt.ArrowCursor
+                        // Pin the zoomed footage to the viewport edges (no panning
+                        // it off into empty space; zooming out reels it back in).
+                        function clampPan() {
+                            var mx = Math.max(0, (video.contentRect.width * videoBox.zoom - video.width) / 2);
+                            var my = Math.max(0, (video.contentRect.height * videoBox.zoom - video.height) / 2);
+                            videoBox.panX = Math.max(-mx, Math.min(mx, videoBox.panX));
+                            videoBox.panY = Math.max(-my, Math.min(my, videoBox.panY));
+                        }
                         onPressed: (m) => { lastX = m.x; lastY = m.y; }
                         onPositionChanged: (m) => {
                             if (videoBox.zoom > 1.0 && (m.buttons & Qt.LeftButton)) {
                                 videoBox.panX += (m.x - lastX);
                                 videoBox.panY += (m.y - lastY);
                                 lastX = m.x; lastY = m.y;
+                                clampPan();
                             }
                         }
                         onWheel: (w) => {
                             var z = videoBox.zoom * (w.angleDelta.y > 0 ? 1.15 : 0.87);
                             videoBox.zoom = Math.max(1.0, Math.min(8.0, z));
                             if (videoBox.zoom <= 1.0) { videoBox.panX = 0; videoBox.panY = 0; }
+                            else clampPan();
                         }
                     }
                 }

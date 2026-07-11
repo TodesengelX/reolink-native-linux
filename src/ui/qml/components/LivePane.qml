@@ -154,6 +154,14 @@ Rectangle {
             property real lastX: 0
             property real lastY: 0
 
+            // Keep the zoomed footage pinned to the viewport edges — panning must
+            // not drag it off into empty space, and zooming out reels it back in.
+            function clampPan() {
+                var mx = Math.max(0, (video.contentRect.width * root.zoom - video.width) / 2);
+                var my = Math.max(0, (video.contentRect.height * root.zoom - video.height) / 2);
+                root.panX = Math.max(-mx, Math.min(mx, root.panX));
+                root.panY = Math.max(-my, Math.min(my, root.panY));
+            }
             onClicked: root.clicked(root.paneIndex)
             onDoubleClicked: if (root.hasSource) root.toggleMaximize(root.paneIndex)
             onPressed: (m) => { lastX = m.x; lastY = m.y; }
@@ -162,6 +170,7 @@ Rectangle {
                     root.panX += (m.x - lastX);
                     root.panY += (m.y - lastY);
                     lastX = m.x; lastY = m.y;
+                    clampPan();
                 }
             }
             onWheel: (w) => {
@@ -169,6 +178,7 @@ Rectangle {
                 var z = root.zoom * (w.angleDelta.y > 0 ? 1.15 : 0.87);
                 root.zoom = Math.max(1.0, Math.min(8.0, z));
                 if (root.zoom <= 1.0) { root.panX = 0; root.panY = 0; }
+                else clampPan();
             }
         }
     }
