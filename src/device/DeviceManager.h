@@ -14,6 +14,7 @@
 
 namespace rl {
 class ReolinkHttpClient;
+class StreamPlayer;
 }
 
 namespace rl {
@@ -107,6 +108,11 @@ public:
     // with its path (the file is playable/seekable locally, unlike the FLV path).
     Q_INVOKABLE void requestHdClip(int row, qint64 startEpoch, int durationSecs = 15);
 
+    // Native (Baichuan/TCP 9000) recorded playback: stream the recording from
+    // startEpoch straight into `player` — realtime, frame-accurate, full HEVC main.
+    Q_INVOKABLE void startBaichuanPlayback(int row, qint64 startEpoch, rl::StreamPlayer *player,
+                                           bool mainStream = true);
+
     // Settings: fetch a batch of Get* commands (emits settingsLoaded with a map
     // of cmd -> value) and apply one Set* command (emits settingApplied).
     Q_INVOKABLE void fetchSettings(int row, const QStringList &getCommands);
@@ -145,6 +151,7 @@ private:
         QString mainCodec = QStringLiteral("h264"); // sub stream is always h264
         QSize mainSize;                             // GetEnc-declared main resolution
         QSize subSize;                              // GetEnc-declared sub resolution
+        QString uid;                                // per-camera UID (Baichuan playback)
         QString password;                           // in-memory only (keyring at rest)
         bool primed = false;                        // password loaded?
         api::ChannelCaps caps;                      // this channel's capabilities
@@ -167,6 +174,7 @@ private:
         QString codec = QStringLiteral("h264");
         QSize mainSize; // GetEnc-declared main/sub resolution (for rotation detection)
         QSize subSize;
+        QString uid;
         api::ChannelCaps caps;
     };
 

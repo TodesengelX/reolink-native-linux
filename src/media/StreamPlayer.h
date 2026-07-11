@@ -8,6 +8,7 @@
 #include <QVideoSink>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <thread>
 
@@ -53,6 +54,12 @@ public:
         QString source;
         QSize expectedSize; // declared size for rotation detection (see property)
 
+        // Custom packet source (native Baichuan): when set, the demuxer reads the
+        // raw elementary stream via this blocking callback instead of opening a URL.
+        // forcedFormat is the libavformat demuxer name ("h264"/"hevc").
+        std::function<int(unsigned char *, int)> readPacket;
+        QString forcedFormat;
+
         // Retry on connection error even for non-live sources (playback FLV on a
         // connection-limited NVR often needs a couple of attempts).
         std::atomic<bool> retryOnError{false};
@@ -82,6 +89,14 @@ public:
 
     QSize expectedSize() const { return m_expectedSize; }
     void setExpectedSize(const QSize &size);
+
+    // Drive playback from a blocking packet callback (native Baichuan) instead of a
+    // URL. `reader` fills a buffer with elementary-stream bytes (returns count, 0/EOF
+    // to end); `format` is the demuxer ("h264"/"hevc"); `onStop` is invoked on
+    // stop()/destruction to unblock and tear down the source. Set before start();
+    // cleared by setSource(). Not a QML API.
+    void setPacketSource(std::function<int(unsigned char *, int)> reader, const QString &format,
+                         std::function<void()> onStop);
 
     QVideoSink *videoSink() const;
     void setVideoSink(QVideoSink *sink);
@@ -128,6 +143,10 @@ private:
 
     QString m_source;
     QSize m_expectedSize;
+    std::function<int(unsigned char *, int)> m_pendingReader;
+    QString m_pendingFormat;
+    std::function<void()> m_pendingStop; // teardown for the not-yet-started source
+    std::function<void()> m_activeStop;  // teardown for the running session's source
     bool m_loop = false;
 
     State m_state = State::Idle;

@@ -383,12 +383,25 @@ AVPixelFormat setupHwDecode(AVCodecContext *dec, const AVCodec *codec, AVBufferR
     return AV_PIX_FMT_NONE;
 }
 
+// AVIOContext read callback for a custom packet source (native Baichuan): pull
+// elementary-stream bytes from the session's blocking reader.
+int avioReadThunk(void *opaque, uint8_t *buf, int size)
+{
+    auto *s = static_cast<Session *>(opaque);
+    if (s->abort.load())
+        return AVERROR_EOF;
+    return s->readPacket(buf, size);
+}
+
 // One open→decode session. Returns true when the caller should retry (reconnect).
 bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
 {
     const QString source = s->source;
     const QByteArray url = source.toUtf8();
-    const bool live = isLiveUrl(source);
+    // A custom packet source (native Baichuan) is treated as live: real-time paced
+    // by the device, no URL to open.
+    const bool packetSource = static_cast<bool>(s->readPacket);
+    const bool live = packetSource || isLiveUrl(source);
 
     InterruptContext interrupt{s.get(), QDeadlineTimer(kOpenTimeoutMs)};
 
@@ -396,19 +409,45 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
     fmt->interrupt_callback.callback = &InterruptContext::callback;
     fmt->interrupt_callback.opaque = &interrupt;
 
+    // Custom-IO cleanup must outlive fmt close (avformat_close_input leaves a
+    // caller-supplied AVIOContext alone), so this guard is declared first.
+    AVIOContext *avioCtx = nullptr;
+    struct AvioGuard {
+        AVIOContext **pb;
+        ~AvioGuard()
+        {
+            if (*pb) {
+                av_freep(&(*pb)->buffer);
+                avio_context_free(pb);
+            }
+        }
+    } avioGuard{&avioCtx};
+
     AVDictionary *opts = nullptr;
-    if (live) {
+    const AVInputFormat *ifmt = nullptr;
+    if (packetSource) {
+        constexpr int kAvioBuf = 1 << 16;
+        avioCtx = avio_alloc_context(static_cast<unsigned char *>(av_malloc(kAvioBuf)), kAvioBuf,
+                                     0, s.get(), &avioReadThunk, nullptr, nullptr);
+        fmt->pb = avioCtx;
+        fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+        ifmt = av_find_input_format(s->forcedFormat.toUtf8().constData());
+        // Raw elementary stream over non-seekable IO: give the parser room to find
+        // the SPS/VPS (an I-frame can be ~600 KB) so the size isn't "unspecified".
+        av_dict_set(&opts, "probesize", "4000000", 0);
+        av_dict_set(&opts, "analyzeduration", "4000000", 0);
+    } else if (live) {
         av_dict_set(&opts, "rtsp_transport", "tcp", 0);
         av_dict_set(&opts, "fflags", "nobuffer", 0);
         av_dict_set(&opts, "flags", "low_delay", 0);
     }
-    int rc = avformat_open_input(&fmt, url.constData(), nullptr, &opts);
+    int rc = avformat_open_input(&fmt, packetSource ? nullptr : url.constData(), ifmt, &opts);
     av_dict_free(&opts);
     if (rc < 0) {
         char buf[AV_ERROR_MAX_STRING_SIZE]{};
         av_strerror(rc, buf, sizeof(buf));
         postState(s, State::Error, QString::fromUtf8(buf));
-        return live || s->retryOnError.load(); // NVR may be momentarily out of slots
+        return !packetSource && (live || s->retryOnError.load());
     }
 
     struct FmtGuard {
@@ -419,7 +458,7 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
     interrupt.deadline = QDeadlineTimer(kOpenTimeoutMs);
     if (avformat_find_stream_info(fmt, nullptr) < 0) {
         postState(s, State::Error, QStringLiteral("could not read stream info"));
-        return live || s->retryOnError.load();
+        return !packetSource && (live || s->retryOnError.load());
     }
 
     const int videoIndex = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
@@ -629,12 +668,12 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
                 // Non-seekable input can't loop; fall through to a reconnect.
             }
             finalizeRecording();
-            return live;
+            return live && !packetSource; // a custom source is one-shot: don't retry
         }
         if (rc < 0) {
             postState(s, State::Error, QStringLiteral("read error / stalled"));
             finalizeRecording();
-            return live || s->retryOnError.load();
+            return !packetSource && (live || s->retryOnError.load());
         }
         if (packet->stream_index != videoIndex) {
             av_packet_unref(packet);
@@ -738,6 +777,10 @@ StreamPlayer::StreamPlayer(QObject *parent) : QObject(parent) {}
 
 StreamPlayer::~StreamPlayer()
 {
+    if (m_activeStop)
+        m_activeStop();
+    if (m_pendingStop)
+        m_pendingStop();
     if (m_session) {
         // Null the back-pointer under the lock so no queued callback touches us
         // after this returns, then signal abort. The detached worker drops the
@@ -752,9 +795,12 @@ StreamPlayer::~StreamPlayer()
 
 void StreamPlayer::setSource(const QString &source)
 {
-    if (m_source == source)
+    if (m_source == source && !m_pendingReader)
         return;
     stop();
+    m_pendingReader = nullptr; // URL source supersedes any packet source
+    m_pendingFormat.clear();
+    m_pendingStop = nullptr;
     m_source = source;
     emit sourceChanged();
 }
@@ -765,6 +811,17 @@ void StreamPlayer::setExpectedSize(const QSize &size)
         return;
     m_expectedSize = size;
     emit expectedSizeChanged();
+}
+
+void StreamPlayer::setPacketSource(std::function<int(unsigned char *, int)> reader,
+                                   const QString &format, std::function<void()> onStop)
+{
+    stop();
+    m_pendingReader = std::move(reader);
+    m_pendingFormat = format;
+    m_pendingStop = std::move(onStop);
+    m_source.clear();
+    emit sourceChanged();
 }
 
 QVideoSink *StreamPlayer::videoSink() const
@@ -811,13 +868,15 @@ void StreamPlayer::setRetryOnError(bool v)
 
 void StreamPlayer::start()
 {
-    if (m_source.isEmpty())
+    if (m_source.isEmpty() && !m_pendingReader)
         return;
     stop();
 
     auto s = std::make_shared<Session>();
     s->player = this;
     s->source = m_source;
+    s->readPacket = m_pendingReader;
+    s->forcedFormat = m_pendingFormat;
     s->expectedSize = m_expectedSize;
     s->loop.store(m_loop);
     s->retryOnError.store(m_retryOnError);
@@ -826,12 +885,23 @@ void StreamPlayer::start()
         s->sink = m_pendingSink;
     }
     m_session = s;
+    // Adopt the pending source's teardown as the running session's teardown, so the
+    // stop() above (which tears down the previous session) doesn't kill this source.
+    m_activeStop = std::move(m_pendingStop);
+    m_pendingStop = nullptr;
     applyState(State::Connecting, QString());
     std::thread(runWorker, s).detach();
 }
 
 void StreamPlayer::stop()
 {
+    // Unblock and tear down the running session's custom packet source (native
+    // Baichuan). Its read() may be blocking the decode worker; this wakes it so
+    // avformat unwinds. The pending (not-yet-started) source is left untouched.
+    if (m_activeStop) {
+        m_activeStop();
+        m_activeStop = nullptr;
+    }
     if (!m_session)
         return;
     {

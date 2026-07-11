@@ -71,16 +71,15 @@ Item {
         }
     }
 
-    // HD: download the full-resolution main-stream clip covering this moment, then
-    // play it locally (the FLV path can't carry the HEVC main stream). The download
-    // is slow on a home NVR, so we surface a clear loading state.
+    // HD: stream the full-resolution main stream over native Baichuan (TCP 9000)
+    // from this exact moment — realtime and frame-accurate, the way the official
+    // apps do it (HTTP-FLV can't carry the HEVC main stream, cmd=Download is slow).
     function playHd(sec) {
         if (page.deviceRow < 0)
             return;
-        player.stop();
-        page.hdLoading = true;
-        statusText.text = qsTr("Downloading HD clip…");
-        Devices.requestHdClip(page.deviceRow, epochAt(sec), 15);
+        player.loop = false;
+        statusText.text = qsTr("HD");
+        Devices.startBaichuanPlayback(page.deviceRow, epochAt(sec), player, true);
     }
 
     property real _pendingPlayEpoch: 0  // play this once the day's search returns

@@ -2,6 +2,8 @@
 
 #include "core/Log.h"
 #include "core/Paths.h"
+#include "media/StreamPlayer.h"
+#include "protocol/BaichuanClient.h"
 #include "protocol/ReolinkHttpClient.h"
 
 #include <QDateTime>
@@ -385,6 +387,7 @@ void DeviceManager::applyValidation(qint64 hostId, const Validation &v)
         e.mainCodec = ch.codec.isEmpty() ? QStringLiteral("h264") : ch.codec;
         e.mainSize = ch.mainSize;
         e.subSize = ch.subSize;
+        e.uid = ch.uid;
         e.caps = ch.caps;
         e.talk = ch.caps.talk;
         e.isAdmin = v.isAdmin;
@@ -560,6 +563,7 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
                 cr.codec = codecByChannel.value(c.channel, QStringLiteral("h264"));
                 cr.mainSize = mainSizeByChannel.value(c.channel);
                 cr.subSize = subSizeByChannel.value(c.channel);
+                cr.uid = c.uid;
                 cr.caps = capsFor(c.channel);
                 v.talk = v.talk || cr.caps.talk;
                 v.channels.append(cr);
@@ -820,6 +824,37 @@ void DeviceManager::requestHdClip(int row, qint64 startEpoch, int durationSecs)
             },
             Qt::QueuedConnection);
     }));
+}
+
+void DeviceManager::startBaichuanPlayback(int row, qint64 startEpoch, StreamPlayer *player,
+                                          bool mainStream)
+{
+    if (row < 0 || row >= m_entries.size() || !player || startEpoch <= 0)
+        return;
+    const Entry &e = m_entries.at(row);
+    if (e.rec.kind == QLatin1String("stream") || !e.primed)
+        return;
+
+    BaichuanClient::Params p;
+    p.host = e.rec.addr;
+    p.port = 9000; // Baichuan is a separate port from the HTTP API
+    p.username = e.rec.username;
+    p.password = e.password;
+    p.channel = e.channel;
+    p.uid = e.uid;
+    p.mainStream = mainStream;
+    p.startEpoch = startEpoch;
+
+    auto client = std::make_shared<BaichuanClient>(p);
+    client->start();
+    // The sub stream is always H.264; the main stream's codec is per-channel.
+    const bool h265 = mainStream && e.mainCodec == QLatin1String("h265");
+    player->setExpectedSize(mainStream ? e.mainSize : e.subSize);
+    player->setPacketSource(
+        [client](unsigned char *buf, int size) { return client->read(buf, size); },
+        h265 ? QStringLiteral("hevc") : QStringLiteral("h264"),
+        [client] { client->stop(); });
+    player->start();
 }
 
 void DeviceManager::fetchSettings(int row, const QStringList &getCommands)
