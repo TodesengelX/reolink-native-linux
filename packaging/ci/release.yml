@@ -1,0 +1,67 @@
+# Release automation: on a version tag (v*), build an AppImage and a Flatpak
+# bundle and attach both to the GitHub Release.
+#
+# To activate: this file must live at .github/workflows/release.yml. Pushing a
+# workflow file needs a token with the `workflow` scope:
+#   gh auth refresh -s workflow
+#   git mv packaging/ci/release.yml .github/workflows/release.yml && git commit && git push
+# Then cut a release:  git tag v0.1.0 && git push origin v0.1.0
+name: release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.2'
+          modules: 'qtmultimedia qtshadertools'
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libavformat-dev libavcodec-dev libavutil-dev \
+            libswscale-dev libcurl4-openssl-dev libsecret-1-dev libsqlite3-dev \
+            libfuse2 wget
+      - name: Build
+        run: |
+          cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+      - name: Package AppImage
+        run: bash packaging/appimage/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: appimage, path: '*.AppImage' }
+
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: bilelmoussaoui/flatpak-github-actions:kde-6.7
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: reolink-native-linux.flatpak
+          manifest-path: packaging/flatpak/io.github.todesengelx.ReolinkLinux.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with: { name: flatpak, path: reolink-native-linux.flatpak }
+
+  release:
+    needs: [appimage, flatpak]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            appimage/*.AppImage
+            flatpak/reolink-native-linux.flatpak
+          generate_release_notes: true

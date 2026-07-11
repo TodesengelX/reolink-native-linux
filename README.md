@@ -1,48 +1,44 @@
-# Reolink Linux Client
+# Reolink Native Linux Client
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A fully **native Linux desktop client** for Reolink cameras and NVRs — a 1:1 replica of the official Reolink Client (Windows/macOS): same screens, controls, settings, and behaviors, including the 1/4/9/16 live grid, double-click pane maximize/restore, fullscreen, PTZ, color-coded playback timeline, downloads, and the full device-settings surface.
+A fully **native Linux desktop client** for Reolink cameras and NVRs — built to work like the official Reolink Client (Windows/macOS/Android): the 1/4/9/16 live grid, double-click maximize, fullscreen, PTZ, a color-coded playback timeline, and a full device-settings surface.
 
-**No Wine, no Electron, no web wrappers, no bundled third-party NVR software.** Compiled native code talking directly to the devices over their own protocols.
+**No Wine, no Electron, no web wrappers, no bundled third-party NVR software.** Compiled C++/Qt6 talking directly to the devices over their own protocols — including the native **Baichuan** protocol (TCP 9000) the official apps use, which is why live HD, recorded playback, and settings work reliably where third-party RTSP/HTTP tools struggle.
 
-## Chosen stack (see the design doc for full rationale)
+> **Status: alpha.** Actively developed and validated against a real RLN8-410 NVR. Core live/playback/settings work well; some areas (weekly recording-schedule grid, two-way talk audio, remote/P2P) are still in progress.
 
-| Concern | Choice |
-|---|---|
-| Language / UI | C++20 + Qt 6 (QML for grid/PTZ/timeline, Widgets for settings), dynamically linked (LGPL-clean) |
-| Media | FFmpeg (LGPL-only build) — RTSP/FLV ingest, H.264/H.265 hw decode (VAAPI / NVDEC) with software fallback |
-| Render | Zero-copy DMA-BUF→EGLImage→GL where supported; universal NV12 upload fallback |
-| Audio | PipeWire (AAC + G.711/PCM) |
-| Protocols | Reolink HTTP-CGI JSON API + RTSP/HTTP-FLV + Baichuan (port 9000: events, talk, battery) + ONVIF fallback |
-| Storage | SQLite (devices, layouts, event log) + libsecret keyring (credentials) |
-| Build / packaging | CMake; Flatpak (primary), AppImage, deb |
+## Install
 
-## Documentation
+### AppImage — download and run (no dependencies)
 
-- **[docs/DESIGN.md](docs/DESIGN.md)** — the definitive design document: goals, tech-stack decision, architecture, protocol integration, media pipeline, complete UI screen inventory, data model, packaging, roadmap (M0–M15), and risks.
-- [docs/research/](docs/research/) — research dossiers behind the design:
-  - [official-client-ui.md](docs/research/official-client-ui.md) — screen/control/settings inventory of the official client
-  - [protocols.md](docs/research/protocols.md) — HTTP-CGI API, RTSP/FLV URLs, Baichuan, ONVIF, auth
-  - [video-pipeline.md](docs/research/video-pipeline.md) — decode/render/audio architecture options on Linux
-  - [gui-stack.md](docs/research/gui-stack.md) — native toolkit comparison (Qt vs GTK4 vs Rust options)
-  - [prior-art.md](docs/research/prior-art.md) — reference projects and their licenses
-  - [fact-check.md](docs/research/fact-check.md) — 24 adversarially verified claims (with corrections)
-- [docs/proposals/](docs/proposals/) — the two candidate architectures considered, and the design-review critique that shaped the final doc.
+Grab the latest `.AppImage` from the [**Releases**](../../releases) page, then:
 
-## Status
+```sh
+chmod +x Reolink_Native_Linux-*.AppImage
+./Reolink_Native_Linux-*.AppImage
+```
 
-Milestones **M0–M14** implemented (2026-07-09). The app builds, runs natively, and mirrors the official client:
+### Flatpak
 
-- **Live View** — 1/4/9/16 grid, hardware-accelerated H.264/H.265 decode (VAAPI/NVDEC) with software fallback, double-click maximize, F11 fullscreen, per-pane floating toolbar (stream quality, snapshot, record, digital zoom, PTZ joystick, talk, siren, pop-out), auto-reconnect
-- **Playback** — month calendar, color-coded two-tone timeline (grey timer / blue alarm), recording search, segment playback
-- **Events** — notification inbox with AI-type filters (person/vehicle/pet/visitor/motion), detection polling, jump-to-playback, unread badge
-- **Device Settings** — Display/Encoding/Recording/Detection/Network/Storage/System pages with `Get*`/`Set*` wiring, admin-gated writes
-- **Extras** — battery/solar status, doorbell answer surface, multi-monitor pop-out windows, fisheye dewarp shader, manual MP4 recording (stream-copy)
+Download the `.flatpak` bundle from [Releases](../../releases) and:
 
-Backend-complete but pending validation against real Reolink hardware: PTZ/snapshot/settings `Set` operations, NVR playback streams, two-way talk and doorbell answer (need the Baichuan port-9000 protocol — the M12 spike), and UID/P2P remote access.
+```sh
+flatpak install --user ./reolink-native-linux.flatpak
+flatpak run io.github.todesengelx.ReolinkLinux
+```
 
-### Building
+*(A Flathub listing — `flatpak install flathub io.github.todesengelx.ReolinkLinux` — is planned.)*
+
+### Arch Linux (AUR)
+
+```sh
+yay -S reolink-native-linux        # or: paru -S reolink-native-linux
+```
+
+*(PKGBUILD lives in [`packaging/aur/`](packaging/aur/).)*
+
+### Build from source
 
 ```sh
 cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
@@ -50,22 +46,34 @@ cmake --build build -j$(nproc)
 ./build/reolink-client
 ```
 
-Requires: Qt 6.5+ (base/declarative/multimedia/shadertools/tools), FFmpeg dev headers, libcurl, libsecret, sqlite. Run tests with `ctest --test-dir build`. Compare hardware vs software decode with `tools/bench.sh`.
+Requires Qt 6.5+ (base / declarative / multimedia / shadertools / tools), FFmpeg dev headers, libcurl, libsecret, and sqlite. Run the tests with `ctest --test-dir build`.
 
-### Packaging
+## Features
 
-- **Flatpak:** `flatpak-builder --user --install --force-clean build-flatpak packaging/flatpak/io.github.todesengelx.ReolinkLinux.yml`
-- **AppImage:** `packaging/appimage/build-appimage.sh` (needs `linuxdeploy` + the Qt plugin)
-- **System install:** `cmake --install build --prefix /usr/local` (installs the binary, `.desktop`, icon, and AppStream metadata)
+- **Live view** — 1/4/9/16 grid; hardware-accelerated H.264/H.265 decode (VAAPI/NVDEC) with software fallback; double-click a camera (or single-click it in the sidebar) to maximize; F11 fullscreen; per-pane floating toolbar (SD/HD, snapshot, record, digital zoom with edge-clamped pan, PTZ, talk, siren, floodlight, pop-out); auto-reconnect. Maximized/pop-out HD streams use Baichuan, which avoids the corruption some Reolink NVRs emit on their RTSP main stream.
+- **Playback** — month calendar, two-tone timeline (timer/alarm), recording search, in-place seek and a live playhead, pan/zoom the timeline, HD playback over Baichuan.
+- **Events** — notification inbox with AI-type filters (person/vehicle/pet/visitor/motion), detection polling, jump-to-playback, unread badge.
+- **Device tree** — NVR shown as an expandable parent with its cameras nested; right-click for Properties / Settings / Reboot / Remove.
+- **Settings** — Image (brightness/contrast/saturation/sharpness, mirror/flip, day/night), Detection (motion + per-AI-type sensitivity, alerts), Recording, Encoding, Display/OSD, Network, Storage, Users, Time, System. Camera settings run over the native Baichuan protocol, so they don't hit the NVR web server's under-load 502s.
+- **Extras** — battery/solar status, doorbell answer surface, multi-monitor pop-out, fisheye dewarp shader, manual MP4 recording (stream-copy).
 
-A GitHub Actions CI config (build + test) is provided at [packaging/ci/github-actions-ci.yml](packaging/ci/github-actions-ci.yml) — copy it to `.github/workflows/ci.yml` to activate (adding a workflow requires a token with the `workflow` scope).
+## How it talks to your devices
+
+| Transport | Used for |
+|---|---|
+| **Baichuan** (TCP 9000) | The native app protocol: HD live + recorded playback, and reading/writing device settings. Reliable under NVR load. |
+| RTSP / HTTP-FLV | Live sub-stream grid and light playback scrubbing. |
+| HTTP-CGI JSON API (:443) | Device discovery/validation, host-level settings (network/storage/users/time), and detection polling. |
+
+## Documentation
+
+- **[docs/DESIGN.md](docs/DESIGN.md)** — the definitive design document (goals, stack, architecture, protocols, media pipeline, UI inventory, data model, packaging, roadmap, risks).
+- [docs/research/](docs/research/) — the research dossiers behind the design (official-client UI, protocols, video pipeline, GUI stack, prior art, fact-checks).
 
 ## Licensing
 
-This project is licensed under the [MIT License](LICENSE).
-
-All runtime dependencies are LGPL/MIT/Apache and dynamically linked; the protocol layer is implemented from the MIT-licensed `reolink_aio` knowledge base and Reolink's published HTTP API — never from AGPL code. See DESIGN.md §10 for the full legal notes (HEVC, Baichuan reverse-engineering, bridge policy).
+MIT — see [LICENSE](LICENSE). All runtime dependencies are LGPL/MIT/Apache and dynamically linked. The protocol layer is implemented from the MIT-licensed `reolink_aio` reference and Reolink's published HTTP API and documented wire facts — **never** from AGPL-licensed code.
 
 ## Disclaimer
 
-This is an independent, unofficial project and is not affiliated with, endorsed by, or supported by Reolink. "Reolink" is a trademark of its respective owner. Use with your own devices at your own risk.
+Independent, unofficial project — not affiliated with, endorsed by, or supported by Reolink. "Reolink" is a trademark of its respective owner. Use with your own devices at your own risk.
