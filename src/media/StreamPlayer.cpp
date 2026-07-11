@@ -87,17 +87,29 @@ QString redacted(const QString &source)
 // encodes winding direction, so this is a per-model constant, not inferred.
 QtVideo::Rotation streamRotation(const AVStream *stream, QSize expected)
 {
+    // The DISPLAYMATRIX side data moved to codecpar->coded_side_data in FFmpeg 6.1
+    // (libavcodec 60.15); older builds (e.g. the Flatpak runtime's FFmpeg) expose
+    // it via the now-deprecated av_stream_get_side_data. Support both.
+    const int32_t *dm = nullptr;
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(60, 15, 100)
     const AVPacketSideData *sd =
         stream->codecpar->coded_side_data
             ? av_packet_side_data_get(stream->codecpar->coded_side_data,
                                       stream->codecpar->nb_coded_side_data,
                                       AV_PKT_DATA_DISPLAYMATRIX)
             : nullptr;
-    if (sd && sd->size >= 9 * static_cast<int>(sizeof(int32_t))) {
+    if (sd && sd->size >= 9 * static_cast<int>(sizeof(int32_t)))
+        dm = reinterpret_cast<const int32_t *>(sd->data);
+#else
+    size_t dmSize = 0;
+    const uint8_t *raw = av_stream_get_side_data(stream, AV_PKT_DATA_DISPLAYMATRIX, &dmSize);
+    if (raw && dmSize >= 9 * sizeof(int32_t))
+        dm = reinterpret_cast<const int32_t *>(raw);
+#endif
+    if (dm) {
         // av_display_rotation_get returns the CCW angle; the clockwise display
         // rotation is its negation, normalized to [0,360).
-        int cw = static_cast<int>(std::llround(-av_display_rotation_get(
-            reinterpret_cast<const int32_t *>(sd->data))));
+        int cw = static_cast<int>(std::llround(-av_display_rotation_get(dm)));
         cw = ((cw % 360) + 360) % 360;
         switch (cw) {
         case 90:

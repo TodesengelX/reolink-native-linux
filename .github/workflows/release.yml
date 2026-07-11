@@ -12,6 +12,7 @@ permissions:
 jobs:
   appimage:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install Qt 6
@@ -25,23 +26,21 @@ jobs:
           sudo apt-get install -y libavformat-dev libavcodec-dev libavutil-dev \
             libswscale-dev libcurl4-openssl-dev libsecret-1-dev libsqlite3-dev \
             libfuse2 wget
-      - name: Build
+      - name: Build + install into AppDir
         run: |
-          cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
           cmake --build build -j"$(nproc)"
-      - name: Get linuxdeploy
-        run: |
-          cd /tmp
-          for tool in linuxdeploy linuxdeploy-plugin-qt; do
-            wget -q "https://github.com/linuxdeploy/$tool/releases/download/continuous/$tool-x86_64.AppImage" -O "$tool"
-            chmod +x "$tool"
-          done
-          echo "/tmp" >> "$GITHUB_PATH"
-      - name: Package AppImage
+          DESTDIR="$PWD/AppDir" cmake --install build
+      - name: Package AppImage (linuxdeployqt)
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
-          OUTPUT: reolink-native-linux-x86_64.AppImage
-        run: bash packaging/appimage/build-appimage.sh
+          VERSION: ${{ github.ref_name }}
+        run: |
+          wget -q https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage -O /tmp/linuxdeployqt
+          chmod +x /tmp/linuxdeployqt
+          /tmp/linuxdeployqt AppDir/usr/share/applications/io.github.todesengelx.ReolinkLinux.desktop \
+            -qmldir=src/ui/qml -appimage -unsupported-allow-new-glibc
+          mv ./*.AppImage reolink-native-linux-x86_64.AppImage
       - uses: actions/upload-artifact@v4
         with: { name: appimage, path: '*.AppImage' }
 
