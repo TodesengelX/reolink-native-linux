@@ -847,6 +847,8 @@ void DeviceManager::startBaichuanPlayback(int row, qint64 startEpoch, StreamPlay
 
     auto client = std::make_shared<BaichuanClient>(p);
     client->start();
+    m_playbackClient = client; // weak — for in-place seek; StreamPlayer owns lifetime
+    m_playbackRow = row;
     // The sub stream is always H.264; the main stream's codec is per-channel.
     const bool h265 = mainStream && e.mainCodec == QLatin1String("h265");
     player->setExpectedSize(mainStream ? e.mainSize : e.subSize);
@@ -855,6 +857,14 @@ void DeviceManager::startBaichuanPlayback(int row, qint64 startEpoch, StreamPlay
         h265 ? QStringLiteral("hevc") : QStringLiteral("h264"),
         [client] { client->stop(); });
     player->start();
+}
+
+bool DeviceManager::seekBaichuanPlayback(int row, qint64 startEpoch)
+{
+    if (row != m_playbackRow)
+        return false;
+    auto client = m_playbackClient.lock();
+    return client && client->seek(startEpoch);
 }
 
 void DeviceManager::fetchSettings(int row, const QStringList &getCommands)

@@ -28,6 +28,7 @@ public:
         bool keyFrame = false;
         Codec codec = Codec::Unknown;
         quint32 microseconds = 0; // presentation time source
+        quint32 time = 0;         // POSIX UTC wall-clock of the frame (0 if absent)
         QByteArray annexB;        // raw elementary-stream bytes, feed to a decoder
     };
 
@@ -40,6 +41,10 @@ public:
 
     int declaredWidth() const { return m_width; }
     int declaredHeight() const { return m_height; }
+
+    // Discard the rolling buffer (e.g. on seek, so a partial frame from the old
+    // position isn't spliced onto the new stream).
+    void reset() { m_buf.clear(); }
 
 private:
     QByteArray m_buf;

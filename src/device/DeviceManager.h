@@ -13,6 +13,7 @@
 #include <memory>
 
 namespace rl {
+class BaichuanClient;
 class ReolinkHttpClient;
 class StreamPlayer;
 }
@@ -112,6 +113,10 @@ public:
     // startEpoch straight into `player` — realtime, frame-accurate, full HEVC main.
     Q_INVOKABLE void startBaichuanPlayback(int row, qint64 startEpoch, rl::StreamPlayer *player,
                                            bool mainStream = true);
+    // Seek the active Baichuan playback (same row) to a new instant in place — no
+    // reconnect. Returns false if there's no live session for `row` (caller should
+    // then startBaichuanPlayback instead).
+    Q_INVOKABLE bool seekBaichuanPlayback(int row, qint64 startEpoch);
 
     // Settings: fetch a batch of Get* commands (emits settingsLoaded with a map
     // of cmd -> value) and apply one Set* command (emits settingApplied).
@@ -212,6 +217,11 @@ private:
     // Keyed by "hostId:channel" so each NVR camera is tracked independently.
     QHash<QString, api::DetectionState> m_lastDetection; // for 0->1 edge detection
     QHash<QString, bool> m_pollInFlight;                 // avoid overlapping polls
+
+    // The in-flight Baichuan playback session, so a scrub can seek it in place.
+    // Weak: the StreamPlayer owns the client's lifetime.
+    std::weak_ptr<BaichuanClient> m_playbackClient;
+    int m_playbackRow = -1;
 };
 
 } // namespace rl

@@ -263,33 +263,56 @@ bool BaichuanClient::startStream(QTcpSocket &sock, const QByteArray &aesKey)
         return true;
     }
 
-    // Recorded playback BY TIME (cmd 143): stream from an arbitrary instant, so the
-    // timeline can seek anywhere without a per-file search. Structure verified across
-    // independent PCAP-derived implementations: a FileInfoList/FileInfo carrying the
-    // channel, stream, and a start/end time range. Media follows on this msg_num.
-    const QDateTime start = QDateTime::fromSecsSinceEpoch(m_p.startEpoch);
+    // Recorded playback by time (cmd 143). Media follows on msg_num 20.
+    sendPlayback(sock, aesKey, m_p.startEpoch);
+    m_streamTail = netBuf;
+    return true;
+}
+
+// Request recorded playback from `startEpoch` by time (cmd 143). Used both to
+// start playback and to seek in place. Structure verified across independent
+// PCAP-derived implementations: a FileInfoList/FileInfo with the channel, stream,
+// and a start/end time range.
+void BaichuanClient::sendPlayback(QTcpSocket &sock, const QByteArray &aesKey, qint64 startEpoch)
+{
+    const quint8 streamByte = m_p.mainStream ? 0 : 1;
+    const QByteArray streamName = m_p.mainStream ? QByteArrayLiteral("mainStream")
+                                                 : QByteArrayLiteral("subStream");
+    const QDateTime start = QDateTime::fromSecsSinceEpoch(startEpoch);
     const QDateTime dayEnd(start.date(), QTime(23, 59, 59));
     const QByteArray uid = m_p.uid.toUtf8();
     const QByteArray ch = QByteArray::number(m_p.channel);
     const QByteArray uidEl = uid.isEmpty() ? QByteArray() : ("<uid>" + uid + "</uid>\n");
 
-    QByteArray byTime =
+    const QByteArray byTime =
         "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<FileInfoList version=\"1.1\">\n<FileInfo>\n"
         "<logicChnBitmap>255</logicChnBitmap>\n<channelId>" + ch + "</channelId>\n" + uidEl +
         "<supportSub>" + QByteArray(m_p.mainStream ? "0" : "1") + "</supportSub>\n"
-        "<streamType>" + streamName.toUtf8() + "</streamType>\n"
+        "<streamType>" + streamName + "</streamType>\n"
         + timeXml(QStringLiteral("startTime"), start) + "\n"
         + timeXml(QStringLiteral("endTime"), dayEnd) + "\n</FileInfo>\n</FileInfoList>\n</body>\n";
     sock.write(frame(143, m_p.channel, streamByte, 20, 0, 0x6414, bc::aesCfb(byTime, aesKey, false)));
     sock.flush();
-    m_streamTail = netBuf;
-    return true; // media follows on msg_num 20
+}
+
+bool BaichuanClient::seek(qint64 startEpoch)
+{
+    if (startEpoch <= 0)
+        return false;
+    QMutexLocker lock(&m_mutex);
+    if (m_finished || m_abort.load())
+        return false;
+    m_seekEpoch = startEpoch;
+    return true;
 }
 
 void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint16 streamMsgNum)
 {
     BcMediaParser parser;
     bool started = false;
+    // After a seek, discard old in-flight frames until an I-frame at the new
+    // position (POSIX seconds); 0 = no seek pending.
+    qint64 seekTarget = 0;
     // Recorded playback is delivered faster than realtime; pace it to 1x from the
     // frame timestamps so it doesn't fast-forward. Live preview is not paced.
     const bool pace = m_p.startEpoch > 0;
@@ -305,7 +328,12 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
         if (!started) {
             if (!f.keyFrame)
                 return; // recorded playback opens mid-GOP; wait for the first I-frame
+            // On a seek, the connection still carries old-position frames briefly;
+            // drop them until an I-frame lands at the requested time.
+            if (seekTarget > 0 && f.time != 0 && qAbs(qint64(f.time) - seekTarget) > 120)
+                return;
             started = true;
+            seekTarget = 0;
         }
         if (pace && f.microseconds) {
             if (!clock.isValid()) {
@@ -330,6 +358,28 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
     Msg m;
     int stalls = 0;
     while (!m_abort.load()) {
+        // In-place seek: reissue by-time playback and reset the media pipeline. The
+        // BC message framing stays intact (continuous connection); only the BCMedia
+        // layer resets, resyncing on the new position's first I-frame.
+        qint64 seekTo = 0;
+        {
+            QMutexLocker lock(&m_mutex);
+            if (m_seekEpoch > 0) {
+                seekTo = m_seekEpoch;
+                m_seekEpoch = 0;
+            }
+        }
+        if (seekTo > 0) {
+            sendPlayback(sock, aesKey, seekTo);
+            parser.reset();
+            started = false;
+            seekTarget = seekTo; // discard until an I-frame at the new position
+            clock.invalidate();
+            firstMicros = 0;
+            QMutexLocker lock(&m_mutex);
+            m_ring.clear(); // drop queued old-position frames so playback jumps
+            m_cond.wakeAll();
+        }
         if (!parseMessage(netBuf, m)) {
             // Short wait so abort is honored quickly; recorded playback bursts then
             // stalls, so nudge it with a keep-alive after ~1s of silence.

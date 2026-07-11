@@ -36,6 +36,14 @@ Item {
     property bool active: true
     onActiveChanged: if (!active) player.stop()
 
+    // Advance the playhead in realtime while streaming, so the timeline cursor
+    // tracks the current position (and play/pause resumes from where you are).
+    Timer {
+        interval: 1000; repeat: true
+        running: player.state === StreamPlayer.Streaming
+        onTriggered: if (page.playheadSecs < 86399) page.playheadSecs += 1
+    }
+
     function refresh() {
         if (page.deviceRow >= 0)
             Devices.searchRecordings(page.deviceRow, page.selYear, page.selMonth, page.selDay);
@@ -81,8 +89,13 @@ Item {
     function playHd(sec) {
         if (page.deviceRow < 0)
             return;
-        player.loop = false;
         statusText.text = qsTr("HD");
+        // Seek the running session in place (no reconnect) when possible; else open
+        // a fresh Baichuan session.
+        if (player.state === StreamPlayer.Streaming
+            && Devices.seekBaichuanPlayback(page.deviceRow, epochAt(sec)))
+            return;
+        player.loop = false;
         Devices.startBaichuanPlayback(page.deviceRow, epochAt(sec), player, true);
     }
 

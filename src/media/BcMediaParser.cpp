@@ -67,6 +67,8 @@ int BcMediaParser::append(const QByteArray &mediaBytes)
             const quint32 payloadSize = le32(b + 8);
             const quint32 addHdr = le32(b + 12);
             const quint32 micros = le32(b + 16);
+            // POSIX wall-clock time rides at offset 24 when the extra header is present.
+            const quint32 time = (addHdr >= 4) ? le32(b + 24) : 0;
             const int dataStart = 24 + static_cast<int>(addHdr);
             const int total = dataStart + static_cast<int>(payloadSize) + padFor(payloadSize);
             if (m_buf.size() < total)
@@ -74,6 +76,7 @@ int BcMediaParser::append(const QByteArray &mediaBytes)
             VideoFrame f;
             f.keyFrame = keyFrame;
             f.microseconds = micros;
+            f.time = time;
             if (b[4] == 'H' && b[5] == '2' && b[6] == '6')
                 f.codec = (b[7] == '5') ? Codec::H265 : Codec::H264;
             f.annexB = m_buf.mid(dataStart, static_cast<int>(payloadSize));
