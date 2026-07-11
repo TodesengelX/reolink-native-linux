@@ -78,8 +78,12 @@ Item {
             if (row === page.deviceRow) { page.fetched = true; page.status = error; }
         }
         function onSettingApplied(row, command, ok, error) {
-            if (row === page.deviceRow)
-                page.status = ok ? qsTr("%1 saved").arg(command) : (command + ": " + error);
+            if (row !== page.deviceRow)
+                return;
+            page.status = ok ? qsTr("%1 saved").arg(command) : (command + ": " + error);
+            // Reflect user add/remove/password changes immediately.
+            if (ok && (command === "AddUser" || command === "DelUser" || command === "ModifyUser"))
+                page.fetch();
         }
     }
 
@@ -199,6 +203,14 @@ Item {
                 }
             }
         }
+    }
+
+    // Add-user / change-password dialog for the Users panel.
+    UserEditDialog { id: userDialog; deviceRow: page.deviceRow }
+    function openUserDialog(mode, name) {
+        userDialog.mode = mode;
+        userDialog.userName = name || "";
+        userDialog.open();
     }
 
     // ---- Reusable form controls -------------------------------------------
@@ -584,15 +596,29 @@ Item {
         }
     }
 
-    // ---- Users panel (host-level, read-only list) ----
+    // ---- Users panel (host-level) ----
     Component {
         id: usersPanel
         ColumnLayout {
             spacing: Theme.spacing
+
+            component MiniBtn: Rectangle {
+                property string label: ""
+                property bool danger: false
+                signal clicked()
+                implicitWidth: mbTxt.implicitWidth + 16; implicitHeight: 24; radius: 4
+                color: mbHover.hovered ? (danger ? Theme.danger : Theme.accentDim) : Theme.surfaceAlt
+                border.color: danger ? Theme.danger : Theme.border
+                Text { id: mbTxt; anchors.centerIn: parent; text: parent.label; color: Theme.text; font.pixelSize: 11 }
+                HoverHandler { id: mbHover }
+                TapHandler { onTapped: parent.clicked() }
+            }
+
             Repeater {
                 model: page.val("GetUser","User") || []
                 delegate: RowLayout {
                     required property var modelData
+                    property bool confirming: false
                     Layout.fillWidth: true
                     spacing: Theme.spacing
                     Text { text: "👤"; font.pixelSize: 12 }
@@ -603,13 +629,39 @@ Item {
                         Text { id: lvl; anchors.centerIn: parent
                                text: modelData.level || ""; color: Theme.textMuted; font.pixelSize: 11 }
                     }
+                    MiniBtn {
+                        visible: page.isAdmin
+                        label: qsTr("Password")
+                        onClicked: page.openUserDialog("password", modelData.userName)
+                    }
+                    MiniBtn {
+                        visible: page.isAdmin
+                        label: parent.confirming ? qsTr("Confirm remove") : qsTr("Remove")
+                        danger: parent.confirming
+                        onClicked: {
+                            if (parent.confirming) {
+                                Devices.applySetting(page.deviceRow, "DelUser",
+                                    { "User": { "userName": modelData.userName } });
+                                parent.confirming = false;
+                            } else {
+                                parent.confirming = true;
+                            }
+                        }
+                    }
                 }
             }
             Text { visible: (page.val("GetUser","User") || []).length === 0
                    text: page.status === "" ? qsTr("No users reported.") : qsTr("Loading…")
                    color: Theme.textMuted; font.pixelSize: 12 }
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border; visible: page.isAdmin }
+            MiniBtn {
+                visible: page.isAdmin
+                label: qsTr("+ Add user")
+                onClicked: page.openUserDialog("add", "")
+            }
             Item { Layout.fillHeight: true }
-            Text { text: qsTr("Adding/removing users and changing passwords is on the roadmap.")
+            Text { visible: !page.isAdmin
+                   text: qsTr("Managing users requires an administrator account.")
                    color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
         }
     }

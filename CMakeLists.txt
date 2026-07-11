@@ -68,6 +68,7 @@ set(APP_QML_FILES
     src/ui/qml/pages/DeviceSettingsPage.qml
     src/ui/qml/dialogs/AddDeviceDialog.qml
     src/ui/qml/dialogs/PropertiesDialog.qml
+    src/ui/qml/dialogs/UserEditDialog.qml
 )
 # Strip the src/ui/qml/ prefix so module paths are clean (Main.qml, pages/..., etc.)
 foreach(qml_file IN LISTS APP_QML_FILES)
