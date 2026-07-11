@@ -682,6 +682,7 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
         QString error;
         qint64 playbackOffsetSecs = 0;
         bool haveOffset = false;
+        QVector<std::pair<qint64, qint64>> files; // (start,end) wall-clock epochs
         if (batch.transportOk && !batch.results.isEmpty() && batch.results.first().ok) {
             const api::SearchResult sr = api::parseSearch(batch.results.first().value);
             for (const api::RecordingFile &f : sr.files) {
@@ -697,6 +698,9 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
                 seg["type"] = QStringLiteral("timer");
                 seg["startEpoch"] = static_cast<double>(f.start.toSecsSinceEpoch());
                 segments.append(seg);
+                files.append({f.start.toSecsSinceEpoch(),
+                              f.end.isValid() ? f.end.toSecsSinceEpoch()
+                                              : f.start.toSecsSinceEpoch() + 3600});
                 // Learn the NVR's playback-clock offset from the first valid file:
                 // the FLV endpoint seeks by PlaybackTime, not wall-clock StartTime.
                 if (!haveOffset && f.playbackTime.isValid()) {
@@ -711,11 +715,14 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
         }
         QMetaObject::invokeMethod(
             this,
-            [this, row, segments, days, year, month, error, playbackOffsetSecs, haveOffset] {
-                // Store the offset BEFORE emitting recordingsFound so a QML handler
-                // that immediately calls playbackUrl() sees the corrected clock.
-                if (haveOffset && row >= 0 && row < m_entries.size())
-                    m_entries[row].playbackOffsetSecs = playbackOffsetSecs;
+            [this, row, segments, days, year, month, error, playbackOffsetSecs, haveOffset, files] {
+                // Store the offset + file boundaries BEFORE emitting recordingsFound
+                // so a QML handler that immediately calls playbackUrl() sees them.
+                if (row >= 0 && row < m_entries.size()) {
+                    if (haveOffset)
+                        m_entries[row].playbackOffsetSecs = playbackOffsetSecs;
+                    m_entries[row].recordingFiles = files;
+                }
                 if (error.isEmpty()) {
                     emit recordingsFound(row, segments);
                     emit recordingDaysFound(row, year, month, days);
@@ -742,14 +749,34 @@ QString DeviceManager::playbackUrl(int row, qint64 startEpoch, bool mainStream)
     const Entry &e = m_entries.at(row);
     if (e.rec.kind == QLatin1String("stream") || !e.primed)
         return {};
-    // The FLV endpoint seeks by the NVR's playback reference clock, which leads
-    // wall-clock by the device's UTC offset (learned during the day's search).
-    const QDateTime start = QDateTime::fromSecsSinceEpoch(startEpoch + e.playbackOffsetSecs);
+    // The FLV endpoint only accepts a start on a recording-file boundary and uses
+    // `seek` for the offset into that file — a mid-file start time is rejected. Snap
+    // to the file containing startEpoch (or the nearest earlier one for a gap).
+    qint64 fileStart = -1;
+    qint64 fileEnd = 0;
+    for (const auto &f : e.recordingFiles) {
+        if (startEpoch >= f.first && startEpoch <= f.second) {
+            fileStart = f.first;
+            fileEnd = f.second;
+            break;
+        }
+        if (f.first <= startEpoch && f.first > fileStart) { // nearest earlier start
+            fileStart = f.first;
+            fileEnd = f.second;
+        }
+    }
+    if (fileStart < 0)
+        return {}; // no recording covers this moment
+    const int seekSecs = static_cast<int>(qBound<qint64>(0, startEpoch - fileStart,
+                                                         qMax<qint64>(0, fileEnd - fileStart)));
+    // `start` is the file's PlaybackTime (its wall-clock start + the device's UTC
+    // offset), which the NVR requires as a boundary.
+    const QDateTime start = QDateTime::fromSecsSinceEpoch(fileStart + e.playbackOffsetSecs);
     // Reuse the app's existing session token so the NVR doesn't reject a second
     // login for the playback stream. Falls back to user/password if no token yet.
     const QString token = e.client ? e.client->token() : QString();
     return api::playbackFlvUrl(e.rec.addr, e.rec.port, e.rec.https, e.channel, mainStream, start,
-                               e.rec.username, e.password, token);
+                               e.rec.username, e.password, token, seekSecs);
 }
 
 void DeviceManager::requestHdClip(int row, qint64 startEpoch, int durationSecs)

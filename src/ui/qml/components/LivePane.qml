@@ -245,7 +245,13 @@ Rectangle {
                     font.pixelSize: 14
                 }
                 HoverHandler { id: hover }
-                TapHandler { onTapped: parent.activated() }
+                // ReleaseWithinBounds takes an exclusive grab on press so the
+                // full-pane MouseArea (click-to-select / pan) behind the video
+                // can't steal the tap.
+                TapHandler {
+                    gesturePolicy: TapHandler.ReleaseWithinBounds
+                    onTapped: parent.activated()
+                }
             }
 
             // Quality: Fluent / (Balanced) / Clear. Balanced omitted until wired.

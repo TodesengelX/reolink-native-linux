@@ -390,7 +390,7 @@ SearchResult parseSearch(const Json &value)
 
 QString playbackFlvUrl(const QString &host, int port, bool https, int channel, bool mainStream,
                        const QDateTime &start, const QString &username, const QString &password,
-                       const QString &token)
+                       const QString &token, int seekSecs)
 {
     Q_UNUSED(port); // the flv endpoint is on the web port; app=bcs handles routing
     const QString scheme = https ? QStringLiteral("https") : QStringLiteral("http");
@@ -398,11 +398,12 @@ QString playbackFlvUrl(const QString &host, int port, bool https, int channel, b
     // The official web client maps stream -> wire `type` via EnumRTMPStreamType:
     // main (CLEAR) => 0, sub (FLUENT) => 1. (Our earlier 1/0 was inverted.)
     QString base = QStringLiteral("%1://%2/flv?port=1935&app=bcs&stream=playback.bcs&channel=%3"
-                                  "&type=%4&start=%5&seek=0")
+                                  "&type=%4&start=%5&seek=%6")
                        .arg(scheme, hostForUrl(host))
                        .arg(channel)
                        .arg(mainStream ? 0 : 1)
-                       .arg(ts);
+                       .arg(ts)
+                       .arg(seekSecs);
     if (!token.isEmpty())
         return base + QStringLiteral("&token=") +
                QString::fromUtf8(QUrl::toPercentEncoding(token));

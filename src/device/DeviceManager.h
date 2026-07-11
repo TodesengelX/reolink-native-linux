@@ -167,6 +167,10 @@ private:
         // clock (PlaybackTime − StartTime), learned from the last recording search.
         // The HTTP-FLV playback endpoint seeks by this reference, not wall-clock.
         qint64 playbackOffsetSecs = 0;
+        // Recording file boundaries (wall-clock start,end epochs) from the last
+        // search. FLV playback must start on a boundary and use `seek` for the
+        // offset into the file, so a scrub is snapped to the containing file.
+        QVector<std::pair<qint64, qint64>> recordingFiles;
         // Persistent authenticated client for the host, shared by its channels.
         std::shared_ptr<ReolinkHttpClient> client;
     };

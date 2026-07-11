@@ -193,18 +193,19 @@ SearchResult parseSearch(const Json &value);
 // HTTP-FLV playback stream for an NVR recording (verified on RLN8-410):
 //   <scheme>://host/flv?port=1935&app=bcs&stream=playback.bcs&channel=N
 //     &type=0|1&start=YYYYMMDDHHMMSS&seek=0&user=U&password=P
-// `start` MUST be the file's PlaybackTime (RecordingFile::playbackTime), i.e. the
-// NVR's playback reference clock — passing the wall-clock StartTime makes the NVR
-// accept the request then immediately close the socket (empty response). Both the
-// PlaybackTime and the `type` mapping below were confirmed against the NVR's own
-// web client (PlayerPlayback.constructH5Url + EnumRTMPStreamType).
+// `start` MUST be the PlaybackTime of a recording FILE BOUNDARY — the NVR rejects
+// an arbitrary mid-file start (empty response). Use `seekSecs` to play from an
+// offset into that file. `start` is the NVR's playback reference clock (leads
+// wall-clock StartTime by the device's UTC offset); passing wall-clock StartTime
+// also fails. PlaybackTime + `type` mapping confirmed against the NVR's own web
+// client (PlayerPlayback.constructH5Url + EnumRTMPStreamType).
 // mainStream picks type=0 (main) vs type=1 (sub). Credentials are embedded
 // (openable directly by libavformat) — callers must redact them from logs.
 // When token is non-empty it is used (reuses the app's session, avoiding a
 // second login the NVR may reject); otherwise user/password are embedded.
 QString playbackFlvUrl(const QString &host, int port, bool https, int channel,
                        bool mainStream, const QDateTime &start, const QString &username,
-                       const QString &password, const QString &token = {});
+                       const QString &password, const QString &token = {}, int seekSecs = 0);
 
 // ---- Full-resolution clip download (NvrDownload + Download) ----------------
 // HTTP-FLV can't carry the HEVC main stream, so full-res playback goes through
