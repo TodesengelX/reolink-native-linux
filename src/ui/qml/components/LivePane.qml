@@ -18,7 +18,7 @@ Rectangle {
     property int deviceRow: -1     // row in the Devices model (-1 = empty slot)
     property string label: ""
     property bool selected: false
-    property bool forceMain: false // maximized panes pull the main stream
+    property bool forceMain: false // maximizing DEFAULTS a pane to the main stream
     property bool pageActive: true // false when the Live View page isn't on screen
 
     // Capabilities (from the Devices model; false for empty slots). Named cap*
@@ -32,8 +32,13 @@ Rectangle {
     property bool talkActive: false
 
     // User stream-quality preference: false = Fluent (sub), true = Clear (main).
+    // This alone decides which stream plays — so the SD/HD toolbar toggle works in
+    // every layout, including a maximized pane. Maximizing/restoring just seeds a
+    // sensible default (main when big, sub in the grid) via onForceMainChanged; the
+    // user can still override it with the toggle afterwards.
     property bool qualityMain: false
-    readonly property bool effectiveMain: forceMain || qualityMain
+    readonly property bool effectiveMain: qualityMain
+    onForceMainChanged: qualityMain = forceMain
     readonly property bool hasSource: deviceRow >= 0
     property string sourceUrl: ""
 
