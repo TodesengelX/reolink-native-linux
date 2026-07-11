@@ -24,10 +24,11 @@ Item {
     }
 
     readonly property var categories: [
-        { key: "display",   label: qsTr("Display / Image"), cmds: ["GetOsd", "GetImage", "GetIsp"] },
+        { key: "image",     label: qsTr("Image"),           cmds: ["GetImage", "GetIsp", "GetIrLights"] },
+        { key: "display",   label: qsTr("Display / OSD"),    cmds: ["GetOsd"] },
         { key: "encoding",  label: qsTr("Encoding"),        cmds: ["GetEnc"] },
         { key: "recording", label: qsTr("Recording"),       cmds: ["GetRec"] },
-        { key: "detection", label: qsTr("Detection / Alarm"),cmds: ["GetMdAlarm", "GetAiAlarm"] },
+        { key: "detection", label: qsTr("Detection / Alerts"), cmds: ["GetMdAlarm", "GetAiCfg", "GetPush"] },
         { key: "network",   label: qsTr("Network"),         cmds: ["GetLocalLink", "GetNetPort"] },
         { key: "storage",   label: qsTr("Storage"),         cmds: ["GetHddInfo"] },
         { key: "system",    label: qsTr("System"),          cmds: ["GetDevInfo", "GetTime"] }
@@ -171,13 +172,173 @@ Item {
                     Layout.fillHeight: true
                     sourceComponent: {
                         switch (page.category) {
+                        case "image": return imagePanel;
                         case "encoding": return encodingPanel;
                         case "display": return displayPanel;
+                        case "detection": return detectionPanel;
                         case "system": return systemPanel;
                         default: return genericPanel;
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // ---- Reusable form controls -------------------------------------------
+    // A labeled slider that writes once, on release (so dragging doesn't spam the
+    // NVR). `commit` receives the integer value.
+    component SliderRow: RowLayout {
+        property string label: ""
+        property int from: 0
+        property int to: 255
+        property int value: 0
+        property bool enabledCtl: true
+        signal commit(int v)
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        Text { text: parent.label; color: Theme.textMuted; font.pixelSize: 12; Layout.preferredWidth: 150 }
+        Slider {
+            id: sld
+            Layout.fillWidth: true
+            enabled: parent.enabledCtl
+            from: parent.from; to: parent.to
+            value: parent.value
+            stepSize: 1
+            onPressedChanged: if (!pressed) parent.commit(Math.round(value))
+        }
+        Text { text: Math.round(sld.value); color: Theme.text; font.pixelSize: 12; Layout.preferredWidth: 32 }
+    }
+
+    // A labeled dropdown of string options; writes the chosen option on change.
+    component EnumRow: RowLayout {
+        property string label: ""
+        property var options: []
+        property string value: ""
+        property bool enabledCtl: true
+        signal commit(string v)
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        Text { text: parent.label; color: Theme.textMuted; font.pixelSize: 12; Layout.preferredWidth: 150 }
+        ComboBox {
+            id: cb
+            Layout.preferredWidth: 200
+            enabled: parent.enabledCtl
+            model: parent.options
+            currentIndex: Math.max(0, parent.options.indexOf(parent.value))
+            onActivated: parent.commit(currentText)
+        }
+        Item { Layout.fillWidth: true }
+    }
+
+    component SwitchRow: RowLayout {
+        property string label: ""
+        property bool checked: false
+        property bool enabledCtl: true
+        signal commit(bool v)
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        Text { text: parent.label; color: Theme.textMuted; font.pixelSize: 12; Layout.preferredWidth: 150 }
+        Switch { checked: parent.checked; enabled: parent.enabledCtl; onToggled: parent.commit(checked) }
+        Item { Layout.fillWidth: true }
+    }
+
+    // ---- Image panel (brightness/contrast/… + day-night + IR) -------------
+    Component {
+        id: imagePanel
+        ColumnLayout {
+            spacing: Theme.spacing
+            SliderRow {
+                label: qsTr("Brightness"); enabledCtl: page.isAdmin
+                value: page.val("GetImage","Image","bright") || 128
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetImage",
+                    { "Image": { "channel": Devices.channelOf(page.deviceRow), "bright": v } })
+            }
+            SliderRow {
+                label: qsTr("Contrast"); enabledCtl: page.isAdmin
+                value: page.val("GetImage","Image","contrast") || 128
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetImage",
+                    { "Image": { "channel": Devices.channelOf(page.deviceRow), "contrast": v } })
+            }
+            SliderRow {
+                label: qsTr("Saturation"); enabledCtl: page.isAdmin
+                value: page.val("GetImage","Image","saturation") || 128
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetImage",
+                    { "Image": { "channel": Devices.channelOf(page.deviceRow), "saturation": v } })
+            }
+            SliderRow {
+                label: qsTr("Sharpness"); enabledCtl: page.isAdmin
+                value: page.val("GetImage","Image","sharpen") || 128
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetImage",
+                    { "Image": { "channel": Devices.channelOf(page.deviceRow), "sharpen": v } })
+            }
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+            EnumRow {
+                label: qsTr("Day / Night"); enabledCtl: page.isAdmin
+                options: ["Auto", "Color", "Black&White"]
+                value: page.val("GetIsp","Isp","dayNight") || "Auto"
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetIsp",
+                    { "Isp": { "channel": Devices.channelOf(page.deviceRow), "dayNight": v } })
+            }
+            EnumRow {
+                label: qsTr("Infrared lights"); enabledCtl: page.isAdmin
+                options: ["Auto", "On", "Off"]
+                value: page.val("GetIrLights","IrLights","state") || "Auto"
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetIrLights",
+                    { "IrLights": { "channel": Devices.channelOf(page.deviceRow), "state": v } })
+            }
+            Item { Layout.fillHeight: true }
+            Text {
+                text: qsTr("Changes apply on release. Options come from the camera's GetImage/GetIsp ranges.")
+                color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap
+            }
+        }
+    }
+
+    // ---- Detection / Alerts panel (motion + AI types + push) --------------
+    Component {
+        id: detectionPanel
+        ColumnLayout {
+            spacing: Theme.spacing
+            Text { text: qsTr("Motion detection"); color: Theme.text; font.pixelSize: 13; font.bold: true }
+            SliderRow {
+                label: qsTr("Sensitivity"); from: 1; to: 50; enabledCtl: page.isAdmin
+                value: page.val("GetMdAlarm","MdAlarm","sensitivity") || 25
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetMdAlarm",
+                    { "MdAlarm": { "channel": Devices.channelOf(page.deviceRow), "sensitivity": v } })
+            }
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+            Text { text: qsTr("Smart (AI) detection"); color: Theme.text; font.pixelSize: 13; font.bold: true }
+            SwitchRow {
+                label: qsTr("People"); enabledCtl: page.isAdmin
+                checked: page.val("GetAiCfg","AiDetectType","people") === 1
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetAiCfg",
+                    { "channel": Devices.channelOf(page.deviceRow), "AiDetectType": { "people": v ? 1 : 0 } })
+            }
+            SwitchRow {
+                label: qsTr("Vehicles"); enabledCtl: page.isAdmin
+                checked: page.val("GetAiCfg","AiDetectType","vehicle") === 1
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetAiCfg",
+                    { "channel": Devices.channelOf(page.deviceRow), "AiDetectType": { "vehicle": v ? 1 : 0 } })
+            }
+            SwitchRow {
+                label: qsTr("Animals (pets)"); enabledCtl: page.isAdmin
+                checked: page.val("GetAiCfg","AiDetectType","dog_cat") === 1
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetAiCfg",
+                    { "channel": Devices.channelOf(page.deviceRow), "AiDetectType": { "dog_cat": v ? 1 : 0 } })
+            }
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+            Text { text: qsTr("Alerts"); color: Theme.text; font.pixelSize: 13; font.bold: true }
+            SwitchRow {
+                label: qsTr("Push notifications"); enabledCtl: page.isAdmin
+                checked: page.val("GetPush","Push","enable") === 1 || page.val("GetPush","Push","schedule","enable") === 1
+                onCommit: (v) => Devices.applySetting(page.deviceRow, "SetPush",
+                    { "Push": { "channel": Devices.channelOf(page.deviceRow), "enable": v ? 1 : 0 } })
+            }
+            Item { Layout.fillHeight: true }
+            Text {
+                text: qsTr("Detection zones and per-type sensitivity/schedules are on the roadmap.")
+                color: Theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap
             }
         }
     }
