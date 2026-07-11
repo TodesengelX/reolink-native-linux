@@ -15,6 +15,15 @@ Rectangle {
     signal cameraProperties(int row)   // show the camera properties dialog
     signal nvrProperties(var host)     // show the NVR properties dialog (hostInfo map)
 
+    // Collapsed NVR hosts (hostId key -> true). Reassigned wholesale so the
+    // bindings that read it re-evaluate (QML doesn't observe deep mutation).
+    property var collapsed: ({})
+    function toggleCollapse(key) {
+        var c = Object.assign({}, collapsed);
+        c[key] = !c[key];
+        collapsed = c;
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -76,7 +85,11 @@ Rectangle {
                     anchors.leftMargin: Theme.spacing
                     anchors.rightMargin: Theme.spacing
                     spacing: 8
-                    Text { text: "▾"; color: Theme.textMuted; font.pixelSize: 10 }
+                    Text {
+                        text: root.collapsed[nvrHeader.section] ? "▸" : "▾"
+                        color: Theme.textMuted; font.pixelSize: 11
+                        Layout.preferredWidth: 10
+                    }
                     Rectangle { // online dot
                         width: 8; height: 8; radius: 4
                         color: nvrHeader.host && nvrHeader.host.online ? Theme.online : Theme.textMuted
@@ -107,7 +120,14 @@ Rectangle {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onClicked: nvrMenu.popup()
+                    // Left-click expands/collapses the camera list; only
+                    // right-click brings up the management menu.
+                    onClicked: (m) => {
+                        if (m.button === Qt.RightButton)
+                            nvrMenu.popup();
+                        else
+                            root.toggleCollapse(nvrHeader.section);
+                    }
                 }
                 Menu {
                     id: nvrMenu
@@ -131,14 +151,18 @@ Rectangle {
                 required property string status
                 required property string model
                 required property string kind
+                required property int hostId
                 required property bool online
                 required property int batteryPercent
                 required property bool batteryCharging
 
                 readonly property bool underNvr: kind === "nvr"
+                readonly property bool hidden: underNvr && root.collapsed[hostId] === true
 
                 width: ListView.view.width
-                height: 48
+                height: hidden ? 0 : 48
+                visible: !hidden
+                clip: true
                 color: delegateArea.containsMouse ? Theme.surfaceAlt : "transparent"
 
                 RowLayout {
