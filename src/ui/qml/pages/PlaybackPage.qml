@@ -257,20 +257,30 @@ Item {
                 spacing: Theme.spacing
                 component Ctl: Rectangle {
                     property string glyph: ""
+                    property string tip: ""
                     signal activated()
                     width: 34; height: 30; radius: Theme.radius
                     color: cHover.hovered ? Theme.surfaceAlt : Theme.surface
                     border.color: Theme.border
                     Text { anchors.centerIn: parent; text: parent.glyph; color: Theme.text; font.pixelSize: 14 }
                     HoverHandler { id: cHover }
+                    ToolTip {
+                        visible: cHover.hovered && tip !== ""
+                        delay: 500
+                        x: (parent.width - width) / 2
+                        y: -height - 8
+                        contentItem: Text { text: tip; color: Theme.text; font.pixelSize: 11 }
+                        background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: 4 }
+                    }
                     TapHandler { onTapped: parent.activated() }
                 }
                 // Play/pause resumes at the current playhead in the active quality
                 // (a StreamPlayer session is one-shot, so "play" re-opens the stream).
                 Ctl { glyph: player.state === StreamPlayer.Streaming ? "⏸" : "▶"
+                      tip: player.state === StreamPlayer.Streaming ? qsTr("Pause") : qsTr("Play")
                       onActivated: player.state === StreamPlayer.Streaming
                                    ? player.stop() : page.playAt(page.playheadSecs) }
-                Ctl { glyph: "⏹"; onActivated: player.stop() }
+                Ctl { glyph: "⏹"; tip: qsTr("Stop"); onActivated: player.stop() }
                 Item { Layout.fillWidth: true }
                 // Quality toggle: SD = light sub-stream (FLV) scrubbing; HD = full-res
                 // main stream over native Baichuan.
@@ -285,6 +295,18 @@ Item {
                         font.pixelSize: 12; font.bold: true
                     }
                     HoverHandler { id: hdHover }
+                    ToolTip {
+                        visible: hdHover.hovered
+                        delay: 500
+                        x: (parent.width - width) / 2
+                        y: -height - 8
+                        contentItem: Text {
+                            text: page.hdMode ? qsTr("Switch to SD (light scrubbing)")
+                                              : qsTr("Switch to HD (full resolution)")
+                            color: Theme.text; font.pixelSize: 11
+                        }
+                        background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: 4 }
+                    }
                     TapHandler {
                         onTapped: {
                             page.hdMode = !page.hdMode;

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import ReolinkApp
 import ReolinkApp.Core
@@ -97,6 +98,14 @@ Rectangle {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.fullscreenRequested()
+            }
+            ToolTip {
+                visible: fullscreenArea.containsMouse
+                delay: 500
+                x: (parent.width - width) / 2
+                y: parent.height + 6
+                contentItem: Text { text: qsTr("Fullscreen (F11)"); color: Theme.text; font.pixelSize: 11 }
+                background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: 4 }
             }
         }
     }

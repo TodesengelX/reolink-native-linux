@@ -264,6 +264,7 @@ Rectangle {
 
             component ToolButton: Rectangle {
                 property string glyph: ""
+                property string tip: ""
                 property bool active: false
                 property bool enabledTool: true
                 signal activated()
@@ -277,6 +278,14 @@ Rectangle {
                     font.pixelSize: 14
                 }
                 HoverHandler { id: hover }
+                ToolTip {
+                    visible: hover.hovered && tip !== ""
+                    delay: 500
+                    x: (parent.width - width) / 2
+                    y: -height - 8
+                    contentItem: Text { text: tip; color: Theme.text; font.pixelSize: 11 }
+                    background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: 4 }
+                }
                 // ReleaseWithinBounds takes an exclusive grab on press so the
                 // full-pane MouseArea (click-to-select / pan) behind the video
                 // can't steal the tap.
@@ -289,25 +298,30 @@ Rectangle {
             // Quality: Fluent / (Balanced) / Clear. Balanced omitted until wired.
             ToolButton {
                 glyph: root.qualityMain ? "HD" : "SD"
+                tip: root.qualityMain ? qsTr("Switch to Fluent (SD)") : qsTr("Switch to Clear (HD)")
                 active: root.qualityMain
                 onActivated: root.qualityMain = !root.qualityMain
             }
             ToolButton {
                 glyph: "◉"; enabledTool: true
+                tip: qsTr("Save snapshot")
                 onActivated: Devices.snapshot(root.deviceRow)
             }
             // Manual record: taps the displayed stream, no second connection.
             ToolButton {
                 glyph: "⏺"; active: player.recording
+                tip: player.recording ? qsTr("Stop recording") : qsTr("Record video")
                 onActivated: player.recording ? player.stopRecording() : player.startRecording()
             }
             ToolButton {
                 glyph: "⊕"; active: root.zoom > 1.01
+                tip: root.zoom > 1.01 ? qsTr("Reset zoom") : qsTr("Digital zoom (scroll to adjust)")
                 onActivated: { if (root.zoom > 1.01) { root.zoom = 1; root.panX = 0; root.panY = 0; }
                                else root.zoom = 2; }
             }
             ToolButton {
                 glyph: "⇅"; active: root.ptzOpen; enabledTool: root.capPtz
+                tip: qsTr("PTZ controls")
                 onActivated: root.ptzOpen = !root.ptzOpen
             }
             // Two-way talk (push-to-hold). Baichuan talk path is the primary
@@ -315,10 +329,12 @@ Rectangle {
             // this toggles the UI state and mic intent today.
             ToolButton {
                 glyph: "🎙"; active: root.talkActive; enabledTool: root.capTalk
+                tip: qsTr("Two-way talk (coming soon)")
                 onActivated: root.talkActive = !root.talkActive
             }
             ToolButton {
                 glyph: "📢"; enabledTool: root.capSiren
+                tip: qsTr("Sound siren")
                 // AudioAlarmPlay takes its fields FLAT in param (verified on real
                 // firmware — a Set*-style wrapped object gets rspCode -4 "param
                 // error"). alarm_mode "times"/1 sounds a single blast.
@@ -327,6 +343,7 @@ Rectangle {
             }
             ToolButton {
                 glyph: "💡"; active: root.floodOn; enabledTool: root.capFloodlight
+                tip: qsTr("Toggle floodlight")
                 onActivated: {
                     root.floodOn = !root.floodOn;       // optimistic; toast confirms
                     Devices.toggleFloodlight(root.deviceRow);
@@ -335,10 +352,12 @@ Rectangle {
             // Pop out into a detached window (drag to another monitor).
             ToolButton {
                 glyph: "⧉"
+                tip: qsTr("Pop out to a window")
                 onActivated: if (root.hasSource) root.popOut(root.deviceRow, root.label)
             }
             ToolButton {
                 glyph: "⛶"
+                tip: root.forceMain ? qsTr("Restore grid") : qsTr("Maximize")
                 onActivated: if (root.hasSource) root.toggleMaximize(root.paneIndex)
             }
         }

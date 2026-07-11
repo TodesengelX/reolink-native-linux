@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import ReolinkApp
 import ReolinkApp.Core
@@ -71,6 +72,18 @@ Item {
                             page.maximizedIndex = -1;
                         }
                     }
+                    ToolTip {
+                        visible: presetArea.containsMouse
+                        delay: 500
+                        x: (parent.width - width) / 2
+                        y: parent.height + 6
+                        contentItem: Text {
+                            text: modelData === 1 ? qsTr("Single pane")
+                                : qsTr("%1-pane grid").arg(modelData)
+                            color: Theme.text; font.pixelSize: 11
+                        }
+                        background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: 4 }
+                    }
                 }
             }
 
@@ -94,6 +107,14 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: page.fullscreenToggled()
+                }
+                ToolTip {
+                    visible: fsArea.containsMouse
+                    delay: 500
+                    x: (parent.width - width) / 2
+                    y: parent.height + 6
+                    contentItem: Text { text: qsTr("Fullscreen (F11)"); color: Theme.text; font.pixelSize: 11 }
+                    background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: 4 }
                 }
             }
         }
