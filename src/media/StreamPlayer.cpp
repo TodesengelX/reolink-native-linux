@@ -19,6 +19,7 @@ extern "C" {
 #include <libavutil/display.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/time.h>
 #include <libswscale/swscale.h>
 }
@@ -348,7 +349,16 @@ AVPixelFormat getHwFormat(AVCodecContext *ctx, const AVPixelFormat *fmts)
     for (const AVPixelFormat *p = fmts; *p != AV_PIX_FMT_NONE; ++p)
         if (*p == want)
             return *p;
-    return fmts[0]; // GPU surface not offered — take the software format
+    // Wanted GPU surface not offered (or hwaccel init failed and ffmpeg is
+    // re-asking): pick the first SOFTWARE format, not fmts[0] — the list leads
+    // with hw formats, and returning a refused one loops the failure (e.g. VAAPI
+    // rejecting 2160x7680, which exceeds its 4352 max height).
+    for (const AVPixelFormat *p = fmts; *p != AV_PIX_FMT_NONE; ++p) {
+        const AVPixFmtDescriptor *d = av_pix_fmt_desc_get(*p);
+        if (d && !(d->flags & AV_PIX_FMT_FLAG_HWACCEL))
+            return *p;
+    }
+    return fmts[0];
 }
 
 // Configures dec for hardware decode; returns the hw pixel format (or NONE).
@@ -551,6 +561,13 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
     // Drain one decoded frame at a time; shared by the normal and flush paths.
     auto receiveFrames = [&]() {
         while (avcodec_receive_frame(dec, frame) == 0 && !s->abort.load()) {
+            // Don't render frames the decoder knows are damaged (missing slices or
+            // references — e.g. Reolink's flawed RTSP output for 8K duo mains).
+            // A brief freeze beats a band of macroblock garbage.
+            if ((frame->flags & AV_FRAME_FLAG_CORRUPT) || frame->decode_error_flags) {
+                av_frame_unref(frame);
+                continue;
+            }
             // Hardware frames live on the GPU; pull them into system memory.
             AVFrame *decoded = frame;
             if (hwPixFmt != AV_PIX_FMT_NONE && frame->format == hwPixFmt) {

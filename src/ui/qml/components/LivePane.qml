@@ -41,7 +41,13 @@ Rectangle {
     readonly property bool effectiveMain: qualityMain
     onForceMainChanged: qualityMain = forceMain
     readonly property bool hasSource: deviceRow >= 0
-    property string sourceUrl: ""
+    // What this pane is currently streaming: an RTSP URL, or "bc:<row>" for native
+    // Baichuan HD live. HD (main) live goes over Baichuan because the NVR's RTSP
+    // output for 8K duo main streams is itself corrupt (verified against raw
+    // captures) — the official clients use Baichuan for live too. The grid's sub
+    // streams stay RTSP (clean, and the NVR only allows ~1 Baichuan session).
+    property string streamKey: ""
+    property bool bcFallback: false // Baichuan slot busy → RTSP main for this round
 
     signal toggleMaximize(int index)
     signal clicked(int index)
@@ -51,16 +57,53 @@ Rectangle {
         // Only stream when the pane is laid out AND its page is actually on screen
         // — otherwise hidden Live View panes keep streaming and exhaust the NVR's
         // limited session slots (starving Playback and other cameras).
-        var url = (deviceRow >= 0 && visible && pageActive)
-                  ? Devices.liveUrl(deviceRow, effectiveMain) : "";
-        if (url !== sourceUrl)
-            sourceUrl = url;
+        var want = deviceRow >= 0 && visible && pageActive;
+        var key = "";
+        if (want) {
+            if (effectiveMain && !bcFallback)
+                key = "bc:" + deviceRow;
+            else
+                key = Devices.liveUrl(deviceRow, effectiveMain);
+        }
+        if (key === streamKey)
+            return;
+        streamKey = key;
+        if (key === "") {
+            player.stop();
+        } else if (key.substring(0, 3) === "bc:") {
+            player.loop = false;
+            Devices.startBaichuanLive(root.deviceRow, player, true);
+        } else {
+            // Set loop before start() so the worker sees the right value from
+            // frame one (the declarative `loop:` binding can lag the handler).
+            player.loop = !key.startsWith("rtsp://") && !key.startsWith("rtmp://")
+                       && !key.startsWith("tcp://") && !key.startsWith("udp://");
+            // Declared size for the stream we're opening, so a transmitted-rotated
+            // main stream (e.g. Duo 3) is presented upright.
+            player.expectedSize = Devices.declaredSize(root.deviceRow, root.effectiveMain);
+            player.source = key;
+            player.start();
+        }
     }
-    onDeviceRowChanged: updateSource()
+    onDeviceRowChanged: { bcFallback = false; updateSource(); }
     onVisibleChanged: updateSource()
     onPageActiveChanged: updateSource()
-    onEffectiveMainChanged: updateSource()
+    onEffectiveMainChanged: { bcFallback = false; updateSource(); }
     Component.onCompleted: updateSource()
+
+    // The NVR grants only ~1 Baichuan session. If HD live can't get the slot,
+    // fall back to RTSP main once (artifact-prone on 8K duos, but beats a dead
+    // pane); the next SD/HD flip or camera change retries Baichuan.
+    Connections {
+        target: player
+        function onStateChanged() {
+            if (player.state === StreamPlayer.Error && !root.bcFallback
+                && root.streamKey.substring(0, 3) === "bc:") {
+                root.bcFallback = true;
+                root.updateSource();
+            }
+        }
+    }
 
     // Recompute when the backing device finishes priming / changes.
     Connections {
@@ -76,23 +119,6 @@ Rectangle {
         videoSink: video.videoSink
     }
 
-    onSourceUrlChanged: {
-        if (root.hasSource && root.sourceUrl.length > 0) {
-            // Set loop before start() so the worker sees the right value from
-            // frame one (the declarative `loop:` binding can lag the handler).
-            player.loop = !root.sourceUrl.startsWith("rtsp://")
-                       && !root.sourceUrl.startsWith("rtmp://")
-                       && !root.sourceUrl.startsWith("tcp://")
-                       && !root.sourceUrl.startsWith("udp://");
-            // Declared size for the stream we're opening, so a transmitted-rotated
-            // main stream (e.g. Duo 3) is presented upright.
-            player.expectedSize = Devices.declaredSize(root.deviceRow, root.effectiveMain);
-            player.source = root.sourceUrl;
-            player.start();
-        } else {
-            player.stop();
-        }
-    }
     Component.onDestruction: player.stop()
 
     // ---- Video with digital zoom ------------------------------------------

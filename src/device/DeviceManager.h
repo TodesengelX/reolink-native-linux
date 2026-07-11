@@ -120,6 +120,13 @@ public:
     // startEpoch straight into `player` — realtime, frame-accurate, full HEVC main.
     Q_INVOKABLE void startBaichuanPlayback(int row, qint64 startEpoch, rl::StreamPlayer *player,
                                            bool mainStream = true);
+    // Native LIVE view over Baichuan (cmd 3 Preview), for the maximized pane's HD
+    // stream. The NVR's RTSP output for 8K duo main streams is itself corrupt
+    // (verified: raw ffmpeg -c copy captures carry invalid NALUs), so HD live must
+    // go over Baichuan — the transport the official clients use. The NVR only
+    // allows ~1 concurrent Baichuan session; callers fall back to RTSP on error.
+    Q_INVOKABLE void startBaichuanLive(int row, rl::StreamPlayer *player,
+                                       bool mainStream = true);
     // Seek the active Baichuan playback (same row) to a new instant in place — no
     // reconnect. Returns false if there's no live session for `row` (caller should
     // then startBaichuanPlayback instead).
@@ -219,6 +226,8 @@ private:
     void validateAsync(qint64 hostId, const QString &newPassword = QString(),
                        bool storeNew = false);
     int rowForHostId(qint64 hostId) const;
+    // Shared body of startBaichuanPlayback/startBaichuanLive (startEpoch<=0 = live).
+    void startBaichuan(int row, qint64 startEpoch, rl::StreamPlayer *player, bool mainStream);
     void applyValidation(qint64 hostId, const Validation &v);
     void postValidation(qint64 hostId, const Validation &v); // marshals to GUI thread
     std::shared_ptr<ReolinkHttpClient> clientFor(int row);

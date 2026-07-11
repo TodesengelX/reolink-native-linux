@@ -853,10 +853,10 @@ void DeviceManager::requestHdClip(int row, qint64 startEpoch, int durationSecs)
     }));
 }
 
-void DeviceManager::startBaichuanPlayback(int row, qint64 startEpoch, StreamPlayer *player,
-                                          bool mainStream)
+void DeviceManager::startBaichuan(int row, qint64 startEpoch, StreamPlayer *player,
+                                  bool mainStream)
 {
-    if (row < 0 || row >= m_entries.size() || !player || startEpoch <= 0)
+    if (row < 0 || row >= m_entries.size() || !player)
         return;
     const Entry &e = m_entries.at(row);
     if (e.rec.kind == QLatin1String("stream") || !e.primed)
@@ -870,12 +870,14 @@ void DeviceManager::startBaichuanPlayback(int row, qint64 startEpoch, StreamPlay
     p.channel = e.channel;
     p.uid = e.uid;
     p.mainStream = mainStream;
-    p.startEpoch = startEpoch;
+    p.startEpoch = startEpoch; // <= 0 = live (cmd 3 Preview), else by-time playback
 
     auto client = std::make_shared<BaichuanClient>(p);
     client->start();
-    m_playbackClient = client; // weak — for in-place seek; StreamPlayer owns lifetime
-    m_playbackRow = row;
+    if (startEpoch > 0) {
+        m_playbackClient = client; // weak — for in-place seek; StreamPlayer owns lifetime
+        m_playbackRow = row;
+    }
     // The sub stream is always H.264; the main stream's codec is per-channel.
     const bool h265 = mainStream && e.mainCodec == QLatin1String("h265");
     player->setExpectedSize(mainStream ? e.mainSize : e.subSize);
@@ -884,6 +886,19 @@ void DeviceManager::startBaichuanPlayback(int row, qint64 startEpoch, StreamPlay
         h265 ? QStringLiteral("hevc") : QStringLiteral("h264"),
         [client] { client->stop(); });
     player->start();
+}
+
+void DeviceManager::startBaichuanPlayback(int row, qint64 startEpoch, StreamPlayer *player,
+                                          bool mainStream)
+{
+    if (startEpoch <= 0)
+        return;
+    startBaichuan(row, startEpoch, player, mainStream);
+}
+
+void DeviceManager::startBaichuanLive(int row, StreamPlayer *player, bool mainStream)
+{
+    startBaichuan(row, /*startEpoch=*/0, player, mainStream);
 }
 
 bool DeviceManager::seekBaichuanPlayback(int row, qint64 startEpoch)
