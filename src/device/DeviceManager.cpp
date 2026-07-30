@@ -73,6 +73,9 @@ static QString detKey(qint64 hostId, int channel)
 
 void DeviceManager::pollDetections()
 {
+    if (!m_pushWarmed)
+        warmPushCache();
+
     // Poll each HOST with a SINGLE batched request covering all its online
     // channels — Reolink NVRs are connection-limited, so opening one connection
     // per channel (5+ at once) starves live/playback streams. One connection per
@@ -1162,8 +1165,58 @@ void DeviceManager::fetchAlerts(int row)
             m[QStringLiteral("ok")] = false;
         }
         QMetaObject::invokeMethod(
-            this, [this, row, m] { emit alertsLoaded(row, m); }, Qt::QueuedConnection);
+            this, [this, row, m] {
+                if (m.contains(QStringLiteral("push")))
+                    m_pushEnabled[row] = m.value(QStringLiteral("push")).toInt();
+                emit alertsLoaded(row, m);
+            }, Qt::QueuedConnection);
     }));
+}
+
+bool DeviceManager::pushEnabledFor(qint64 hostId, int channel) const
+{
+    const int row = rowOfHostChannel(hostId, channel);
+    // Unknown (cache cold, or push not reported by the device) => allow the
+    // notification; only an explicit disabled (0) suppresses it.
+    return m_pushEnabled.value(row, 1) != 0;
+}
+
+QString DeviceManager::mdZoneBits(const QString &valueTable, int cells) const
+{
+    const QByteArray raw = QByteArray::fromBase64(valueTable.toLatin1());
+    QString out;
+    out.reserve(cells);
+    for (int i = 0; i < cells; ++i) {
+        const int byte = i / 8;
+        const bool on = byte < raw.size()
+                        && ((static_cast<quint8>(raw[byte]) >> (7 - (i % 8))) & 1);
+        out += on ? QLatin1Char('1') : QLatin1Char('0');
+    }
+    return out;
+}
+
+QString DeviceManager::mdZoneTable(const QString &bits) const
+{
+    const int cells = bits.size();
+    QByteArray raw((cells + 7) / 8, '\0');
+    for (int i = 0; i < cells; ++i)
+        if (bits.at(i) == QLatin1Char('1'))
+            raw[i / 8] = static_cast<char>(static_cast<quint8>(raw[i / 8])
+                                           | (1 << (7 - (i % 8))));
+    return QString::fromLatin1(raw.toBase64());
+}
+
+void DeviceManager::warmPushCache()
+{
+    int i = 0;
+    for (int row = 0; row < m_entries.size(); ++row) {
+        const Entry &e = m_entries.at(row);
+        if (e.rec.kind == QLatin1String("stream") || !e.primed)
+            continue;
+        m_pushWarmed = true;   // a camera is ready; don't re-warm every poll cycle
+        // Stagger so we never open several Baichuan settings sessions at once.
+        QTimer::singleShot(i++ * 1200, this, [this, row] { fetchAlerts(row); });
+    }
 }
 
 void DeviceManager::setAlertEnable(int row, const QString &kind, bool enable)
@@ -1189,7 +1242,9 @@ void DeviceManager::setAlertEnable(int row, const QString &kind, bool enable)
         bc.close();
         QMetaObject::invokeMethod(
             this,
-            [this, row, kind, ok] {
+            [this, row, kind, ok, enable] {
+                if (ok && kind == QLatin1String("push"))
+                    m_pushEnabled[row] = enable ? 1 : 0;
                 emit settingApplied(row, kind, ok,
                                     ok ? QString() : tr("couldn't reach the device"));
             },

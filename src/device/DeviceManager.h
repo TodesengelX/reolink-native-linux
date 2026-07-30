@@ -163,6 +163,19 @@ public:
     Q_INVOKABLE void fetchAlerts(int row);
     Q_INVOKABLE void setAlertEnable(int row, const QString &kind, bool enable);
 
+    // Whether this camera's Push Notifications action is enabled, from a cache
+    // warmed shortly after startup and updated whenever alerts are read/toggled.
+    // Gates desktop notifications for new detections; unknown => treated enabled.
+    bool pushEnabledFor(qint64 hostId, int channel) const;
+
+    // Motion-detection zone (grid mask) helpers. The device stores the zone as a
+    // base64 <valueTable> in the MdAlarm config: one bit per cell (1 = detect),
+    // row-major over columns x rows. mdZoneBits decodes it to a '0'/'1' string of
+    // `cells` chars for the editor; mdZoneTable re-encodes a bit string to the
+    // base64 the device expects (write it back via writeBcConfig(row, 46, 47, ...)).
+    Q_INVOKABLE QString mdZoneBits(const QString &valueTable, int cells) const;
+    Q_INVOKABLE QString mdZoneTable(const QString &bits) const;
+
     // Generic settings over Baichuan: read a command's config into a flat
     // { tag: value } map (emits bcConfigLoaded), and read-modify-write leaf tags
     // (emits settingApplied("Set<setCmd>", ...)). reqBody is the optional GET
@@ -258,6 +271,7 @@ private:
     void validateAsync(qint64 hostId, const QString &newPassword = QString(),
                        bool storeNew = false);
     int rowForHostId(qint64 hostId) const;
+    void warmPushCache();   // fetch each camera's push state once, staggered
     // Shared body of startBaichuanPlayback/startBaichuanLive (startEpoch<=0 = live).
     void startBaichuan(int row, qint64 startEpoch, rl::StreamPlayer *player, bool mainStream);
     void applyValidation(qint64 hostId, const Validation &v);
@@ -273,6 +287,8 @@ private:
     // Keyed by "hostId:channel" so each NVR camera is tracked independently.
     QHash<QString, api::DetectionState> m_lastDetection; // for 0->1 edge detection
     QHash<QString, bool> m_pollInFlight;                 // avoid overlapping polls
+    QHash<int, int> m_pushEnabled;  // row -> push enable (1/0/-1) for notif gating
+    bool m_pushWarmed = false;      // one-time warm of the push cache after priming
 
     // The in-flight Baichuan playback session, so a scrub can seek it in place.
     // Weak: the StreamPlayer owns the client's lifetime.

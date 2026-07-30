@@ -191,6 +191,20 @@ bool Database::clearEvents()
     return true;
 }
 
+bool Database::trimEvents(int keep)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(
+        "DELETE FROM events WHERE id NOT IN "
+        "(SELECT id FROM events ORDER BY ts DESC, id DESC LIMIT :keep)"));
+    q.bindValue(QStringLiteral(":keep"), keep);
+    if (!q.exec()) {
+        m_lastError = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
 qint64 Database::addHost(const HostRecord &rec)
 {
     QSqlQuery q(db());

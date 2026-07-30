@@ -6,9 +6,14 @@
 
 namespace rl {
 
+// Retention cap: the inbox keeps only the newest N events, discarding older ones
+// from both the model and the database.
+static constexpr int kMaxEvents = 100;
+
 EventManager::EventManager(Database *db, DeviceManager *devices, QObject *parent)
     : QAbstractListModel(parent), m_db(db), m_devices(devices)
 {
+    m_db->trimEvents(kMaxEvents);   // enforce the cap on any pre-existing history
     reload();
     connect(m_devices, &DeviceManager::detectionEvent, this, &EventManager::onDetection);
 
@@ -51,7 +56,7 @@ bool EventManager::matches(const EventRecord &e) const
 void EventManager::reload()
 {
     beginResetModel();
-    m_all = m_db->recentEvents(500);
+    m_all = m_db->recentEvents(kMaxEvents);
     m_view.clear();
     for (int i = 0; i < m_all.size(); ++i)
         if (matches(m_all[i]))
@@ -139,6 +144,34 @@ void EventManager::onDetection(qint64 hostId, int channel, const QString &type,
     }
     ++m_unread;
     emit unreadChanged();
+
+    // Desktop notification for this detection, gated on the camera's Push
+    // Notifications being enabled (mirrors how the official apps gate push).
+    if (m_devices->pushEnabledFor(hostId, channel)) {
+        QString what;
+        if (type == QLatin1String("person"))       what = tr("Person detected");
+        else if (type == QLatin1String("vehicle")) what = tr("Vehicle detected");
+        else if (type == QLatin1String("pet") || type == QLatin1String("dog_cat"))
+            what = tr("Pet detected");
+        else if (type == QLatin1String("visitor")) what = tr("Visitor at the door");
+        else                                        what = tr("Motion detected");
+        m_notifier.notify(camera.isEmpty() ? tr("Camera") : camera, what,
+                          QStringLiteral("io.github.todesengelx.ReolinkLinux"));
+    }
+
+    // Enforce the retention cap: drop the oldest events beyond kMaxEvents from
+    // the view (highest indices, since m_view is ascending), the in-memory list,
+    // and the database. Normally this trims exactly one event per new arrival.
+    if (m_all.size() > kMaxEvents) {
+        for (int vi = m_view.size() - 1; vi >= 0 && m_view[vi] >= kMaxEvents; --vi) {
+            beginRemoveRows({}, vi, vi);
+            m_view.remove(vi);
+            endRemoveRows();
+        }
+        m_all.resize(kMaxEvents);
+        m_db->trimEvents(kMaxEvents);
+        emit countChanged();
+    }
 }
 
 void EventManager::markAllRead()

@@ -61,6 +61,66 @@ ApplicationWindow {
             visible: !window.videoFullscreen
         }
 
+        // Update banner — checked against GitHub Releases on startup. Shows a
+        // one-click "Update now" when running as an AppImage, else a download link.
+        Rectangle {
+            id: updateBanner
+            property bool dismissed: false
+            Layout.fillWidth: true
+            visible: !window.videoFullscreen && !dismissed
+                     && (Updater.available || Updater.downloading || Updater.failed)
+            implicitHeight: 40
+            color: Updater.failed ? Theme.danger : Theme.accentDim
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.spacing * 2
+                anchors.rightMargin: Theme.spacing
+                spacing: Theme.spacing
+
+                Text { text: "\u2b06"; color: Theme.text; font.pixelSize: 14 }
+                Text {
+                    Layout.fillWidth: true
+                    color: Theme.text; font.pixelSize: 12; elide: Text.ElideRight
+                    text: Updater.downloading
+                            ? qsTr("Downloading update\u2026 %1%").arg(Updater.progress)
+                        : Updater.failed
+                            ? qsTr("Update failed: %1").arg(Updater.error)
+                        : qsTr("Version %1 is available \u2014 you have %2")
+                            .arg(Updater.latestVersion).arg(Updater.currentVersion)
+                }
+
+                component BannerBtn: Rectangle {
+                    property string label: ""
+                    signal clicked()
+                    implicitWidth: bl.implicitWidth + 22; implicitHeight: 26; radius: Theme.radius
+                    color: bh.hovered ? Qt.rgba(1, 1, 1, 0.18) : Qt.rgba(1, 1, 1, 0.08)
+                    Text { id: bl; anchors.centerIn: parent; text: parent.label; color: Theme.text; font.pixelSize: 12 }
+                    HoverHandler { id: bh }
+                    TapHandler { onTapped: parent.clicked() }
+                }
+
+                BannerBtn {
+                    visible: !Updater.downloading
+                    label: Updater.failed ? qsTr("Retry") : qsTr("What's new")
+                    onClicked: Updater.failed ? Updater.applyUpdate() : Updater.openReleasePage()
+                }
+                BannerBtn {
+                    visible: Updater.available && !Updater.downloading && !Updater.failed
+                    label: Updater.canSelfUpdate ? qsTr("Update now") : qsTr("Download")
+                    onClicked: Updater.applyUpdate()
+                }
+                Rectangle {
+                    visible: !Updater.downloading
+                    implicitWidth: 24; implicitHeight: 24; radius: 12
+                    color: xh.hovered ? Qt.rgba(1, 1, 1, 0.18) : "transparent"
+                    Text { anchors.centerIn: parent; text: "\u2715"; color: Theme.text; font.pixelSize: 12 }
+                    HoverHandler { id: xh }
+                    TapHandler { onTapped: updateBanner.dismissed = true }
+                }
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true

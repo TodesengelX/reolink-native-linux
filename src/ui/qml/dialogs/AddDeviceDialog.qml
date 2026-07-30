@@ -9,7 +9,6 @@ Dialog {
     title: qsTr("Add Device")
     modal: true
     width: 460
-    standardButtons: Dialog.Ok | Dialog.Cancel
 
     // Opens the dialog and immediately scans the network (first-run flow).
     function openAndScan() {
@@ -22,6 +21,55 @@ Dialog {
         color: Theme.surface
         border.color: Theme.border
         radius: Theme.radius
+    }
+
+    header: Item {
+        implicitHeight: 46
+        Text {
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.spacing * 2
+            anchors.verticalCenter: parent.verticalCenter
+            text: dialog.title
+            color: Theme.text
+            font.pixelSize: 15
+            font.bold: true
+        }
+        Rectangle {
+            anchors { bottom: parent.bottom; left: parent.left; right: parent.right
+                      leftMargin: Theme.spacing; rightMargin: Theme.spacing }
+            height: 1; color: Theme.border
+        }
+    }
+
+    footer: Item {
+        implicitHeight: 56
+        Rectangle {
+            anchors { top: parent.top; left: parent.left; right: parent.right
+                      leftMargin: Theme.spacing; rightMargin: Theme.spacing }
+            height: 1; color: Theme.border
+        }
+        RowLayout {
+            anchors.right: parent.right
+            anchors.rightMargin: Theme.spacing * 2
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Theme.spacing
+            Rectangle {
+                implicitWidth: cancelLbl.implicitWidth + 28; implicitHeight: 34; radius: Theme.radius
+                color: cancelHov.hovered ? Theme.surfaceAlt : "transparent"
+                border.color: Theme.border
+                Text { id: cancelLbl; anchors.centerIn: parent; text: qsTr("Cancel"); color: Theme.text; font.pixelSize: 13 }
+                HoverHandler { id: cancelHov }
+                TapHandler { onTapped: dialog.reject() }
+            }
+            Rectangle {
+                implicitWidth: addLbl.implicitWidth + 28; implicitHeight: 34; radius: Theme.radius
+                color: addHov.hovered ? Theme.accent : Theme.accentDim
+                border.color: Theme.accent
+                Text { id: addLbl; anchors.centerIn: parent; text: qsTr("Add"); color: Theme.text; font.pixelSize: 13 }
+                HoverHandler { id: addHov }
+                TapHandler { onTapped: dialog.accept() }
+            }
+        }
     }
 
     ListModel { id: discoveredModel }
@@ -150,7 +198,8 @@ Dialog {
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: 8
-                                Text { text: "📷"; font.pixelSize: 12 }
+                                Rectangle { width: 7; height: 7; radius: 3.5
+                                            color: Theme.accent; Layout.alignment: Qt.AlignVCenter }
                                 Text {
                                     text: parent.parent.ip
                                     color: Theme.text
@@ -188,11 +237,24 @@ Dialog {
                     CheckBox {
                         id: httpsCheck
                         checked: true
+                        Layout.alignment: Qt.AlignVCenter
+                        indicator: Rectangle {
+                            implicitWidth: 18; implicitHeight: 18
+                            anchors.verticalCenter: parent.verticalCenter
+                            radius: 4
+                            color: httpsCheck.checked ? Theme.accent : Theme.surfaceAlt
+                            border.color: httpsCheck.checked ? Theme.accent : Theme.border
+                            Text {
+                                anchors.centerIn: parent
+                                text: "\u2713"; visible: httpsCheck.checked
+                                color: Theme.window; font.pixelSize: 12; font.bold: true
+                            }
+                        }
                         contentItem: Text {
                             text: qsTr("Use HTTPS")
                             color: Theme.text
                             font.pixelSize: 12
-                            leftPadding: parent.indicator.width + 6
+                            leftPadding: httpsCheck.indicator.width + 8
                             verticalAlignment: Text.AlignVCenter
                         }
                     }
