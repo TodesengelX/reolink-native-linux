@@ -2,6 +2,7 @@
 #include "core/Database.h"
 #include "core/Log.h"
 #include "core/Paths.h"
+#include "core/Updater.h"
 #include "device/DeviceDiscovery.h"
 #include "device/DeviceManager.h"
 #include "device/EventManager.h"
@@ -21,7 +22,7 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("reolink-linux"));
     QCoreApplication::setApplicationName(QStringLiteral("reolink-client"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.1"));
 
     // Give the app a real identity in the taskbar/dock. setDesktopFileName lets
     // Wayland compositors match the window to the installed .desktop file and
@@ -121,11 +122,13 @@ int main(int argc, char *argv[])
     rl::DeviceManager devices(&database, &credentials);
     rl::EventManager events(&database, &devices);
     rl::DeviceDiscovery discovery;
+    rl::Updater updater;
 
     qmlRegisterType<rl::StreamPlayer>("ReolinkApp.Core", 1, 0, "StreamPlayer");
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Devices", &devices);
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Events", &events);
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Discovery", &discovery);
+    qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Updater", &updater);
 
     QQmlApplicationEngine engine;
     // Lets tests/screenshots open a specific page (0=Live,1=Playback,2=Events,3=Settings).
@@ -140,6 +143,11 @@ int main(int argc, char *argv[])
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("ReolinkApp", "Main");
+
+    // Check GitHub for a newer release shortly after the UI is up (skipped in
+    // the headless screenshot mode). Silent unless an update is found.
+    if (!parser.isSet(smokeOption))
+        QTimer::singleShot(3000, &updater, &rl::Updater::check);
 
     if (parser.isSet(smokeOption)) {
         const QString outPath = parser.value(smokeOption);

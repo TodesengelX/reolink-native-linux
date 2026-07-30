@@ -24,6 +24,45 @@ Rectangle {
         collapsed = c;
     }
 
+    // Small drawn device icons: an NVR chassis or a camera, tinted by state.
+    component DeviceGlyph: Canvas {
+        property string kind: "cam"      // "nvr" | "cam"
+        property color tint: Theme.textMuted
+        implicitWidth: 20; implicitHeight: 20
+        onTintChanged: requestPaint()
+        onKindChanged: requestPaint()
+        onPaint: {
+            var ctx = getContext("2d");
+            ctx.reset();
+            ctx.strokeStyle = tint; ctx.fillStyle = tint;
+            ctx.lineWidth = 1.6; ctx.lineJoin = "round"; ctx.lineCap = "round";
+            function rr(x, y, w, h, r) {
+                ctx.beginPath();
+                ctx.moveTo(x + r, y);
+                ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+                ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+                ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+                ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+                ctx.closePath();
+            }
+            if (kind === "nvr") {
+                rr(2, 5, 16, 10, 2.2); ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(4.5, 8.5); ctx.lineTo(10, 8.5);
+                ctx.moveTo(4.5, 11.5); ctx.lineTo(10, 11.5);
+                ctx.stroke();
+                ctx.beginPath(); ctx.arc(14.5, 11.5, 1.2, 0, 2 * Math.PI); ctx.fill();
+            } else {
+                rr(2.5, 8, 10, 6, 2.5); ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(12.5, 9.3); ctx.lineTo(17.2, 7.2);
+                ctx.lineTo(17.2, 14.8); ctx.lineTo(12.5, 12.7);
+                ctx.closePath(); ctx.stroke();
+                ctx.beginPath(); ctx.arc(6, 11, 1.7, 0, 2 * Math.PI); ctx.stroke();
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -76,7 +115,7 @@ Rectangle {
                 property var host: Devices.hostInfo(parseInt(section))
                 property bool isNvr: host && host.kind === "nvr"
                 width: ListView.view.width
-                height: isNvr ? 40 : 0
+                height: isNvr ? 44 : 0
                 visible: isNvr
                 color: nvrHover.hovered ? Theme.surfaceAlt : "transparent"
 
@@ -84,33 +123,42 @@ Rectangle {
                     anchors.fill: parent
                     anchors.leftMargin: Theme.spacing
                     anchors.rightMargin: Theme.spacing
-                    spacing: 8
+                    spacing: 7
                     Text {
                         text: root.collapsed[nvrHeader.section] ? "▸" : "▾"
                         color: Theme.textMuted; font.pixelSize: 11
                         Layout.preferredWidth: 10
                     }
-                    Rectangle { // online dot
-                        width: 8; height: 8; radius: 4
-                        color: nvrHeader.host && nvrHeader.host.online ? Theme.online : Theme.textMuted
+                    DeviceGlyph {
+                        kind: "nvr"
+                        tint: nvrHeader.host && nvrHeader.host.online ? Theme.accent : Theme.textMuted
+                        Layout.alignment: Qt.AlignVCenter
                     }
                     ColumnLayout {
                         Layout.fillWidth: true
-                        spacing: 0
+                        spacing: 1
                         Text {
                             Layout.fillWidth: true
                             text: nvrHeader.host ? nvrHeader.host.name : ""
                             color: Theme.text; font.pixelSize: 13; font.bold: true
                             elide: Text.ElideRight
                         }
-                        Text {
-                            Layout.fillWidth: true
-                            text: nvrHeader.host
-                                ? (nvrHeader.host.model + " · " + nvrHeader.host.onlineCount
-                                   + "/" + nvrHeader.host.channelCount + qsTr(" cameras"))
-                                : ""
-                            color: Theme.textMuted; font.pixelSize: 10
-                            elide: Text.ElideRight
+                        Row {
+                            spacing: 5
+                            Rectangle {
+                                width: 7; height: 7; radius: 3.5
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: nvrHeader.host && nvrHeader.host.online ? Theme.online : Theme.textMuted
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: nvrHeader.host
+                                    ? (nvrHeader.host.model + " · " + nvrHeader.host.onlineCount
+                                       + "/" + nvrHeader.host.channelCount + qsTr(" cameras"))
+                                    : ""
+                                color: Theme.textMuted; font.pixelSize: 10
+                                elide: Text.ElideRight
+                            }
                         }
                     }
                 }
@@ -129,17 +177,17 @@ Rectangle {
                             root.toggleCollapse(nvrHeader.section);
                     }
                 }
-                Menu {
+                ThemedMenu {
                     id: nvrMenu
-                    MenuItem { text: qsTr("Properties")
+                    ThemedMenuItem { text: qsTr("Properties")
                                onTriggered: root.nvrProperties(nvrHeader.host) }
-                    MenuItem { text: qsTr("Settings")
+                    ThemedMenuItem { text: qsTr("Settings")
                                onTriggered: root.openSettings(nvrHeader.host.firstRow) }
-                    MenuSeparator {}
-                    MenuItem { text: qsTr("Reboot NVR")
+                    ThemedMenuSeparator {}
+                    ThemedMenuItem { text: qsTr("Reboot NVR")
                                enabled: nvrHeader.host && nvrHeader.host.isAdmin
                                onTriggered: Devices.reboot(nvrHeader.host.firstRow) }
-                    MenuItem { text: qsTr("Remove NVR")
+                    ThemedMenuItem { text: qsTr("Remove NVR")
                                onTriggered: Devices.removeDevice(nvrHeader.host.firstRow) }
                 }
             }
@@ -165,19 +213,31 @@ Rectangle {
                 clip: true
                 color: delegateArea.containsMouse ? Theme.surfaceAlt : "transparent"
 
+                // Tree connector: a vertical trunk plus a branch to each camera,
+                // making the nesting under the NVR obvious.
+                Rectangle {
+                    visible: camRow.underNvr && !camRow.hidden
+                    x: 17; y: 0; width: 2; height: parent.height
+                    color: Theme.textMuted; opacity: 0.35
+                }
+                Rectangle {
+                    visible: camRow.underNvr && !camRow.hidden
+                    x: 17; y: parent.height / 2 - 1; width: 13; height: 2
+                    color: Theme.textMuted; opacity: 0.35
+                }
+
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: camRow.underNvr ? Theme.spacing * 2 + 6 : Theme.spacing
+                    anchors.leftMargin: camRow.underNvr ? 30 : Theme.spacing
                     anchors.rightMargin: Theme.spacing
                     anchors.topMargin: 4
                     anchors.bottomMargin: 4
                     spacing: Theme.spacing
 
-                    Rectangle { // online dot
-                        width: 8
-                        height: 8
-                        radius: 4
-                        color: online ? Theme.online : Theme.textMuted
+                    DeviceGlyph {
+                        kind: "cam"
+                        tint: camRow.online ? Theme.accent : Theme.textMuted
+                        Layout.alignment: Qt.AlignVCenter
                     }
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -189,13 +249,21 @@ Rectangle {
                             font.pixelSize: 13
                             elide: Text.ElideRight
                         }
-                        Text {
-                            Layout.fillWidth: true
-                            text: camRow.underNvr ? status
-                                : (model.length > 0 ? model + " · " + status : status)
-                            color: Theme.textMuted
-                            font.pixelSize: 11
-                            elide: Text.ElideRight
+                        Row {
+                            spacing: 5
+                            Rectangle {
+                                width: 7; height: 7; radius: 3.5
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: online ? Theme.online : Theme.textMuted
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: camRow.underNvr ? status
+                                    : (model.length > 0 ? model + " · " + status : status)
+                                color: Theme.textMuted
+                                font.pixelSize: 11
+                                elide: Text.ElideRight
+                            }
                         }
                     }
 
@@ -254,16 +322,16 @@ Rectangle {
                     }
                 }
 
-                Menu {
+                ThemedMenu {
                     id: camMenu
-                    MenuItem { text: qsTr("Properties")
+                    ThemedMenuItem { text: qsTr("Properties")
                                onTriggered: root.cameraProperties(camRow.index) }
-                    MenuItem { text: qsTr("Settings")
+                    ThemedMenuItem { text: qsTr("Settings")
                                onTriggered: root.openSettings(camRow.index) }
-                    MenuSeparator {}
+                    ThemedMenuSeparator {}
                     // Standalone cameras are their own host and can be removed here;
                     // an NVR's channels are managed on the NVR (remove it whole).
-                    MenuItem {
+                    ThemedMenuItem {
                         text: camRow.underNvr ? qsTr("Remove NVR…") : qsTr("Remove device")
                         onTriggered: Devices.removeDevice(camRow.index)
                     }

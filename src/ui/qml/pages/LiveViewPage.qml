@@ -30,7 +30,9 @@ Item {
         maximizedIndex = row;
         selectedIndex = row;
     }
-    readonly property int cols: preset === 1 ? 1 : preset === 4 ? 2 : preset === 9 ? 3 : 4
+    // Column/row counts per preset. 6 is the only non-square layout (3x2).
+    readonly property int cols: preset === 1 ? 1 : preset === 4 ? 2 : (preset === 6 || preset === 9) ? 3 : 4
+    readonly property int rows: preset === 1 ? 1 : (preset === 4 || preset === 6) ? 2 : preset === 9 ? 3 : 4
 
     // Removing a device shifts row indices; keep maximized/selected pointing at the
     // right pane (or clear them) so the grid never blanks or maximizes the wrong cam.
@@ -60,7 +62,7 @@ Item {
             visible: !page.fullscreen
 
             Repeater {
-                model: [1, 4, 9, 16]
+                model: [1, 4, 6, 9, 16]
                 Rectangle {
                     required property int modelData
                     width: 34
@@ -140,7 +142,7 @@ Item {
             readonly property real cellWidth:
                 (width - grid.spacing * (page.cols - 1)) / page.cols
             readonly property real cellHeight:
-                (height - grid.spacing * (page.cols - 1)) / page.cols
+                (height - grid.spacing * (page.rows - 1)) / page.rows
 
             Grid {
                 id: grid

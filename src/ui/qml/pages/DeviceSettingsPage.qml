@@ -290,6 +290,7 @@ Item {
 
     // Add-user / change-password dialog for the Users panel.
     UserEditDialog { id: userDialog; deviceRow: page.deviceRow }
+    DetectionZoneDialog { id: zoneDialog }
 
     // Confirmation sheet for destructive actions (e.g. disk format).
     ConfirmDialog {
@@ -451,6 +452,22 @@ Item {
                 value: parseInt(page.md.sensitivity || "25")
                 onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 46, 47,
                     { "sensitivityInfoList//sensitivity": v })
+            }
+            // Detection-zone (grid mask) editor — disable detection over parts of
+            // the frame, like the Windows app. Enabled once MdAlarm has loaded.
+            Rectangle {
+                Layout.fillWidth: true; implicitHeight: 36; radius: Theme.radius
+                readonly property bool ready: page.isAdmin && page.md.valueTable !== undefined
+                color: dzHover.hovered && ready ? Theme.surfaceAlt : Theme.surface
+                border.color: Theme.border
+                opacity: ready ? 1 : 0.5
+                RowLayout {
+                    anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                    Text { text: qsTr("Detection zone"); color: Theme.text; font.pixelSize: 13; Layout.fillWidth: true }
+                    Text { text: qsTr("Edit\u2026"); color: Theme.accent; font.pixelSize: 12 }
+                }
+                HoverHandler { id: dzHover }
+                TapHandler { onTapped: if (parent.ready) zoneDialog.openFor(page.deviceRow, page.md) }
             }
             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
             Text { text: qsTr("Smart (AI) detection"); color: Theme.text; font.pixelSize: 13; font.bold: true }

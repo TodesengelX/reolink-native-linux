@@ -27,6 +27,9 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.1.1" date="2026-07-12">
+      <description><p>Detection-zone editor, 6-camera live grid, desktop notifications, a nested device tree with icons, event retention cap, and a built-in update checker.</p></description>
+    </release>
     <release version="0.1.0" date="2026-07-09">
       <description><p>Initial development release: live view, playback, events, and settings.</p></description>
     </release>

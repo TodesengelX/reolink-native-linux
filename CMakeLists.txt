@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(reolink-client
-    VERSION 0.1.0
+    VERSION 0.1.1
     DESCRIPTION "Native Linux client for Reolink cameras and NVRs"
     LANGUAGES CXX)
 
@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS
-    Core Gui Qml Quick QuickControls2 Sql Multimedia Concurrent Network LinguistTools Test ShaderTools)
+    Core Gui Qml Quick QuickControls2 Sql Multimedia Concurrent Network DBus LinguistTools Test ShaderTools)
 qt_standard_project_setup(REQUIRES 6.5)
 
 find_package(PkgConfig REQUIRED)
@@ -27,6 +27,8 @@ add_library(reolink_core STATIC
     src/core/Paths.h src/core/Paths.cpp
     src/core/Database.h src/core/Database.cpp
     src/core/CredentialStore.h src/core/CredentialStore.cpp
+    src/core/Notifier.h src/core/Notifier.cpp
+    src/core/Updater.h src/core/Updater.cpp
     src/protocol/Json.h
     src/protocol/ReolinkApi.h src/protocol/ReolinkApi.cpp
     src/protocol/ReolinkHttpClient.h src/protocol/ReolinkHttpClient.cpp
@@ -41,7 +43,7 @@ add_library(reolink_core STATIC
 )
 target_include_directories(reolink_core PUBLIC src third_party)
 target_link_libraries(reolink_core PUBLIC
-    Qt6::Core Qt6::Gui Qt6::Sql Qt6::Multimedia Qt6::Concurrent Qt6::Network
+    Qt6::Core Qt6::Gui Qt6::Sql Qt6::Multimedia Qt6::Concurrent Qt6::Network Qt6::DBus
     PkgConfig::FFMPEG PkgConfig::CURL PkgConfig::SECRET)
 
 # ---------------------------------------------------------------------------
@@ -54,6 +56,9 @@ set(APP_QML_FILES
     src/ui/qml/Theme.qml
     src/ui/qml/components/SideBar.qml
     src/ui/qml/components/NavBar.qml
+    src/ui/qml/components/ThemedMenu.qml
+    src/ui/qml/components/ThemedMenuItem.qml
+    src/ui/qml/components/ThemedMenuSeparator.qml
     src/ui/qml/components/LivePane.qml
     src/ui/qml/components/PtzPad.qml
     src/ui/qml/components/Timeline.qml
@@ -71,6 +76,7 @@ set(APP_QML_FILES
     src/ui/qml/dialogs/PropertiesDialog.qml
     src/ui/qml/dialogs/UserEditDialog.qml
     src/ui/qml/dialogs/ConfirmDialog.qml
+    src/ui/qml/dialogs/DetectionZoneDialog.qml
 )
 # Strip the src/ui/qml/ prefix so module paths are clean (Main.qml, pages/..., etc.)
 foreach(qml_file IN LISTS APP_QML_FILES)

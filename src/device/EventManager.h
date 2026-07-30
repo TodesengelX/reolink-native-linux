@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Database.h"
+#include "core/Notifier.h"
 
 #include <QAbstractListModel>
 
@@ -55,6 +56,7 @@ private:
 
     Database *m_db;
     DeviceManager *m_devices;
+    Notifier m_notifier;             // desktop notifications for new detections
     QVector<EventRecord> m_all;      // newest first
     QVector<int> m_view;             // indices into m_all passing the filter
     QString m_filter;                // "" = all, else a type

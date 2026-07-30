@@ -50,6 +50,8 @@ public:
     qint64 addEvent(const EventRecord &rec);
     QVector<EventRecord> recentEvents(int limit = 500) const;
     bool clearEvents();
+    // Retention cap: delete all but the newest `keep` events.
+    bool trimEvents(int keep);
 
 private:
     bool migrate();
