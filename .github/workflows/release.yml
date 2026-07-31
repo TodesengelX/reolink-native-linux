@@ -19,7 +19,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.7.2'
-          modules: 'qtmultimedia qtshadertools qtwayland'
+          modules: 'qtmultimedia qtshadertools'
       - name: System deps
         run: |
           sudo apt-get update
@@ -46,6 +46,9 @@ jobs:
           # The qt plugin locates Qt via $QMAKE — without it, it finds no
           # modules ("Could not find Qt modules to deploy").
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          # Qt6 ships the Wayland platform plugins in the base install; confirm
+          # they're present so EXTRA_PLATFORM_PLUGINS has something to bundle.
+          echo "Available platform plugins:"; ls "$QT_ROOT_DIR/plugins/platforms/"
           # The qt plugin bundles every SQL driver plugin; the Mimer and MySQL
           # ones pull in proprietary client libs (libmimerapi.so / libmysqlclient)
           # that aren't installed, which fails the whole run. We only use SQLite.
