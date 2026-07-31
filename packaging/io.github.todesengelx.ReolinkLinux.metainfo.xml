@@ -27,6 +27,9 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.1.3" date="2026-07-31">
+      <description><p>Clicking a detection notification now opens the app and plays that event back; the app version is shown in the nav bar.</p></description>
+    </release>
     <release version="0.1.2" date="2026-07-30">
       <description><p>The AppImage now runs natively on Wayland (bundles the Qt Wayland platform plugins) instead of falling back to XWayland.</p></description>
     </release>

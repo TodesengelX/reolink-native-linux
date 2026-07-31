@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(reolink-client
-    VERSION 0.1.2
+    VERSION 0.1.3
     DESCRIPTION "Native Linux client for Reolink cameras and NVRs"
     LANGUAGES CXX)
 
