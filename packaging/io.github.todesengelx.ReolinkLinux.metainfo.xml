@@ -27,6 +27,9 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.1.2" date="2026-07-30">
+      <description><p>The AppImage now runs natively on Wayland (bundles the Qt Wayland platform plugins) instead of falling back to XWayland.</p></description>
+    </release>
     <release version="0.1.1" date="2026-07-12">
       <description><p>Detection-zone editor, 6-camera live grid, desktop notifications, a nested device tree with icons, event retention cap, and a built-in update checker.</p></description>
     </release>
