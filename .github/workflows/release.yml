@@ -19,7 +19,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.7.2'
-          modules: 'qtmultimedia qtshadertools'
+          modules: 'qtmultimedia qtshadertools qtwayland'
       - name: System deps
         run: |
           sudo apt-get update
@@ -37,6 +37,11 @@ jobs:
           NO_STRIP: '1'
           QML_SOURCES_PATHS: ${{ github.workspace }}/src/ui/qml
           OUTPUT: reolink-native-linux-x86_64.AppImage
+          # Bundle Qt's Wayland platform plugins too (the qt plugin ships only the
+          # "best" platform = xcb by default). With qtwayland installed, linuxdeploy
+          # also pulls in the wayland-shell-integration / decoration plugins, so the
+          # app runs natively on Wayland instead of falling back to XWayland.
+          EXTRA_PLATFORM_PLUGINS: 'libqwayland-egl.so;libqwayland-generic.so'
         run: |
           # The qt plugin locates Qt via $QMAKE — without it, it finds no
           # modules ("Could not find Qt modules to deploy").
