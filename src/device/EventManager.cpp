@@ -16,6 +16,7 @@ EventManager::EventManager(Database *db, DeviceManager *devices, QObject *parent
     m_db->trimEvents(kMaxEvents);   // enforce the cap on any pre-existing history
     reload();
     connect(m_devices, &DeviceManager::detectionEvent, this, &EventManager::onDetection);
+    connect(&m_notifier, &Notifier::activated, this, &EventManager::eventActivated);
 
     // Test hook: RL_MOCK_EVENTS seeds in-memory events (no DB writes) so the
     // inbox UI can be verified without cameras.
@@ -156,7 +157,8 @@ void EventManager::onDetection(qint64 hostId, int channel, const QString &type,
         else if (type == QLatin1String("visitor")) what = tr("Visitor at the door");
         else                                        what = tr("Motion detected");
         m_notifier.notify(camera.isEmpty() ? tr("Camera") : camera, what,
-                          QStringLiteral("io.github.todesengelx.ReolinkLinux"));
+                          QStringLiteral("io.github.todesengelx.ReolinkLinux"),
+                          hostId, channel, rec.timestamp);
     }
 
     // Enforce the retention cap: drop the oldest events beyond kMaxEvents from

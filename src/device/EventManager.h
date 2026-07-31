@@ -46,6 +46,8 @@ signals:
     void countChanged();
     void unreadChanged();
     void filterChanged();
+    // The user clicked a desktop notification — jump to this event's playback.
+    void eventActivated(qint64 hostId, int channel, qint64 timestamp);
 
 private slots:
     void onDetection(qint64 hostId, int channel, const QString &type, const QString &camera);

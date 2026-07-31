@@ -190,6 +190,18 @@ ApplicationWindow {
             nav.currentIndex = 0;
         }
     }
+    // Desktop-notification click: bring the window up and play the event back.
+    Connections {
+        target: Events
+        function onEventActivated(hostId, channel, timestamp) {
+            window.show();
+            window.raise();
+            window.requestActivate();
+            nav.currentIndex = 1;
+            playbackPage.openAt(hostId, channel, timestamp);
+        }
+    }
+
     Connections {
         target: Devices
         function onDetectionEvent(hostId, channel, type, camera) {
