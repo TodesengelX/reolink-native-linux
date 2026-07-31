@@ -149,6 +149,22 @@ int main(int argc, char *argv[])
     if (!parser.isSet(smokeOption))
         QTimer::singleShot(3000, &updater, &rl::Updater::check);
 
+    // TEST HOOK (local): RL_TEST_NOTIFY=1 fires a synthetic detection through
+    // the full pipeline (event inbox -> desktop notification -> click-to-raise)
+    // so the notification flow can be exercised without waiting for real motion.
+    if (qEnvironmentVariableIsSet("RL_TEST_NOTIFY")) {
+        QTimer::singleShot(6000, &devices, [&devices] {
+            if (devices.rowCount() == 0)
+                return;
+            const QVariantMap c = devices.cameraInfo(0);
+            QMetaObject::invokeMethod(&devices, "detectionEvent", Qt::DirectConnection,
+                                      Q_ARG(qint64, c.value(QStringLiteral("hostId")).toLongLong()),
+                                      Q_ARG(int, c.value(QStringLiteral("channel")).toInt()),
+                                      Q_ARG(QString, QStringLiteral("person")),
+                                      Q_ARG(QString, c.value(QStringLiteral("name")).toString()));
+        });
+    }
+
     if (parser.isSet(smokeOption)) {
         const QString outPath = parser.value(smokeOption);
         const int delayMs = parser.value(smokeDelayOption).toInt();

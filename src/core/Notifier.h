@@ -34,6 +34,7 @@ signals:
 
 private slots:
     void onActionInvoked(quint32 id, const QString &actionKey);
+    void onActivationToken(quint32 id, const QString &token);
     void onNotificationClosed(quint32 id, quint32 reason);
 
 private:
@@ -41,6 +42,7 @@ private:
         qint64 hostId;
         int channel;
         qint64 timestamp;
+        QString token; // xdg-activation token (Wayland focus grant)
     };
     QHash<quint32, Payload> m_pending; // notification id -> event to jump to
 };

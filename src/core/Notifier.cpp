@@ -23,6 +23,9 @@ Notifier::Notifier(QObject *parent) : QObject(parent)
                     QStringLiteral("ActionInvoked"), this,
                     SLOT(onActionInvoked(quint32, QString)));
         bus.connect(QLatin1String(kService), QLatin1String(kPath), QLatin1String(kInterface),
+                    QStringLiteral("ActivationToken"), this,
+                    SLOT(onActivationToken(quint32, QString)));
+        bus.connect(QLatin1String(kService), QLatin1String(kPath), QLatin1String(kInterface),
                     QStringLiteral("NotificationClosed"), this,
                     SLOT(onNotificationClosed(quint32, quint32)));
     }
@@ -49,7 +52,12 @@ void Notifier::notify(const QString &title, const QString &body, const QString &
         << title                               // summary
         << body                                // body
         << actions                             // actions
-        << QVariantMap()                       // hints
+        << QVariantMap{                        // hints
+               {QStringLiteral("desktop-entry"),
+                QStringLiteral("io.github.todesengelx.ReolinkLinux")},
+               {QStringLiteral("x-kde-xdgTokenAppId"),
+                QStringLiteral("io.github.todesengelx.ReolinkLinux")},
+           }
         << qint32(7000);                       // expire timeout (ms)
 
     if (hostId < 0) {
@@ -63,8 +71,15 @@ void Notifier::notify(const QString &title, const QString &body, const QString &
                 QDBusPendingReply<quint32> reply = *w;
                 w->deleteLater();
                 if (!reply.isError())
-                    m_pending.insert(reply.value(), {hostId, channel, timestamp});
+                    m_pending.insert(reply.value(), {hostId, channel, timestamp, QString()});
             });
+}
+
+void Notifier::onActivationToken(quint32 id, const QString &token)
+{
+    const auto it = m_pending.find(id);
+    if (it != m_pending.end())
+        it->token = token;
 }
 
 void Notifier::onActionInvoked(quint32 id, const QString &actionKey)
@@ -73,6 +88,8 @@ void Notifier::onActionInvoked(quint32 id, const QString &actionKey)
     const auto it = m_pending.constFind(id);
     if (it == m_pending.constEnd())
         return; // not ours (the signal is bus-wide for all apps' notifications)
+    if (!it->token.isEmpty())
+        qputenv("XDG_ACTIVATION_TOKEN", it->token.toUtf8());
     emit activated(it->hostId, it->channel, it->timestamp);
 }
 
