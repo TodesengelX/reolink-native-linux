@@ -41,11 +41,6 @@ jobs:
           # "best" platform = xcb by default), so the app runs natively on Wayland
           # instead of falling back to XWayland.
           EXTRA_PLATFORM_PLUGINS: 'libqwayland-egl.so;libqwayland-generic.so'
-          # ...and the Wayland integration plugins. The qt plugin bundles
-          # shell-integration on its own but MISSES graphics-integration-client
-          # (the EGL client-buffer integration); without it Qt Quick aborts on
-          # Wayland with "Failed to create RHI / initialize graphics backend".
-          EXTRA_QT_PLUGINS: 'wayland-decoration-client;wayland-graphics-integration-client;wayland-shell-integration'
         run: |
           # The qt plugin locates Qt via $QMAKE — without it, it finds no
           # modules ("Could not find Qt modules to deploy").
@@ -62,8 +57,18 @@ jobs:
             wget -q "https://github.com/linuxdeploy/$t/releases/download/continuous/$t-x86_64.AppImage" -O "/tmp/$t"
             chmod +x "/tmp/$t"
           done
-          /tmp/linuxdeploy --appdir AppDir --plugin qt --output appimage \
-            -d AppDir/usr/share/applications/io.github.todesengelx.ReolinkLinux.desktop
+          DESKTOP=AppDir/usr/share/applications/io.github.todesengelx.ReolinkLinux.desktop
+          # Phase 1: deploy Qt into the AppDir (no packaging yet).
+          /tmp/linuxdeploy --appdir AppDir --plugin qt -d "$DESKTOP"
+          # linuxdeploy-plugin-qt deploys the wayland decoration + shell-integration
+          # plugins but NOT graphics-integration-client (the EGL client-buffer
+          # integration) — without it Qt Quick aborts on Wayland ("Failed to create
+          # RHI"). Its runtime lib (libQt6WaylandEglClientHwIntegration) is already
+          # in usr/lib as a dep of the wayland platform plugin, so copy the plugin
+          # in by hand, then package.
+          cp -av "$QT_ROOT_DIR/plugins/wayland-graphics-integration-client" AppDir/usr/plugins/
+          # Phase 2: package the populated AppDir into the AppImage.
+          /tmp/linuxdeploy --appdir AppDir --output appimage -d "$DESKTOP"
       - uses: actions/upload-artifact@v4
         with: { name: appimage, path: '*.AppImage' }
 
