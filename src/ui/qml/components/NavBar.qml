@@ -25,6 +25,15 @@ Rectangle {
             font.bold: true
         }
 
+        // App version, always visible (set via setApplicationVersion in main.cpp).
+        Text {
+            text: "v" + Qt.application.version
+            color: Theme.textMuted
+            font.pixelSize: 11
+            Layout.alignment: Qt.AlignVCenter
+            Layout.topMargin: 3
+        }
+
         Item { width: Theme.spacing * 2; height: 1 }
 
         Repeater {
