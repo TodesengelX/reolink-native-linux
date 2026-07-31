@@ -38,10 +38,14 @@ jobs:
           QML_SOURCES_PATHS: ${{ github.workspace }}/src/ui/qml
           OUTPUT: reolink-native-linux-x86_64.AppImage
           # Bundle Qt's Wayland platform plugins too (the qt plugin ships only the
-          # "best" platform = xcb by default). With qtwayland installed, linuxdeploy
-          # also pulls in the wayland-shell-integration / decoration plugins, so the
-          # app runs natively on Wayland instead of falling back to XWayland.
+          # "best" platform = xcb by default), so the app runs natively on Wayland
+          # instead of falling back to XWayland.
           EXTRA_PLATFORM_PLUGINS: 'libqwayland-egl.so;libqwayland-generic.so'
+          # ...and the Wayland integration plugins. The qt plugin bundles
+          # shell-integration on its own but MISSES graphics-integration-client
+          # (the EGL client-buffer integration); without it Qt Quick aborts on
+          # Wayland with "Failed to create RHI / initialize graphics backend".
+          EXTRA_QT_PLUGINS: 'wayland-decoration-client;wayland-graphics-integration-client;wayland-shell-integration'
         run: |
           # The qt plugin locates Qt via $QMAKE — without it, it finds no
           # modules ("Could not find Qt modules to deploy").
