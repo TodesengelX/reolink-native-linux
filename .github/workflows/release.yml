@@ -58,8 +58,13 @@ jobs:
             chmod +x "/tmp/$t"
           done
           DESKTOP=AppDir/usr/share/applications/io.github.todesengelx.ReolinkLinux.desktop
-          # Phase 1: deploy Qt into the AppDir (no packaging yet).
-          /tmp/linuxdeploy --appdir AppDir --plugin qt -d "$DESKTOP"
+          # Phase 1: deploy Qt into the AppDir (no packaging yet). libva is
+          # excluded: a bundled libva can't find the host's VAAPI driver, which
+          # forced software decode everywhere — the host's own libva (paired
+          # with its driver) enables hardware decode, and hosts without it fall
+          # back to software exactly as before.
+          /tmp/linuxdeploy --appdir AppDir --plugin qt -d "$DESKTOP" \
+            --exclude-library "libva.so*" --exclude-library "libva-*.so*"
           # linuxdeploy-plugin-qt deploys the wayland decoration + shell-integration
           # plugins but NOT graphics-integration-client (the EGL client-buffer
           # integration) — without it Qt Quick aborts on Wayland ("Failed to create
