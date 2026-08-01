@@ -72,6 +72,58 @@ static QString detKey(qint64 hostId, int channel)
     return QString::number(hostId) + u':' + QString::number(channel);
 }
 
+void DeviceManager::applyConnectivity(qint64 hostId, bool transportOk,
+                                      const QHash<int, bool> &chanOnline)
+{
+    // Host-level: three consecutive failed poll cycles (~30s) = unreachable;
+    // one success after that = recovered. Fires exactly once per transition.
+    int &fails = m_hostFails[hostId];
+    QString hostName;
+    for (const Entry &e : m_entries)
+        if (e.rec.id == hostId) { hostName = e.rec.name; break; }
+
+    if (!transportOk) {
+        if (++fails != 3)
+            return;
+        for (int i = 0; i < m_entries.size(); ++i) {
+            if (m_entries.at(i).rec.id != hostId || !m_entries.at(i).online)
+                continue;
+            m_entries[i].online = false;
+            m_entries[i].status = tr("unreachable");
+            emit dataChanged(index(i), index(i));
+        }
+        emit connectivityChanged(hostId, -1, hostName, false);
+        return;
+    }
+    if (fails >= 3) {
+        for (int i = 0; i < m_entries.size(); ++i) {
+            if (m_entries.at(i).rec.id != hostId || m_entries.at(i).online)
+                continue;
+            m_entries[i].online = true;
+            m_entries[i].status = tr("online");
+            emit dataChanged(index(i), index(i));
+        }
+        emit connectivityChanged(hostId, -1, hostName, true);
+    }
+    fails = 0;
+
+    // Channel-level (NVRs): flip individual cameras that dropped or returned.
+    for (auto it = chanOnline.constBegin(); it != chanOnline.constEnd(); ++it) {
+        for (int i = 0; i < m_entries.size(); ++i) {
+            Entry &e = m_entries[i];
+            if (e.rec.id != hostId || e.channel != it.key())
+                continue;
+            if (e.online != it.value()) {
+                e.online = it.value();
+                e.status = it.value() ? tr("online") : tr("offline");
+                emit dataChanged(index(i), index(i));
+                emit connectivityChanged(hostId, e.channel, e.chanName, it.value());
+            }
+            break;
+        }
+    }
+}
+
 void DeviceManager::pollDetections()
 {
     if (!m_pushWarmed)
@@ -90,7 +142,8 @@ void DeviceManager::pollDetections()
     QHash<qint64, HostPoll> byHost;
     QVector<qint64> order;
     for (const Entry &e : m_entries) {
-        if (!e.online || e.rec.kind == QLatin1String("stream") || !e.client)
+        // Offline entries stay in the poll: that's how we notice recovery.
+        if (e.rec.kind == QLatin1String("stream") || !e.client)
             continue;
         if (!byHost.contains(e.rec.id)) {
             byHost[e.rec.id] = HostPoll{e.client, {}, {}, {}};
@@ -124,7 +177,23 @@ void DeviceManager::pollDetections()
                         api::command(QStringLiteral("GetAiState"), Json{{"channel", ch}}));
                 }
             }
+            // One channel-status query per NVR cycle: notices cameras that
+            // drop or return while the app is running.
+            const bool wantStatus = hp.channels.size() > 1;
+            if (wantStatus)
+                cmds.push_back(api::command(QStringLiteral("GetChannelstatus"), Json::object()));
             const api::BatchResult batch = hp.client->call(cmds);
+
+            QHash<int, bool> chanOnline; // parsed channel -> online (NVRs only)
+            if (batch.transportOk && wantStatus && batch.results.size() == items.size() + 1) {
+                const api::CommandResult &cs = batch.results.last();
+                if (cs.ok && cs.value.contains("status") && cs.value["status"].is_array())
+                    for (const auto &c : cs.value["status"]) {
+                        if (c.contains("channel"))
+                            chanOnline[c["channel"].get<int>()] =
+                                c.value("online", 1) != 0;
+                    }
+            }
 
             // Combine per-channel md/ai (results preserve request order).
             QHash<int, api::DetectionState> states;
@@ -145,10 +214,14 @@ void DeviceManager::pollDetections()
                 }
             }
 
+            const bool transportOk = batch.transportOk;
             QMetaObject::invokeMethod(
                 this,
-                [this, hostId, key, hp, states] {
+                [this, hostId, key, hp, states, transportOk, chanOnline] {
                     m_pollInFlight[key] = false;
+                    applyConnectivity(hostId, transportOk, chanOnline);
+                    if (!transportOk)
+                        return;
                     for (int i = 0; i < hp.channels.size(); ++i) {
                         const int channel = hp.channels[i];
                         const QString ckey = detKey(hostId, channel);

@@ -23,6 +23,8 @@ EventManager::EventManager(Database *db, DeviceManager *devices, QObject *parent
     connect(&m_notifier, &Notifier::activated, this, &EventManager::eventActivated);
     connect(m_devices, &DeviceManager::eventThumbnailReady, this,
             &EventManager::onThumbnailReady);
+    connect(m_devices, &DeviceManager::connectivityChanged, this,
+            &EventManager::onConnectivity);
 
     // Test hook: RL_MOCK_EVENTS seeds in-memory events (no DB writes) so the
     // inbox UI can be verified without cameras.
@@ -185,6 +187,51 @@ void EventManager::onDetection(qint64 hostId, int channel, const QString &type,
     // Enforce the retention cap: drop the oldest events beyond kMaxEvents from
     // the view (highest indices, since m_view is ascending), the in-memory list,
     // and the database. Normally this trims exactly one event per new arrival.
+    if (m_all.size() > kMaxEvents) {
+        for (int vi = m_view.size() - 1; vi >= 0 && m_view[vi] >= kMaxEvents; --vi) {
+            beginRemoveRows({}, vi, vi);
+            m_view.remove(vi);
+            endRemoveRows();
+        }
+        for (int i = kMaxEvents; i < m_all.size(); ++i)
+            if (!m_all.at(i).thumbnail.isEmpty())
+                QFile::remove(m_all.at(i).thumbnail);
+        m_all.resize(kMaxEvents);
+        m_db->trimEvents(kMaxEvents);
+        emit countChanged();
+    }
+}
+
+void EventManager::onConnectivity(qint64 hostId, int channel, const QString &name, bool online)
+{
+    // Health alert: a camera (channel >= 0) or a whole host dropped or returned.
+    // Recorded in the inbox and always notified — a dead camera can't announce
+    // itself, so the client has to.
+    EventRecord rec;
+    rec.hostId = hostId;
+    rec.channel = qMax(0, channel);
+    rec.timestamp = QDateTime::currentSecsSinceEpoch();
+    rec.type = online ? QStringLiteral("online") : QStringLiteral("offline");
+    rec.camera = name;
+    rec.id = m_db->addEvent(rec);
+
+    m_all.prepend(rec);
+    for (int &idx : m_view)
+        ++idx;
+    if (matches(rec)) {
+        beginInsertRows({}, 0, 0);
+        m_view.prepend(0);
+        endInsertRows();
+        emit countChanged();
+    }
+    ++m_unread;
+    emit unreadChanged();
+
+    m_notifier.notify(name.isEmpty() ? tr("Device") : name,
+                      online ? tr("Back online") : tr("Went offline \u26a0"),
+                      QStringLiteral("io.github.todesengelx.ReolinkLinux"),
+                      hostId, rec.channel, rec.timestamp);
+
     if (m_all.size() > kMaxEvents) {
         for (int vi = m_view.size() - 1; vi >= 0 && m_view[vi] >= kMaxEvents; --vi) {
             beginRemoveRows({}, vi, vi);

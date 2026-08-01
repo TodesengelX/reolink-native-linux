@@ -19,6 +19,8 @@ Item {
         case "vehicle": return "🚗";
         case "pet": return "🐾";
         case "visitor": return "🔔";
+        case "offline": return "⚠";
+        case "online": return "✔";
         default: return "👁";
         }
     }
@@ -28,6 +30,8 @@ Item {
         case "vehicle": return qsTr("Vehicle");
         case "pet": return qsTr("Pet");
         case "visitor": return qsTr("Visitor");
+        case "offline": return qsTr("Went offline");
+        case "online": return qsTr("Back online");
         default: return qsTr("Motion");
         }
     }
@@ -37,6 +41,8 @@ Item {
         case "vehicle": return "#e08a3c";
         case "pet": return Theme.online;
         case "visitor": return Theme.danger;
+        case "offline": return Theme.danger;
+        case "online": return Theme.online;
         default: return Theme.textMuted;
         }
     }

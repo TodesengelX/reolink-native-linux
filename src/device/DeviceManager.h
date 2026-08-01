@@ -208,6 +208,9 @@ signals:
     void detectionEvent(qint64 hostId, int channel, const QString &type, const QString &camera);
     // A quiet event-thumbnail capture finished (path is a local JPEG).
     void eventThumbnailReady(qint64 eventId, const QString &path);
+    // A camera (channel >= 0) or a whole host (channel == -1) changed
+    // connectivity. name is the camera/host display name.
+    void connectivityChanged(qint64 hostId, int channel, const QString &name, bool online);
 
 private slots:
     void pollDetections();
@@ -278,6 +281,7 @@ private:
                        bool storeNew = false);
     int rowForHostId(qint64 hostId) const;
     void warmPushCache();   // fetch each camera's push state once, staggered
+    void applyConnectivity(qint64 hostId, bool transportOk, const QHash<int, bool> &chanOnline);
     // Shared body of startBaichuanPlayback/startBaichuanLive (startEpoch<=0 = live).
     void startBaichuan(int row, qint64 startEpoch, rl::StreamPlayer *player, bool mainStream);
     void applyValidation(qint64 hostId, const Validation &v);
@@ -294,6 +298,7 @@ private:
     QHash<QString, api::DetectionState> m_lastDetection; // for 0->1 edge detection
     QHash<QString, bool> m_pollInFlight;                 // avoid overlapping polls
     QHash<int, int> m_pushEnabled;  // row -> push enable (1/0/-1) for notif gating
+    QHash<qint64, int> m_hostFails; // consecutive poll transport failures per host
     bool m_pushWarmed = false;      // one-time warm of the push cache after priming
 
     // The in-flight Baichuan playback session, so a scrub can seek it in place.
