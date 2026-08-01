@@ -965,6 +965,69 @@ void DeviceManager::requestHdClip(int row, qint64 startEpoch, int durationSecs)
     }));
 }
 
+void DeviceManager::exportClip(int row, qint64 startEpoch, int durationSecs)
+{
+    auto client = clientFor(row);
+    if (!client || row < 0 || row >= m_entries.size() || startEpoch <= 0) {
+        emit clipExportFailed(row, tr("device not ready"));
+        return;
+    }
+    const Entry &e = m_entries.at(row);
+    const int ch = e.channel;
+    const QString host = e.rec.addr;
+    const int port = e.rec.port;
+    const bool https = e.rec.https;
+    const QString safe = QString(e.chanName.isEmpty() ? e.rec.name : e.chanName)
+                             .replace(QRegularExpression(QStringLiteral("[^\\w-]")),
+                                      QStringLiteral("_"));
+    const QDateTime start = QDateTime::fromSecsSinceEpoch(startEpoch);
+    const QDateTime end = start.addSecs(qBound(2, durationSecs, 300));
+    const QString startStamp = start.toString(QStringLiteral("yyyyMMddHHmmss"));
+
+    m_pending.addFuture(QtConcurrent::run([this, client, ch, row, host, port, https, start, end,
+                                           startStamp, safe] {
+        QString error;
+        QString saved;
+        const api::BatchResult b =
+            client->call(Json::array({api::nvrDownloadBody(ch, start, end, QStringLiteral("main"))}));
+        if (b.transportOk && !b.results.isEmpty() && b.results.first().ok) {
+            const QVector<api::DownloadFile> files = api::parseNvrDownload(b.results.first().value);
+            api::DownloadFile pick;
+            for (const api::DownloadFile &f : files)
+                if (f.fileName.contains(startStamp)) { pick = f; break; }
+            if (pick.fileName.isEmpty())
+                for (const api::DownloadFile &f : files)
+                    if (f.size > pick.size)
+                        pick = f;
+            if (pick.fileName.isEmpty()) {
+                error = tr("no recording covers this moment");
+            } else {
+                const QString url =
+                    api::downloadUrl(host, port, https, pick.fileName, client->token());
+                const QString path = Paths::recordingsDir() + u'/' + safe + u'_'
+                                     + start.toString(QStringLiteral("yyyyMMdd_hhmmss"))
+                                     + QStringLiteral(".mp4");
+                QString dlErr;
+                if (client->downloadToFile(url, path, 300, &dlErr)) // NVR downloads are slow
+                    saved = path;
+                else
+                    error = dlErr.isEmpty() ? tr("download failed") : dlErr;
+            }
+        } else {
+            error = b.error.isEmpty() ? tr("clip request failed") : b.error;
+        }
+        QMetaObject::invokeMethod(
+            this,
+            [this, row, saved, error] {
+                if (!saved.isEmpty())
+                    emit clipExported(row, saved);
+                else
+                    emit clipExportFailed(row, error);
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
 void DeviceManager::startBaichuan(int row, qint64 startEpoch, StreamPlayer *player,
                                   bool mainStream)
 {

@@ -131,6 +131,9 @@ public:
     // [startEpoch, startEpoch+durationSecs] to a local file, then emit hdClipReady
     // with its path (the file is playable/seekable locally, unlike the FLV path).
     Q_INVOKABLE void requestHdClip(int row, qint64 startEpoch, int durationSecs = 15);
+    // Save a main-stream clip covering [startEpoch, +durationSecs] into
+    // ~/Videos/Reolink with a friendly name. Emits clipExported/clipExportFailed.
+    Q_INVOKABLE void exportClip(int row, qint64 startEpoch, int durationSecs);
 
     // Native (Baichuan/TCP 9000) recorded playback: stream the recording from
     // startEpoch straight into `player` — realtime, frame-accurate, full HEVC main.
@@ -199,6 +202,8 @@ signals:
     void recordingsFailed(int row, const QString &error);
     void hdClipReady(int row, const QString &localPath, qint64 startEpoch);
     void hdClipFailed(int row, const QString &error);
+    void clipExported(int row, const QString &path);
+    void clipExportFailed(int row, const QString &error);
     void settingsLoaded(int row, const QVariantMap &values);
     void settingsFailed(int row, const QString &error);
     void settingApplied(int row, const QString &command, bool ok, const QString &error);

@@ -105,6 +105,16 @@ Item {
     // Called when an event is clicked in the Events inbox: jump to that exact
     // camera, date, and moment. Runs ONE search, then plays when it returns —
     // firing search+search+playback at once overwhelms a connection-limited NVR.
+    // Export a clip starting at the playhead (NVR downloads run below
+    // realtime, so longer clips take a while — the button shows progress).
+    function exportClip(secs) {
+        var epoch = new Date(page.selYear, page.selMonth - 1, page.selDay).getTime() / 1000
+                    + Math.floor(page.playheadSecs);
+        exportBtn.busy = true;
+        statusText.text = qsTr("Exporting clip…");
+        Devices.exportClip(page.deviceRow, epoch, secs);
+    }
+
     function openAt(hostId, channel, timestamp) {
         var d = new Date(timestamp * 1000);
         page.selYear = d.getFullYear();
@@ -123,6 +133,16 @@ Item {
 
     Connections {
         target: Devices
+        function onClipExported(row, path) {
+            if (row !== page.deviceRow) return;
+            exportBtn.busy = false;
+            statusText.text = qsTr("Clip saved: %1").arg(path);
+        }
+        function onClipExportFailed(row, error) {
+            if (row !== page.deviceRow) return;
+            exportBtn.busy = false;
+            statusText.text = qsTr("Export failed: %1").arg(error);
+        }
         function onRecordingsFound(row, segments) {
             if (row === page.deviceRow) {
                 timeline.segments = segments;
@@ -371,6 +391,36 @@ Item {
                       onActivated: player.state === StreamPlayer.Streaming
                                    ? player.stop() : page.playAt(page.playheadSecs) }
                 Ctl { glyph: "⏹"; tip: qsTr("Stop"); onActivated: player.stop() }
+                // Export: save a main-stream MP4 of the moment at the playhead.
+                Rectangle {
+                    id: exportBtn
+                    property bool busy: false
+                    width: expRow.implicitWidth + 18; height: 30; radius: Theme.radius
+                    color: expHover.hovered && !busy ? Theme.surfaceAlt : Theme.surface
+                    border.color: Theme.border
+                    Row {
+                        id: expRow
+                        anchors.centerIn: parent
+                        spacing: 5
+                        BusyIndicator { visible: exportBtn.busy; running: visible
+                                        width: 14; height: 14
+                                        anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: exportBtn.busy ? qsTr("Exporting…") : qsTr("Export clip")
+                               color: Theme.text; font.pixelSize: 12
+                               anchors.verticalCenter: parent.verticalCenter }
+                        Text { visible: !exportBtn.busy; text: "\u25be"; color: Theme.textMuted
+                               font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
+                    }
+                    HoverHandler { id: expHover }
+                    TapHandler { onTapped: if (!exportBtn.busy) exportMenu.popup() }
+                    ThemedMenu {
+                        id: exportMenu
+                        ThemedMenuItem { text: qsTr("15 seconds"); onTriggered: page.exportClip(15) }
+                        ThemedMenuItem { text: qsTr("30 seconds"); onTriggered: page.exportClip(30) }
+                        ThemedMenuItem { text: qsTr("1 minute");  onTriggered: page.exportClip(60) }
+                        ThemedMenuItem { text: qsTr("2 minutes"); onTriggered: page.exportClip(120) }
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 // Quality toggle: SD = light sub-stream (FLV) scrubbing; HD = full-res
                 // main stream over native Baichuan.
