@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("reolink-linux"));
     QCoreApplication::setApplicationName(QStringLiteral("reolink-client"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.4-dev"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.4"));
 
     // Give the app a real identity in the taskbar/dock. setDesktopFileName lets
     // Wayland compositors match the window to the installed .desktop file and
