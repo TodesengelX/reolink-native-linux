@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS
-    Core Gui Qml Quick QuickControls2 Sql Multimedia Concurrent Network DBus LinguistTools Test ShaderTools)
+    Core Gui Widgets Qml Quick QuickControls2 Sql Multimedia Concurrent Network DBus LinguistTools Test ShaderTools)
 qt_standard_project_setup(REQUIRES 6.5)
 
 find_package(PkgConfig REQUIRED)
@@ -49,7 +49,7 @@ target_link_libraries(reolink_core PUBLIC
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
-qt_add_executable(reolink-client src/main.cpp)
+qt_add_executable(reolink-client src/main.cpp src/ui/TrayIcon.h src/ui/TrayIcon.cpp)
 
 set(APP_QML_FILES
     src/ui/qml/Main.qml
@@ -115,7 +115,7 @@ qt_add_resources(reolink-client "app_icons"
         packaging/icons/reolink-256.png
 )
 
-target_link_libraries(reolink-client PRIVATE reolink_core Qt6::QuickControls2)
+target_link_libraries(reolink-client PRIVATE reolink_core Qt6::QuickControls2 Qt6::Widgets)
 
 qt_add_translations(reolink-client
     TS_FILES i18n/reolink-client_en.ts i18n/reolink-client_es.ts

@@ -8,7 +8,7 @@ ApplicationWindow {
     id: window
     width: 1400
     height: 860
-    visible: true
+    visible: typeof startHidden === "undefined" || !startHidden
     title: qsTr("Reolink Client")
     color: Theme.window
 
@@ -28,6 +28,15 @@ ApplicationWindow {
                        ? Window.Windowed : _preFsVisibility;
         }
     }
+    // Closing hides to the tray when enabled — monitoring and notifications
+    // keep running; Quit lives in the tray menu.
+    onClosing: (close) => {
+        if (Tray.available && Tray.closeToTray) {
+            close.accepted = false;
+            window.hide();
+        }
+    }
+
     // Keep the flag in sync if the compositor changes visibility out from under us.
     onVisibilityChanged: () => {
         if (window.visibility !== Window.FullScreen && videoFullscreen)

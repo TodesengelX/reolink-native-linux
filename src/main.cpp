@@ -3,11 +3,13 @@
 #include "core/Log.h"
 #include "core/Paths.h"
 #include "core/Updater.h"
+#include "ui/TrayIcon.h"
 #include "device/DeviceDiscovery.h"
 #include "device/DeviceManager.h"
 #include "device/EventManager.h"
 #include "media/StreamPlayer.h"
 
+#include <QApplication>
 #include <QCommandLineParser>
 #include <QGuiApplication>
 #include <QIcon>
@@ -19,7 +21,9 @@
 
 int main(int argc, char *argv[])
 {
-    QGuiApplication app(argc, argv);
+    // QApplication (not QGuiApplication): QSystemTrayIcon needs the widgets
+    // layer for the tray icon + menu. The UI itself remains pure QML.
+    QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("reolink-linux"));
     QCoreApplication::setApplicationName(QStringLiteral("reolink-client"));
     QCoreApplication::setApplicationVersion(QStringLiteral("0.1.3"));
@@ -66,12 +70,16 @@ int main(int argc, char *argv[])
                                         QStringLiteral("s"), QStringLiteral("4"));
     QCommandLineOption discoverOption(QStringLiteral("discover"),
                                       QStringLiteral("Scan the LAN for Reolink devices then exit."));
+    // Autostart entries launch with the window hidden — monitoring only.
+    QCommandLineOption hiddenOption(QStringLiteral("start-hidden"),
+                                    QStringLiteral("Start minimized to the system tray."));
     parser.addOption(smokeOption);
     parser.addOption(smokeDelayOption);
     parser.addOption(recordOption);
     parser.addOption(recordOutOption);
     parser.addOption(recordSecsOption);
     parser.addOption(discoverOption);
+    parser.addOption(hiddenOption);
     parser.process(app);
 
     if (parser.isSet(discoverOption)) {
@@ -123,12 +131,14 @@ int main(int argc, char *argv[])
     rl::EventManager events(&database, &devices);
     rl::DeviceDiscovery discovery;
     rl::Updater updater;
+    rl::TrayIcon tray;
 
     qmlRegisterType<rl::StreamPlayer>("ReolinkApp.Core", 1, 0, "StreamPlayer");
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Devices", &devices);
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Events", &events);
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Discovery", &discovery);
     qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Updater", &updater);
+    qmlRegisterSingletonInstance("ReolinkApp.Core", 1, 0, "Tray", &tray);
 
     QQmlApplicationEngine engine;
     // Lets tests/screenshots open a specific page (0=Live,1=Playback,2=Events,3=Settings).
@@ -140,9 +150,28 @@ int main(int argc, char *argv[])
         QStringLiteral("mockDoorbell"), qEnvironmentVariableIsSet("RL_MOCK_DOORBELL"));
     engine.rootContext()->setContextProperty(
         QStringLiteral("playbackAutoplay"), qEnvironmentVariableIsSet("RL_PLAYBACK_AUTOPLAY"));
+    engine.rootContext()->setContextProperty(QStringLiteral("startHidden"),
+                                             parser.isSet(hiddenOption) && tray.available());
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("ReolinkApp", "Main");
+
+    // Tray -> window plumbing (QML handles close-to-tray via the Tray singleton).
+    QObject::connect(&tray, &rl::TrayIcon::quitRequested, &app, &QCoreApplication::quit);
+    QObject::connect(&tray, &rl::TrayIcon::openRequested, &app, [&engine] {
+        const QList<QObject *> roots = engine.rootObjects();
+        if (roots.isEmpty())
+            return;
+        if (auto *w = qobject_cast<QQuickWindow *>(roots.first())) {
+            w->show();
+            w->raise();
+            w->requestActivate();
+        }
+    });
+    QObject::connect(&events, &rl::EventManager::unreadChanged, &tray,
+                     [&tray, &events] { tray.setUnread(events.unread()); });
+    // With the window closed the app lives in the tray; don't exit.
+    app.setQuitOnLastWindowClosed(!tray.available());
 
     // Check GitHub for a newer release shortly after the UI is up (skipped in
     // the headless screenshot mode). Silent unless an update is found.
