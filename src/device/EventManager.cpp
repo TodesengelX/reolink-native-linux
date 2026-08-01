@@ -2,7 +2,11 @@
 
 #include "DeviceManager.h"
 
+#include "core/Paths.h"
+
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
 
 namespace rl {
 
@@ -17,6 +21,8 @@ EventManager::EventManager(Database *db, DeviceManager *devices, QObject *parent
     reload();
     connect(m_devices, &DeviceManager::detectionEvent, this, &EventManager::onDetection);
     connect(&m_notifier, &Notifier::activated, this, &EventManager::eventActivated);
+    connect(m_devices, &DeviceManager::eventThumbnailReady, this,
+            &EventManager::onThumbnailReady);
 
     // Test hook: RL_MOCK_EVENTS seeds in-memory events (no DB writes) so the
     // inbox UI can be verified without cameras.
@@ -132,6 +138,10 @@ void EventManager::onDetection(qint64 hostId, int channel, const QString &type,
     rec.type = type;
     rec.camera = camera;
     rec.id = m_db->addEvent(rec);
+    // Grab a frame from the camera for the inbox thumbnail (quiet; the row
+    // updates in place when it lands).
+    if (rec.id > 0)
+        m_devices->captureEventThumbnail(hostId, channel, rec.id);
 
     m_all.prepend(rec);
     // Shift existing view indices (they point into m_all, which just grew at 0).
@@ -170,10 +180,29 @@ void EventManager::onDetection(qint64 hostId, int channel, const QString &type,
             m_view.remove(vi);
             endRemoveRows();
         }
+        for (int i = kMaxEvents; i < m_all.size(); ++i)
+            if (!m_all.at(i).thumbnail.isEmpty())
+                QFile::remove(m_all.at(i).thumbnail);
         m_all.resize(kMaxEvents);
         m_db->trimEvents(kMaxEvents);
         emit countChanged();
     }
+}
+
+void EventManager::onThumbnailReady(qint64 eventId, const QString &path)
+{
+    m_db->setEventThumbnail(eventId, path);
+    for (int i = 0; i < m_all.size(); ++i) {
+        if (m_all.at(i).id != eventId)
+            continue;
+        m_all[i].thumbnail = path;
+        const int vi = m_view.indexOf(i);
+        if (vi >= 0)
+            emit dataChanged(index(vi), index(vi), {ThumbnailRole});
+        return;
+    }
+    // Event already trimmed away — don't keep an orphaned file.
+    QFile::remove(path);
 }
 
 void EventManager::markAllRead()
@@ -186,6 +215,10 @@ void EventManager::markAllRead()
 
 void EventManager::clear()
 {
+    // Drop the cached snapshot files along with the rows.
+    QDir dir(Paths::thumbnailsDir());
+    for (const QString &f : dir.entryList({QStringLiteral("event_*.jpg")}, QDir::Files))
+        dir.remove(f);
     m_db->clearEvents();
     m_unread = 0;
     emit unreadChanged();

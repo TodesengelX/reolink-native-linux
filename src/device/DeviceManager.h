@@ -116,6 +116,10 @@ public:
     Q_INVOKABLE void ptzPreset(int row, int presetId);
     // Capture a JPEG snapshot; emits snapshotSaved/snapshotFailed.
     Q_INVOKABLE void snapshot(int row);
+    // Quiet snapshot for an event thumbnail: fetches a Snap JPEG, downscales it,
+    // writes it under Paths::thumbnailsDir(), and emits eventThumbnailReady with
+    // the caller's cookie (no snapshotSaved toast). Silent no-op on failure.
+    void captureEventThumbnail(qint64 hostId, int channel, qint64 eventId);
 
     // Playback: search a day's recordings (emits recordingsFound with a list of
     // {start,end,type,name} where start/end are seconds into the day), and build
@@ -202,6 +206,8 @@ signals:
     void bcConfigLoaded(int row, int cmdId, const QVariantMap &values);
     // Emitted on each detection 0->1 transition (feeds the event inbox).
     void detectionEvent(qint64 hostId, int channel, const QString &type, const QString &camera);
+    // A quiet event-thumbnail capture finished (path is a local JPEG).
+    void eventThumbnailReady(qint64 eventId, const QString &path);
 
 private slots:
     void pollDetections();

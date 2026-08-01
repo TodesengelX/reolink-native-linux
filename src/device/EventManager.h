@@ -51,6 +51,7 @@ signals:
 
 private slots:
     void onDetection(qint64 hostId, int channel, const QString &type, const QString &camera);
+    void onThumbnailReady(qint64 eventId, const QString &path);
 
 private:
     void reload();

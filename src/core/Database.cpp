@@ -191,6 +191,19 @@ bool Database::clearEvents()
     return true;
 }
 
+bool Database::setEventThumbnail(qint64 id, const QString &path)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE events SET thumbnail = :thumb WHERE id = :id"));
+    q.bindValue(QStringLiteral(":thumb"), path);
+    q.bindValue(QStringLiteral(":id"), id);
+    if (!q.exec()) {
+        m_lastError = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
 bool Database::trimEvents(int keep)
 {
     QSqlQuery q(db());

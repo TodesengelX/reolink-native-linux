@@ -26,6 +26,11 @@ QString Paths::databaseFile()
     return dataDir() + QStringLiteral("/reolink.db");
 }
 
+QString Paths::thumbnailsDir()
+{
+    return ensured(dataDir() + QStringLiteral("/thumbnails"));
+}
+
 QString Paths::recordingsDir()
 {
     return ensured(QStandardPaths::writableLocation(QStandardPaths::MoviesLocation)

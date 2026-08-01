@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QRegularExpression>
 #include <QSet>
 #include <QUrl>
@@ -664,6 +665,39 @@ void DeviceManager::snapshot(int row)
                 else
                     emit snapshotFailed(row, error.isEmpty() ? tr("snapshot failed") : error);
             },
+            Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::captureEventThumbnail(qint64 hostId, int channel, qint64 eventId)
+{
+    const int row = rowOfHostChannel(hostId, channel);
+    auto client = clientFor(row);
+    if (!client)
+        return; // silent: an event without a thumbnail still shows its placeholder
+    const int ch = channel;
+    m_pending.addFuture(QtConcurrent::run([this, client, ch, eventId] {
+        QString error;
+        const QByteArray jpeg = client->fetchSnapshot(ch, &error);
+        if (jpeg.isEmpty())
+            return;
+        // Downscale so 100 cached thumbnails stay small (a Snap off a 4K/8K
+        // camera can be several MB). Fall back to the raw bytes if decoding
+        // isn't possible.
+        QString path = Paths::thumbnailsDir() + QStringLiteral("/event_%1.jpg").arg(eventId);
+        const QImage img = QImage::fromData(jpeg);
+        bool ok = false;
+        if (!img.isNull())
+            ok = img.scaledToWidth(qMin(640, img.width()), Qt::SmoothTransformation)
+                     .save(path, "JPG", 85);
+        if (!ok) {
+            QFile f(path);
+            ok = f.open(QIODevice::WriteOnly) && f.write(jpeg) == jpeg.size();
+        }
+        if (!ok)
+            return;
+        QMetaObject::invokeMethod(
+            this, [this, eventId, path] { emit eventThumbnailReady(eventId, path); },
             Qt::QueuedConnection);
     }));
 }

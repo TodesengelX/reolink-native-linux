@@ -52,6 +52,7 @@ public:
     bool clearEvents();
     // Retention cap: delete all but the newest `keep` events.
     bool trimEvents(int keep);
+    bool setEventThumbnail(qint64 id, const QString &path);
 
 private:
     bool migrate();

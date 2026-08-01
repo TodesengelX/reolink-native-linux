@@ -10,6 +10,7 @@ struct Paths {
     static QString configDir();    // ~/.config/reolink-client
     static QString databaseFile(); // <dataDir>/reolink.db
     static QString recordingsDir(); // ~/Videos/Reolink (user-changeable later)
+    static QString thumbnailsDir(); // <dataDir>/thumbnails (event snapshots)
 };
 
 } // namespace rl
