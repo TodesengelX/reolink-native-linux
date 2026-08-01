@@ -30,6 +30,23 @@ Rectangle {
     function xForSec(sec) { return (sec - viewStart) / visibleSpan * width; }
     function secForX(x) { return viewStart + x / width * visibleSpan; }
 
+    // Detection-event markers: accent ticks where the inbox saw motion/AI on
+    // this camera, so incidents are findable at a glance.
+    property var alarmTicks: []
+    Repeater {
+        model: root.alarmTicks
+        Rectangle {
+            required property var modelData
+            x: root.xForSec(modelData) - 1
+            visible: x >= -1 && x <= root.width
+            y: 0
+            width: 2
+            height: root.height * 0.35
+            color: Theme.danger
+            opacity: 0.9
+        }
+    }
+
     // Recording segments
     Repeater {
         model: root.segments

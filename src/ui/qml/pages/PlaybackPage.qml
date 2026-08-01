@@ -127,6 +127,12 @@ Item {
             if (row === page.deviceRow) {
                 timeline.segments = segments;
                 statusText.text = segments.length + qsTr(" recordings");
+                // Overlay this day's detection events as timeline markers.
+                var info = Devices.cameraInfo(page.deviceRow);
+                if (info && info.hostId !== undefined) {
+                    var dayStart = new Date(page.selYear, page.selMonth - 1, page.selDay).getTime() / 1000;
+                    timeline.alarmTicks = Events.eventTimesFor(info.hostId, info.channel, dayStart);
+                }
                 // Event jump: play the requested moment now that recordings loaded.
                 if (page._pendingPlayEpoch > 0) {
                     var ep = page._pendingPlayEpoch;

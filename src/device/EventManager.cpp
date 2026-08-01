@@ -263,6 +263,22 @@ void EventManager::onThumbnailReady(qint64 eventId, const QString &path)
     QFile::remove(path);
 }
 
+QVariantList EventManager::eventTimesFor(qint64 hostId, int channel, qint64 dayStart) const
+{
+    QVariantList out;
+    const qint64 dayEnd = dayStart + 86400;
+    for (const EventRecord &e : m_all) {
+        if (e.hostId != hostId || e.channel != channel)
+            continue;
+        if (e.timestamp < dayStart || e.timestamp >= dayEnd)
+            continue;
+        if (e.type == QLatin1String("offline") || e.type == QLatin1String("online"))
+            continue; // connectivity events aren't recordings
+        out.append(int(e.timestamp - dayStart));
+    }
+    return out;
+}
+
 void EventManager::markAllRead()
 {
     if (m_unread == 0)
