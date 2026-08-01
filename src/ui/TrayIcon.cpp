@@ -8,6 +8,7 @@
 #include <QMenu>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTimer>
 
 namespace rl {
 
@@ -40,7 +41,15 @@ TrayIcon::TrayIcon(QObject *parent) : QObject(parent)
 
     m_menu->addSeparator();
     QAction *quit = m_menu->addAction(tr("Quit"));
-    connect(quit, &QAction::triggered, this, &TrayIcon::quitRequested);
+    connect(quit, &QAction::triggered, this, [this] {
+        // Hide immediately for feedback, and emit only after this menu callback
+        // has unwound — quitting from inside the menu's own handler (or its
+        // nested/D-Bus event loop) can tear down the icon without ending the
+        // app's main loop.
+        if (m_tray)
+            m_tray->hide();
+        QTimer::singleShot(0, this, [this] { emit quitRequested(); });
+    });
 
     m_tray = new QSystemTrayIcon(icon, this);
     m_tray->setContextMenu(m_menu);

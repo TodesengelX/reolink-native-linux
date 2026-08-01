@@ -19,6 +19,10 @@
 #include <QQuickWindow>
 #include <QTimer>
 
+#include <chrono>
+#include <thread>
+#include <unistd.h>
+
 int main(int argc, char *argv[])
 {
     // QApplication (not QGuiApplication): QSystemTrayIcon needs the widgets
@@ -157,7 +161,19 @@ int main(int argc, char *argv[])
     engine.loadFromModule("ReolinkApp", "Main");
 
     // Tray -> window plumbing (QML handles close-to-tray via the Tray singleton).
-    QObject::connect(&tray, &rl::TrayIcon::quitRequested, &app, &QCoreApplication::quit);
+    QObject::connect(&tray, &rl::TrayIcon::quitRequested, &app, [&app] {
+        // Quit must be final: a worker blocked on an NVR socket can stall
+        // teardown (the destructors join them), leaving a process with no tray
+        // icon and no window. Arm an independent watchdog so "Quit" always
+        // exits; SQLite/keyring writes are synchronous, so nothing is lost.
+        std::thread([] {
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            // Reached only when graceful teardown stalled — worth knowing.
+            qCWarning(lcUi) << "shutdown stalled; forcing exit";
+            ::_exit(0);
+        }).detach();
+        app.quit();
+    });
     QObject::connect(&tray, &rl::TrayIcon::openRequested, &app, [&engine] {
         const QList<QObject *> roots = engine.rootObjects();
         if (roots.isEmpty())
