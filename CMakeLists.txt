@@ -77,6 +77,7 @@ set(APP_QML_FILES
     src/ui/qml/dialogs/UserEditDialog.qml
     src/ui/qml/dialogs/ConfirmDialog.qml
     src/ui/qml/dialogs/DetectionZoneDialog.qml
+    src/ui/qml/dialogs/ScheduleDialog.qml
 )
 # Strip the src/ui/qml/ prefix so module paths are clean (Main.qml, pages/..., etc.)
 foreach(qml_file IN LISTS APP_QML_FILES)

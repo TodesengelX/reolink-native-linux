@@ -189,6 +189,12 @@ public:
     // request XML some commands need (e.g. AI detection selects an ai_type).
     // These bypass the 502-prone HTTP-CGI, like the official apps.
     Q_INVOKABLE void fetchBcConfig(int row, int cmdId, const QString &reqBody = QString());
+    // Weekly recording schedule (BC cmd 81/82): per-type 168-char '0'/'1'
+    // tables (7 days x 24 hours). fetchRecSchedule emits recScheduleLoaded with
+    // { enable, <type>: table } (types e.g. Normal/MD/people/vehicle/dog_cat);
+    // writeRecSchedule RMWs one type's table (emits settingApplied).
+    Q_INVOKABLE void fetchRecSchedule(int row);
+    Q_INVOKABLE void writeRecSchedule(int row, const QString &type, const QString &table);
     Q_INVOKABLE void writeBcConfig(int row, int getCmd, int setCmd, const QVariantMap &changes,
                                    const QString &reqBody = QString());
 
@@ -209,6 +215,7 @@ signals:
     void settingApplied(int row, const QString &command, bool ok, const QString &error);
     void alertsLoaded(int row, const QVariantMap &values);
     void bcConfigLoaded(int row, int cmdId, const QVariantMap &values);
+    void recScheduleLoaded(int row, const QVariantMap &values);
     // Emitted on each detection 0->1 transition (feeds the event inbox).
     void detectionEvent(qint64 hostId, int channel, const QString &type, const QString &camera);
     // A quiet event-thumbnail capture finished (path is a local JPEG).

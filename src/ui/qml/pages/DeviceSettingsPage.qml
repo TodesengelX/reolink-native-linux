@@ -58,6 +58,7 @@ Item {
     property var aiSens: ({})
     // Recording config over Baichuan (cmd 54 flat map).
     property var rec: ({})
+    property var recSched: ({})   // type -> 168-char weekly table (cmd 81)
     property bool recReady: false
     // Motion detection config over Baichuan (cmd 46 flat map).
     property var md: ({})
@@ -94,8 +95,10 @@ Item {
             }
             if (page.category === "recording") {
                 page.rec = ({});
+                page.recSched = ({});
                 page.recReady = false;
                 Devices.fetchBcConfig(page.deviceRow, 54);
+                Devices.fetchRecSchedule(page.deviceRow);
             }
         } else {
             page.status = qsTr("Select a device");
@@ -150,6 +153,10 @@ Item {
         function onAlertsLoaded(row, values) {
             if (row === page.deviceRow)
                 page.alerts = values;
+        }
+        function onRecScheduleLoaded(row, values) {
+            if (row === page.deviceRow)
+                page.recSched = values;
         }
         function onBcConfigLoaded(row, cmdId, values) {
             if (row !== page.deviceRow)
@@ -291,6 +298,7 @@ Item {
     // Add-user / change-password dialog for the Users panel.
     UserEditDialog { id: userDialog; deviceRow: page.deviceRow }
     DetectionZoneDialog { id: zoneDialog }
+    ScheduleDialog { id: schedDialog }
 
     // Confirmation sheet for destructive actions (e.g. disk format).
     ConfirmDialog {
@@ -695,6 +703,21 @@ Item {
                     label: qsTr("Overwrite when full"); enabledCtl: page.isAdmin
                     checked: parseInt(page.rec.cycle || "1") === 1
                     onCommit: (v) => Devices.writeBcConfig(page.deviceRow, 54, 55, { "cycle": v ? 1 : 0 })
+                }
+                // Weekly per-type recording schedule (7x24 grid, cmd 81/82).
+                Rectangle {
+                    Layout.fillWidth: true; implicitHeight: 36; radius: Theme.radius
+                    readonly property bool ready: page.isAdmin && Object.keys(page.recSched).length > 0
+                    color: schedHover.hovered && ready ? Theme.surfaceAlt : Theme.surface
+                    border.color: Theme.border
+                    opacity: ready ? 1 : 0.5
+                    RowLayout {
+                        anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                        Text { text: qsTr("Recording schedule"); color: Theme.text; font.pixelSize: 13; Layout.fillWidth: true }
+                        Text { text: qsTr("Edit\u2026"); color: Theme.accent; font.pixelSize: 12 }
+                    }
+                    HoverHandler { id: schedHover }
+                    TapHandler { onTapped: if (parent.ready) schedDialog.openFor(page.deviceRow, page.recSched) }
                 }
                 SliderRow {
                     label: qsTr("Pre-record (s)"); from: 0; to: 15; enabledCtl: page.isAdmin

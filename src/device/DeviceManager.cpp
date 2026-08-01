@@ -1422,6 +1422,96 @@ void DeviceManager::setAlertEnable(int row, const QString &kind, bool enable)
     }));
 }
 
+void DeviceManager::fetchRecSchedule(int row)
+{
+    if (row < 0 || row >= m_entries.size()) {
+        emit recScheduleLoaded(row, {});
+        return;
+    }
+    const Entry &e = m_entries.at(row);
+    if (e.rec.kind == QLatin1String("stream") || !e.primed) {
+        emit recScheduleLoaded(row, {});
+        return;
+    }
+    BaichuanControl::Params p{e.rec.addr, 9000, e.rec.username, e.password};
+    const int ch = e.channel;
+    m_pending.addFuture(QtConcurrent::run([this, row, p, ch] {
+        QVariantMap m;
+        BaichuanControl bc(p);
+        if (bc.open()) {
+            const QByteArray xml = bc.get(81, ch);
+            bc.close();
+            // Parse <item><type>T</type><valueTable>V</valueTable></item> pairs.
+            int pos = 0;
+            while (true) {
+                const int t0 = xml.indexOf("<type>", pos);
+                if (t0 < 0)
+                    break;
+                const int t1 = xml.indexOf("</type>", t0);
+                const int v0 = xml.indexOf("<valueTable>", t1);
+                const int v1 = xml.indexOf("</valueTable>", v0);
+                if (t1 < 0 || v0 < 0 || v1 < 0)
+                    break;
+                m.insert(QString::fromLatin1(xml.mid(t0 + 6, t1 - t0 - 6)),
+                         QString::fromLatin1(xml.mid(v0 + 12, v1 - v0 - 12)));
+                pos = v1;
+            }
+            const int e0 = xml.indexOf("<enable>");
+            if (e0 >= 0)
+                m.insert(QStringLiteral("enable"), xml.mid(e0 + 8, 1) == "1");
+        }
+        QMetaObject::invokeMethod(
+            this, [this, row, m] { emit recScheduleLoaded(row, m); }, Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::writeRecSchedule(int row, const QString &type, const QString &table)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    const Entry &e = m_entries.at(row);
+    if (!e.isAdmin) {
+        emit settingApplied(row, QStringLiteral("SetRecSchedule"), false,
+                            tr("requires an administrator account"));
+        return;
+    }
+    BaichuanControl::Params p{e.rec.addr, 9000, e.rec.username, e.password};
+    const int ch = e.channel;
+    const QByteArray typeTag = "<type>" + type.toLatin1() + "</type>";
+    const QByteArray newTable = table.toLatin1();
+    m_pending.addFuture(QtConcurrent::run([this, row, p, ch, typeTag, newTable] {
+        bool ok = false;
+        QString err;
+        BaichuanControl bc(p);
+        if (bc.open()) {
+            QByteArray xml = bc.get(81, ch);
+            const int t = xml.indexOf(typeTag);
+            const int v0 = t >= 0 ? xml.indexOf("<valueTable>", t) : -1;
+            const int v1 = v0 >= 0 ? xml.indexOf("</valueTable>", v0) : -1;
+            if (v1 > 0) {
+                const QByteArray mutated =
+                    xml.left(v0 + 12) + newTable + xml.mid(v1);
+                quint16 st = 0;
+                bc.transact(82, ch, mutated, &st);
+                ok = st == 200 || st == 201 || st == 300;
+                if (!ok)
+                    err = tr("device rejected the schedule (status %1)").arg(st);
+            } else {
+                err = tr("schedule type not found on this device");
+            }
+            bc.close();
+        } else {
+            err = tr("couldn't reach the device");
+        }
+        QMetaObject::invokeMethod(
+            this,
+            [this, row, ok, err] {
+                emit settingApplied(row, QStringLiteral("SetRecSchedule"), ok, err);
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
 void DeviceManager::fetchBcConfig(int row, int cmdId, const QString &reqBody)
 {
     if (row < 0 || row >= m_entries.size()) {
