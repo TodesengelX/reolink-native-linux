@@ -57,7 +57,9 @@ EventManager::EventManager(Database *db, DeviceManager *devices, QObject *parent
 
 bool EventManager::matches(const EventRecord &e) const
 {
-    return m_filter.isEmpty() || e.type == m_filter;
+    const bool typeOk = m_filter.isEmpty() || e.type == m_filter;
+    const bool camOk = m_cameraFilter.isEmpty() || e.camera == m_cameraFilter;
+    return typeOk && camOk;
 }
 
 void EventManager::reload()
@@ -125,6 +127,15 @@ void EventManager::setFilter(const QString &filter)
         return;
     m_filter = filter;
     emit filterChanged();
+    reload();
+}
+
+void EventManager::setCameraFilter(const QString &camera)
+{
+    if (m_cameraFilter == camera)
+        return;
+    m_cameraFilter = camera;
+    emit cameraFilterChanged();
     reload();
 }
 

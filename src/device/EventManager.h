@@ -17,6 +17,7 @@ class EventManager : public QAbstractListModel
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
     Q_PROPERTY(int unread READ unread NOTIFY unreadChanged)
     Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
+    Q_PROPERTY(QString cameraFilter READ cameraFilter WRITE setCameraFilter NOTIFY cameraFilterChanged)
 
 public:
     enum Role {
@@ -38,6 +39,8 @@ public:
     int unread() const { return m_unread; }
     QString filter() const { return m_filter; }
     void setFilter(const QString &filter);
+    QString cameraFilter() const { return m_cameraFilter; }
+    void setCameraFilter(const QString &camera);
 
     Q_INVOKABLE void markAllRead();
     Q_INVOKABLE void clear();
@@ -46,6 +49,7 @@ signals:
     void countChanged();
     void unreadChanged();
     void filterChanged();
+    void cameraFilterChanged();
     // The user clicked a desktop notification — jump to this event's playback.
     void eventActivated(qint64 hostId, int channel, qint64 timestamp);
 
@@ -63,6 +67,7 @@ private:
     QVector<EventRecord> m_all;      // newest first
     QVector<int> m_view;             // indices into m_all passing the filter
     QString m_filter;                // "" = all, else a type
+    QString m_cameraFilter;          // "" = all cameras, else a camera name
     int m_unread = 0;
 };
 

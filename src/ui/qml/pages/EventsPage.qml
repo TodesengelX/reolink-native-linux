@@ -120,6 +120,47 @@ Item {
                     TapHandler { onTapped: Events.filter = parent.modelData.key }
                 }
             }
+
+            // Camera filter: a chip-styled dropdown listing the cameras.
+            Rectangle {
+                id: camChip
+                property bool active: Events.cameraFilter !== ""
+                implicitWidth: camChipText.implicitWidth + 34
+                height: 30
+                radius: 15
+                color: active ? Theme.accentDim : (camChipHover.hovered ? Theme.surfaceAlt : Theme.surface)
+                border.color: active ? Theme.accent : Theme.border
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 5
+                    Text {
+                        id: camChipText
+                        text: camChip.active ? Events.cameraFilter : qsTr("All cameras")
+                        color: camChip.active ? Theme.text : Theme.textMuted
+                        font.pixelSize: 12
+                    }
+                    Text { text: "\u25be"; color: Theme.textMuted; font.pixelSize: 10
+                           anchors.verticalCenter: parent.verticalCenter }
+                }
+                HoverHandler { id: camChipHover }
+                TapHandler { onTapped: camMenu.popup() }
+                ThemedMenu {
+                    id: camMenu
+                    ThemedMenuItem { text: qsTr("All cameras")
+                                     onTriggered: Events.cameraFilter = "" }
+                    ThemedMenuSeparator {}
+                    Instantiator {
+                        model: Devices
+                        delegate: ThemedMenuItem {
+                            required property string name
+                            text: name
+                            onTriggered: Events.cameraFilter = name
+                        }
+                        onObjectAdded: (i, o) => camMenu.insertItem(i + 2, o)
+                        onObjectRemoved: (i, o) => camMenu.removeItem(o)
+                    }
+                }
+            }
         }
 
         // ---- Event list ----
