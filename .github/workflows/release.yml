@@ -91,7 +91,8 @@ jobs:
           # there is no hook mechanism to extend — supply a real one. It keeps
           # APPIMAGE/APPDIR (the updater and autostart entry both read APPIMAGE)
           # because exec preserves the environment.
-          cat > /tmp/AppRun <<'APPRUN'
+          rm -f AppDir/AppRun
+          cat > AppDir/AppRun <<'APPRUN'
           #!/bin/sh
           HERE="$(dirname "$(readlink -f "$0")")"
           # Use the host's libva when it exists; fall back to the bundled copy
@@ -110,9 +111,18 @@ jobs:
           fi
           exec "$HERE/usr/bin/reolink-client" "$@"
           APPRUN
-          chmod +x /tmp/AppRun
-          # Phase 2: package the populated AppDir into the AppImage.
-          /tmp/linuxdeploy --appdir AppDir --custom-apprun /tmp/AppRun --output appimage -d "$DESKTOP"
+          chmod +x AppDir/AppRun
+          # Phase 2: package with appimagetool DIRECTLY rather than a second
+          # linuxdeploy pass. Running linuxdeploy again re-scans the binaries and
+          # re-deploys libva — it is a DT_NEEDED of the bundled libavutil — which
+          # silently undid the move above. (The verification below caught exactly
+          # that, so leave both in place.) Phase 1 already produced everything
+          # appimagetool needs in the AppDir root: AppRun, .DirIcon, the .desktop
+          # and the icon. --no-appstream because our metainfo is validated
+          # separately and a validator warning must not fail the release.
+          wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" -O /tmp/appimagetool
+          chmod +x /tmp/appimagetool
+          ARCH=x86_64 /tmp/appimagetool --no-appstream AppDir reolink-native-linux-x86_64.AppImage
           # Verify the *shipped artifact*, not the AppDir. The AppImage is a
           # compressed squashfs, so `strings` over it proves nothing — extract.
           rm -rf squashfs-root
