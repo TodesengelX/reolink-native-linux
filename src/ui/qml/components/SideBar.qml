@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import QtQuick.Layouts
 import ReolinkApp
 import ReolinkApp.Core
@@ -306,19 +307,93 @@ Rectangle {
                     }
                 }
 
+                // Dragged into a Live View cell to put this camera there. Lives in
+                // the window overlay so the list delegate's clip doesn't cut it off.
+                Item {
+                    id: camDrag
+                    parent: Window.contentItem
+                    width: 190
+                    height: 56
+                    visible: Drag.active
+                    z: 100
+                    Drag.active: false
+                    Drag.keys: ["reolink/camera"]
+                    Drag.hotSpot: Qt.point(width / 2, height / 2)
+                    property int deviceRow: camRow.index
+                    property int sourcePane: -1   // not from the grid
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.radius
+                        color: Theme.surface
+                        border.color: Theme.accent
+                        border.width: 2
+                        opacity: 0.95
+                        Text {
+                            anchors.centerIn: parent
+                            width: parent.width - 16
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
+                            text: camRow.name
+                            color: Theme.text
+                            font.pixelSize: 12
+                        }
+                    }
+                }
+
                 MouseArea {
                     id: delegateArea
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    // Only claim the gesture once it's clearly a sideways drag,
+                    // so flicking the list vertically still scrolls it.
+                    preventStealing: dragging
+
+                    property real pressX: 0
+                    property real pressY: 0
+                    property bool dragging: false
+
                     // Left-click opens the camera full-size in Live View;
                     // right-click opens its management menu.
                     onClicked: (m) => {
+                        if (dragging)   // the release that ended a drag isn't a click
+                            return;
                         if (m.button === Qt.RightButton)
                             camMenu.popup();
                         else
                             root.deviceClicked(camRow.index);
+                    }
+                    onPressed: (m) => { pressX = m.x; pressY = m.y; dragging = false; }
+                    onPositionChanged: (m) => {
+                        if (!(m.buttons & Qt.LeftButton))
+                            return;
+                        var dx = m.x - pressX;
+                        var dy = m.y - pressY;
+                        // Horizontal intent starts a drag; vertical belongs to the list.
+                        if (!dragging && Math.abs(dx) > Theme.dragThreshold
+                            && Math.abs(dx) > Math.abs(dy)) {
+                            dragging = true;
+                            camDrag.Drag.active = true;
+                        }
+                        if (dragging) {
+                            var p = mapToItem(camDrag.parent, m.x, m.y);
+                            camDrag.x = p.x - camDrag.width / 2;
+                            camDrag.y = p.y - camDrag.height / 2;
+                        }
+                    }
+                    onReleased: {
+                        if (!dragging)
+                            return;
+                        camDrag.Drag.drop();
+                        camDrag.Drag.active = false;
+                    }
+                    onCanceled: {
+                        if (!dragging)
+                            return;
+                        camDrag.Drag.active = false;
+                        dragging = false;
                     }
                 }
 

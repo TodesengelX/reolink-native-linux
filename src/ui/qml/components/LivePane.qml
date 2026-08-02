@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import QtMultimedia
 import ReolinkApp
 import ReolinkApp.Core
@@ -49,9 +50,16 @@ Rectangle {
     property string streamKey: ""
     property bool bcFallback: false // Baichuan slot busy → RTSP main for this round
 
+    // These carry the DEVICE ROW, not the pane index: the page tracks which
+    // camera is maximized/selected, so both survive a rearrange.
     signal toggleMaximize(int index)
     signal clicked(int index)
     signal popOut(int deviceRow, string label)
+    // A camera was dropped onto this pane — from the sidebar or another pane.
+    signal cameraDropped(int pane, int row)
+
+    // True while a drag hovers this pane, so it can show where it would land.
+    property bool dropTarget: false
 
     function updateSource() {
         // Only stream when the pane is laid out AND its page is actually on screen
@@ -121,6 +129,71 @@ Rectangle {
 
     Component.onDestruction: player.stop()
 
+    // ---- Drag and drop -----------------------------------------------------
+    // Dropping a camera here re-points this cell at it. Nothing needs to stop
+    // the outgoing stream by hand: changing deviceRow (or dropping out of the
+    // visible preset) runs updateSource(), and both StreamPlayer.setSource and
+    // setPacketSource stop the running session first — which for an HD pane also
+    // fires the Baichuan client's stop callback and frees the NVR's single slot.
+    DropArea {
+        anchors.fill: parent
+        keys: ["reolink/camera"]
+        onEntered: (drag) => {
+            // Dragging a pane onto itself is a no-op; don't advertise a drop.
+            root.dropTarget = !(drag.source && drag.source.sourcePane === root.paneIndex);
+        }
+        onExited: root.dropTarget = false
+        onDropped: (drop) => {
+            root.dropTarget = false;
+            if (drop.source && drop.source.deviceRow >= 0)
+                root.cameraDropped(root.paneIndex, drop.source.deviceRow);
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: root.dropTarget
+        color: Theme.accent
+        opacity: 0.18
+        border.color: Theme.accent
+        border.width: 2
+        z: 50
+    }
+
+    // The thing that actually gets dragged when this pane is picked up. It lives
+    // in the window overlay so it isn't clipped by the pane it came from.
+    Item {
+        id: paneDrag
+        parent: Window.contentItem
+        width: 190
+        height: 108
+        visible: Drag.active
+        z: 100
+        Drag.active: false
+        Drag.keys: ["reolink/camera"]
+        Drag.hotSpot: Qt.point(width / 2, height / 2)
+        property int deviceRow: root.deviceRow
+        property int sourcePane: root.paneIndex
+
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.radius
+            color: Theme.surface
+            border.color: Theme.accent
+            border.width: 2
+            opacity: 0.95
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 16
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                text: root.label
+                color: Theme.text
+                font.pixelSize: 12
+            }
+        }
+    }
+
     // ---- Video with digital zoom ------------------------------------------
     property real zoom: 1.0
     property real panX: 0
@@ -162,16 +235,57 @@ Rectangle {
                 root.panX = Math.max(-mx, Math.min(mx, root.panX));
                 root.panY = Math.max(-my, Math.min(my, root.panY));
             }
-            onClicked: root.clicked(root.paneIndex)
-            onDoubleClicked: if (root.hasSource) root.toggleMaximize(root.paneIndex)
-            onPressed: (m) => { lastX = m.x; lastY = m.y; }
+            // Drag state. A pane is picked up only when it isn't zoomed in —
+            // while zoomed, dragging pans the image, which is the older and more
+            // frequent gesture.
+            property real pressX: 0
+            property real pressY: 0
+            property bool dragging: false
+            readonly property bool canDrag: root.hasSource && root.zoom <= 1.0
+
+            onClicked: {
+                if (dragging)      // the release that ended a drag isn't a click
+                    return;
+                root.clicked(root.deviceRow);
+            }
+            onDoubleClicked: if (root.hasSource) root.toggleMaximize(root.deviceRow)
+            onPressed: (m) => {
+                lastX = m.x; lastY = m.y;
+                pressX = m.x; pressY = m.y;
+                dragging = false;
+            }
             onPositionChanged: (m) => {
                 if (root.zoom > 1.0 && (m.buttons & Qt.LeftButton)) {
                     root.panX += (m.x - lastX);
                     root.panY += (m.y - lastY);
                     lastX = m.x; lastY = m.y;
                     clampPan();
+                    return;
                 }
+                if (!(m.buttons & Qt.LeftButton) || !canDrag)
+                    return;
+                if (!dragging
+                    && Math.hypot(m.x - pressX, m.y - pressY) > Theme.dragThreshold) {
+                    dragging = true;
+                    paneDrag.Drag.active = true;
+                }
+                if (dragging) {
+                    var p = mapToItem(paneDrag.parent, m.x, m.y);
+                    paneDrag.x = p.x - paneDrag.width / 2;
+                    paneDrag.y = p.y - paneDrag.height / 2;
+                }
+            }
+            onReleased: {
+                if (!dragging)
+                    return;
+                paneDrag.Drag.drop();
+                paneDrag.Drag.active = false;
+            }
+            onCanceled: {
+                if (!dragging)
+                    return;
+                paneDrag.Drag.active = false;
+                dragging = false;
             }
             onWheel: (w) => {
                 if (!root.capZoom && !root.hasSource) return;
@@ -368,7 +482,7 @@ Rectangle {
             ToolButton {
                 glyph: "⛶"
                 tip: root.forceMain ? qsTr("Restore grid") : qsTr("Maximize")
-                onActivated: if (root.hasSource) root.toggleMaximize(root.paneIndex)
+                onActivated: if (root.hasSource) root.toggleMaximize(root.deviceRow)
             }
         }
     }
