@@ -6,7 +6,9 @@ A fully **native Linux desktop client** for Reolink cameras and NVRs — built t
 
 **No Wine, no Electron, no web wrappers, no bundled third-party NVR software.** Compiled C++/Qt6 talking directly to the devices over their own protocols — including the native **Baichuan** protocol (TCP 9000) the official apps use, which is why live HD, recorded playback, and settings work reliably where third-party RTSP/HTTP tools struggle.
 
-> **Status: alpha.** Actively developed and validated against a real RLN8-410 NVR. Core live/playback/settings work well; some areas (weekly recording-schedule grid, two-way talk audio, remote/P2P) are still in progress.
+> **Status: alpha.** Actively developed and validated against a real RLN8-410 NVR. Live view, playback, events, notifications and device settings all work; two-way talk audio and remote/P2P access are still in progress.
+
+Latest release: **v0.1.5** — see the [changelog](CHANGELOG.md).
 
 ## Install
 
@@ -50,12 +52,13 @@ Requires Qt 6.5+ (base / declarative / multimedia / shadertools / tools), FFmpeg
 
 ## Features
 
-- **Live view** — 1/4/9/16 grid; hardware-accelerated H.264/H.265 decode (VAAPI/NVDEC) with software fallback; double-click a camera (or single-click it in the sidebar) to maximize; F11 fullscreen; per-pane floating toolbar (SD/HD, snapshot, record, digital zoom with edge-clamped pan, PTZ, talk, siren, floodlight, pop-out); auto-reconnect. Maximized/pop-out HD streams use Baichuan, which avoids the corruption some Reolink NVRs emit on their RTSP main stream.
-- **Playback** — month calendar, two-tone timeline (timer/alarm), recording search, in-place seek and a live playhead, pan/zoom the timeline, HD playback over Baichuan.
-- **Events** — notification inbox with AI-type filters (person/vehicle/pet/visitor/motion), detection polling, jump-to-playback, unread badge.
+- **Live view** — 1/4/6/9/16 grid; hardware-accelerated H.264/H.265 decode (VAAPI/NVDEC) with software fallback; double-click a camera (or single-click it in the sidebar) to maximize; F11 fullscreen; per-pane floating toolbar (SD/HD, snapshot, record, digital zoom with edge-clamped pan, PTZ, talk, siren, floodlight, pop-out); auto-reconnect. Maximized/pop-out HD streams use Baichuan, which avoids the corruption some Reolink NVRs emit on their RTSP main stream.
+- **Playback** — month calendar, two-tone timeline (timer/alarm) with red ticks marking detections, recording search, in-place seek and a live playhead, pan/zoom the timeline, clip export, HD playback over Baichuan.
+- **Events** — notification inbox with thumbnails, AI-type filters (person/vehicle/pet/visitor/motion) and per-camera filtering, detection polling, jump-to-playback, unread badge.
+- **Background monitoring** — lives in the system tray with the window closed, so alerts keep arriving; optional start-on-login. Desktop notifications fire for detections (gated on each camera's Push setting) and for cameras or the NVR going offline; clicking one opens the app and plays that event back.
 - **Device tree** — NVR shown as an expandable parent with its cameras nested; right-click for Properties / Settings / Reboot / Remove.
-- **Settings** — Image (brightness/contrast/saturation/sharpness, mirror/flip, day/night), Detection (motion + per-AI-type sensitivity, alerts), Recording, Encoding, Display/OSD, Network, Storage, Users, Time, System. Camera settings run over the native Baichuan protocol, so they don't hit the NVR web server's under-load 502s.
-- **Extras** — battery/solar status, doorbell answer surface, multi-monitor pop-out, fisheye dewarp shader, manual MP4 recording (stream-copy).
+- **Settings** — Image (brightness/contrast/saturation/sharpness, mirror/flip, day/night), Detection (motion + per-AI-type sensitivity, alerts, and a paint-on-image detection-zone editor), Recording (including a weekly 7×24 schedule grid per recording type), Encoding, Display/OSD, Network, Storage, Users, Time, System. Camera settings run over the native Baichuan protocol, so they don't hit the NVR web server's under-load 502s.
+- **Extras** — battery/solar status, doorbell answer surface, multi-monitor pop-out, fisheye dewarp shader, manual MP4 recording (stream-copy), and a built-in update checker with one-click self-update for the AppImage.
 
 ## How it talks to your devices
 
@@ -67,6 +70,7 @@ Requires Qt 6.5+ (base / declarative / multimedia / shadertools / tools), FFmpeg
 
 ## Documentation
 
+- **[CHANGELOG.md](CHANGELOG.md)** — what changed in each release.
 - **[docs/DESIGN.md](docs/DESIGN.md)** — the definitive design document (goals, stack, architecture, protocols, media pipeline, UI inventory, data model, packaging, roadmap, risks).
 - [docs/research/](docs/research/) — the research dossiers behind the design (official-client UI, protocols, video pipeline, GUI stack, prior art, fact-checks).
 

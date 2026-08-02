@@ -33,16 +33,16 @@
     <release version="0.1.4" date="2026-08-01">
       <description><p>System tray with background monitoring, camera offline alerts, event thumbnails and per-camera filtering, detection markers on the playback timeline, clip export, and a weekly recording-schedule editor.</p></description>
     </release>
-    <release version="0.1.3" date="2026-07-31">
+    <release version="0.1.3" date="2026-07-30">
       <description><p>Clicking a detection notification now opens the app and plays that event back; the app version is shown in the nav bar.</p></description>
     </release>
     <release version="0.1.2" date="2026-07-30">
       <description><p>The AppImage now runs natively on Wayland (bundles the Qt Wayland platform plugins) instead of falling back to XWayland.</p></description>
     </release>
-    <release version="0.1.1" date="2026-07-12">
+    <release version="0.1.1" date="2026-07-30">
       <description><p>Detection-zone editor, 6-camera live grid, desktop notifications, a nested device tree with icons, event retention cap, and a built-in update checker.</p></description>
     </release>
-    <release version="0.1.0" date="2026-07-09">
+    <release version="0.1.0" date="2026-07-11">
       <description><p>Initial development release: live view, playback, events, and settings.</p></description>
     </release>
   </releases>

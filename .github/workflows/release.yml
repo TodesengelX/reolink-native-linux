@@ -160,12 +160,37 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      # Needed for CHANGELOG.md — the release body comes from it, so that the
+      # notes people read on GitHub are the ones written by hand rather than a
+      # bare list of commit subjects.
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { merge-multiple: true }
+      - name: Build release notes from CHANGELOG.md
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Print the body of this version's section: everything after its
+          # heading, up to the next "## [" heading.
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/       { exit }
+            found                   { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          # A missing entry should be visible, not silently ship empty notes.
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::warning::no CHANGELOG.md entry for $VERSION"
+            printf 'See the [changelog](https://github.com/%s/blob/main/CHANGELOG.md).\n' \
+              "$GITHUB_REPOSITORY" > RELEASE_NOTES.md
+          fi
+          echo "--- release notes ---"; cat RELEASE_NOTES.md
       - uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
+          # Keep the auto-generated commit/compare section underneath the
+          # hand-written notes rather than instead of them.
+          append_body: true
+          generate_release_notes: true
           files: |
             *.AppImage
             *.flatpak
           fail_on_unmatched_files: false
-          generate_release_notes: true
