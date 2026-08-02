@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import ReolinkApp
 
 // 24-hour recording timeline: two-tone segments (grey = timer/continuous,
@@ -9,7 +10,13 @@ import ReolinkApp
 // scrubs it; a plain click seeks.
 Rectangle {
     id: root
-    height: 64
+    // The scrub track keeps a fixed height; per-camera lanes extend the widget
+    // downwards, so adding cameras never shrinks the thing you actually drag.
+    readonly property real trackHeight: 64
+    readonly property real laneHeight: 7
+    readonly property real lanesHeight:
+        lanes.length > 0 ? lanes.length * (laneHeight + 3) + 5 : 0
+    height: trackHeight + lanesHeight
     color: Theme.surface
     border.color: Theme.border
     radius: Theme.radius
@@ -18,6 +25,11 @@ Rectangle {
     property real duration: 86400        // seconds shown (a full day)
     property real position: 0            // playhead, seconds
     property var segments: []
+    // One entry per camera in the grid: { name, segments }. The main track shows
+    // the union of these, so you can scrub to anything visible in the grid; the
+    // lanes show which camera actually has footage where, because a union alone
+    // can't tell you that half the panes will be blank at a given moment.
+    property var lanes: []
     property real zoom: 1.0              // 1 = whole day; >1 zooms in
     property real viewStart: 0           // left edge, seconds
 
@@ -41,7 +53,7 @@ Rectangle {
             visible: x >= -1 && x <= root.width
             y: 0
             width: 2
-            height: root.height * 0.35
+            height: root.trackHeight * 0.35
             color: Theme.danger
             opacity: 0.9
         }
@@ -57,7 +69,7 @@ Rectangle {
             x: root.xForSec(segStart)
             width: Math.max(2, root.xForSec(segEnd) - root.xForSec(segStart))
             y: 14
-            height: root.height - 28
+            height: root.trackHeight - 28
             visible: segEnd >= root.viewStart && segStart <= root.viewStart + root.visibleSpan
             color: modelData.type === "alarm" ? Theme.accent : "#4a5a68"
             opacity: 0.85
@@ -73,16 +85,66 @@ Rectangle {
             x: root.xForSec(sec)
             visible: sec >= root.viewStart - 1 && sec <= root.viewStart + root.visibleSpan + 1
             Rectangle {
-                y: 0; width: 1; height: index % 6 === 0 ? root.height : 8
+                y: 0; width: 1; height: index % 6 === 0 ? root.trackHeight : 8
                 color: Theme.border
             }
             Text {
                 visible: parent.index % 2 === 0
-                y: root.height - 14
+                y: root.trackHeight - 14
                 x: 2
                 text: String(parent.index).padStart(2, "0") + ":00"
                 color: Theme.textMuted
                 font.pixelSize: 9
+            }
+        }
+    }
+
+    // Per-camera coverage lanes, in grid order, under the scrub track.
+    Column {
+        y: root.trackHeight
+        width: parent.width
+        spacing: 3
+        Repeater {
+            model: root.lanes
+            Item {
+                required property var modelData
+                width: root.width
+                height: root.laneHeight
+                // Empty track behind, so a camera with no footage at all still
+                // reads as "present but blank" rather than silently missing.
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.border
+                    opacity: 0.25
+                }
+                Repeater {
+                    model: parent.modelData.segments
+                    Rectangle {
+                        required property var modelData
+                        x: root.xForSec(modelData.start)
+                        width: Math.max(1, root.xForSec(modelData.end) - root.xForSec(modelData.start))
+                        height: parent.height
+                        visible: modelData.end >= root.viewStart
+                                 && modelData.start <= root.viewStart + root.visibleSpan
+                        color: modelData.type === "alarm" ? Theme.accent : "#4a5a68"
+                        opacity: 0.9
+                    }
+                }
+                ToolTip {
+                    visible: laneHover.hovered
+                    delay: 400
+                    x: 4
+                    y: -22
+                    contentItem: Text {
+                        text: parent.parent.modelData.name
+                        color: Theme.text
+                        font.pixelSize: 10
+                    }
+                    background: Rectangle {
+                        color: Theme.surfaceAlt; border.color: Theme.border; radius: 3
+                    }
+                }
+                HoverHandler { id: laneHover }
             }
         }
     }
@@ -94,6 +156,7 @@ Rectangle {
         width: 2
         height: root.height
         color: "#ff5a5a"
+        z: 6
         visible: root.position >= root.viewStart && root.position <= root.viewStart + root.visibleSpan
     }
 
