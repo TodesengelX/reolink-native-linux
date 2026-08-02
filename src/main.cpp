@@ -2,6 +2,7 @@
 #include "core/Database.h"
 #include "core/Log.h"
 #include "core/Paths.h"
+#include "core/SingleInstance.h"
 #include "core/Updater.h"
 #include "ui/TrayIcon.h"
 #include "device/DeviceDiscovery.h"
@@ -125,6 +126,20 @@ int main(int argc, char *argv[])
         return app.exec();
     }
 
+    // One client per session. Closing the window leaves the app monitoring in
+    // the tray, so relaunching from the launcher is routine — without this each
+    // relaunch built a second app (own tray icon, NVR login, decoder set) and
+    // they accumulated. Later launches raise the running window and exit.
+    // Skipped for --smoke so headless capture stays independent of any running
+    // client; RL_ALLOW_MULTI is the escape hatch for deliberately running two.
+    rl::SingleInstance instance;
+    const bool guardInstance = !parser.isSet(smokeOption)
+                               && !qEnvironmentVariableIsSet("RL_ALLOW_MULTI");
+    if (guardInstance && !instance.acquire(parser.isSet(hiddenOption))) {
+        qCInfo(lcUi) << "another instance is already running; handed this launch to it";
+        return 0;
+    }
+
     rl::Database database(rl::Paths::databaseFile());
     if (!database.open()) {
         qCCritical(lcCore) << "Cannot open database:" << database.lastError();
@@ -174,7 +189,7 @@ int main(int argc, char *argv[])
         }).detach();
         app.quit();
     });
-    QObject::connect(&tray, &rl::TrayIcon::openRequested, &app, [&engine] {
+    auto raiseWindow = [&engine] {
         const QList<QObject *> roots = engine.rootObjects();
         if (roots.isEmpty())
             return;
@@ -183,7 +198,12 @@ int main(int argc, char *argv[])
             w->raise();
             w->requestActivate();
         }
-    });
+    };
+    QObject::connect(&tray, &rl::TrayIcon::openRequested, &app, raiseWindow);
+    // A second launch (launcher click, notification) reaches us here instead of
+    // starting its own app; it forwarded its activation token so this raise is
+    // allowed rather than suppressed as focus stealing.
+    QObject::connect(&instance, &rl::SingleInstance::activationRequested, &app, raiseWindow);
     QObject::connect(&events, &rl::EventManager::unreadChanged, &tray,
                      [&tray, &events] { tray.setUnread(events.unread()); });
     // With the window closed the app lives in the tray; don't exit.

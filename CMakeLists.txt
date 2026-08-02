@@ -29,6 +29,7 @@ add_library(reolink_core STATIC
     src/core/CredentialStore.h src/core/CredentialStore.cpp
     src/core/Notifier.h src/core/Notifier.cpp
     src/core/Updater.h src/core/Updater.cpp
+    src/core/SingleInstance.h src/core/SingleInstance.cpp
     src/protocol/Json.h
     src/protocol/ReolinkApi.h src/protocol/ReolinkApi.cpp
     src/protocol/ReolinkHttpClient.h src/protocol/ReolinkHttpClient.cpp
