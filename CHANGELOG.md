@@ -6,8 +6,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the project is pre-1.0, minor versions may still change behaviour.
 
-## [Unreleased]
-
 ## [0.1.5] — 2026-08-02
 
 ### Fixed
@@ -81,7 +79,6 @@ While the project is pre-1.0, minor versions may still change behaviour.
 Initial development release: live view, playback, events and device settings,
 published as an AppImage and a Flatpak bundle.
 
-[Unreleased]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.5...HEAD
 [0.1.5]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.2...v0.1.3
