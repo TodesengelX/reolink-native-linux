@@ -61,7 +61,42 @@ Rectangle {
     // True while a drag hovers this pane, so it can show where it would land.
     property bool dropTarget: false
 
+    // A pane hidden by a layout change holds its stream this long before
+    // dropping it, so coming straight back costs nothing.
+    property int keepAliveMs: 5000
+
+    // Drop the stream for good. Separate from updateSource() so the deferred
+    // path and the immediate one can't disagree about what "stopped" means.
+    function releaseStream() {
+        keepAlive.stop();
+        if (streamKey === "")
+            return;
+        streamKey = "";
+        player.stop();
+    }
+
+    Timer {
+        id: keepAlive
+        interval: root.keepAliveMs
+        onTriggered: root.releaseStream()
+    }
+
     function updateSource() {
+        // Hidden by a layout change — maximizing another pane, or switching to a
+        // preset this slot falls outside of. Hold the stream briefly rather than
+        // tearing it down: restoring, or flipping 6 -> 4 -> 6, then reuses the
+        // running session instead of reconnecting every pane (each reconnect
+        // waits for the next keyframe, so it costs seconds per camera).
+        //
+        // Leaving Live View entirely is deliberately NOT covered: Playback needs
+        // the NVR's session slots, and hidden panes holding them starve it.
+        if (deviceRow >= 0 && pageActive && !visible) {
+            if (streamKey !== "")
+                keepAlive.restart();
+            return;
+        }
+        keepAlive.stop();   // visible again (or shutting down): cancel the drop
+
         // Only stream when the pane is laid out AND its page is actually on screen
         // — otherwise hidden Live View panes keep streaming and exhaust the NVR's
         // limited session slots (starving Playback and other cameras).
@@ -93,7 +128,9 @@ Rectangle {
             player.start();
         }
     }
-    onDeviceRowChanged: { bcFallback = false; updateSource(); }
+    // A pane pointed at a different camera must let the old one go now — its
+    // session is wanted elsewhere (a swap hands it straight to another pane).
+    onDeviceRowChanged: { bcFallback = false; releaseStream(); updateSource(); }
     onVisibleChanged: updateSource()
     onPageActiveChanged: updateSource()
     onEffectiveMainChanged: { bcFallback = false; updateSource(); }
