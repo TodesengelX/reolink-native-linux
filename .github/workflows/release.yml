@@ -67,28 +67,64 @@ jobs:
           # in usr/lib as a dep of the wayland platform plugin, so copy the plugin
           # in by hand, then package.
           cp -av "$QT_ROOT_DIR/plugins/wayland-graphics-integration-client" AppDir/usr/plugins/
-          # Drop libva before packaging. libva is a thin loader that dlopen()s a
-          # driver (radeonsi/iHD/...) which must match the host's Mesa; a bundled
-          # copy finds the host driver's ABI unfamiliar and every decode silently
-          # fell back to software. The host's own libva pairs correctly with its
-          # driver, and hosts without libva behave exactly as they do today. This
-          # is a plain rm on purpose: linuxdeploy accepts --exclude-library and
-          # then SILENTLY IGNORES IT, which is why v0.1.4 shipped with libva
-          # bundled despite carrying the flag.
-          rm -fv AppDir/usr/lib/libva*.so* || true
-          # Fail loudly rather than ship another release that only looks fixed.
+          # libva is a thin loader that dlopen()s a driver (radeonsi/iHD/...)
+          # built against the host's Mesa. A bundled libva cannot load the host's
+          # driver, so every decode silently fell back to software — that is the
+          # v0.1.4 bug. The host's own libva pairs correctly with its own driver.
+          #
+          # MOVE rather than delete: the bundled libavutil/libavcodec carry a hard
+          # DT_NEEDED on libva.so.2 / libva-drm.so.2 / libva-x11.so.2, so deleting
+          # outright would stop the app from STARTING on a host with no libva —
+          # worse than software decode. Out of the search path, the host's copy
+          # wins when present, and AppRun below restores the bundled one when it
+          # is genuinely absent.
+          #
+          # This is a plain mv on purpose: linuxdeploy accepts --exclude-library
+          # and then SILENTLY IGNORES IT, which is why v0.1.4 shipped libva
+          # despite carrying that flag.
+          mkdir -p AppDir/usr/lib/va-fallback
+          mv -v AppDir/usr/lib/libva*.so* AppDir/usr/lib/va-fallback/ || true
           if ls AppDir/usr/lib/libva*.so* >/dev/null 2>&1; then
-            echo "::error::libva still present in AppDir after removal"; exit 1
+            echo "::error::libva still on the AppDir search path"; exit 1
           fi
+          # linuxdeploy's default AppRun is a bare symlink to the binary, so
+          # there is no hook mechanism to extend — supply a real one. It keeps
+          # APPIMAGE/APPDIR (the updater and autostart entry both read APPIMAGE)
+          # because exec preserves the environment.
+          cat > /tmp/AppRun <<'APPRUN'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          # Use the host's libva when it exists; fall back to the bundled copy
+          # only to keep the app launchable, accepting software decode there.
+          have_libva=0
+          for probe in ldconfig /sbin/ldconfig /usr/sbin/ldconfig; do
+              if "$probe" -p 2>/dev/null | grep -q 'libva\.so\.2'; then have_libva=1; break; fi
+          done
+          if [ "$have_libva" -eq 0 ]; then
+              for d in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /lib/x86_64-linux-gnu /lib64; do
+                  if [ -e "$d/libva.so.2" ]; then have_libva=1; break; fi
+              done
+          fi
+          if [ "$have_libva" -eq 0 ]; then
+              export LD_LIBRARY_PATH="$HERE/usr/lib/va-fallback${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          fi
+          exec "$HERE/usr/bin/reolink-client" "$@"
+          APPRUN
+          chmod +x /tmp/AppRun
           # Phase 2: package the populated AppDir into the AppImage.
-          /tmp/linuxdeploy --appdir AppDir --output appimage -d "$DESKTOP"
-          # Verify the *shipped artifact*, not the AppDir: extract and look. The
-          # AppImage is a compressed squashfs, so `strings` on it proves nothing.
-          ./reolink-native-linux-x86_64.AppImage --appimage-extract 'usr/lib/*' >/dev/null
+          /tmp/linuxdeploy --appdir AppDir --custom-apprun /tmp/AppRun --output appimage -d "$DESKTOP"
+          # Verify the *shipped artifact*, not the AppDir. The AppImage is a
+          # compressed squashfs, so `strings` over it proves nothing — extract.
+          rm -rf squashfs-root
+          ./reolink-native-linux-x86_64.AppImage --appimage-extract >/dev/null
           if ls squashfs-root/usr/lib/libva*.so* >/dev/null 2>&1; then
-            echo "::error::libva present in the packaged AppImage"; exit 1
+            echo "::error::libva is still on the search path in the AppImage"; exit 1
           fi
-          echo "verified: no libva in the shipped AppImage"
+          test -f squashfs-root/usr/lib/va-fallback/libva.so.2 \
+            || { echo "::error::libva fallback missing — app would not start without host libva"; exit 1; }
+          grep -q 'va-fallback' squashfs-root/AppRun \
+            || { echo "::error::AppRun is not the custom one (no libva fallback logic)"; exit 1; }
+          echo "verified: host libva preferred, bundled copy retained as fallback"
           rm -rf squashfs-root
       - uses: actions/upload-artifact@v4
         with: { name: appimage, path: '*.AppImage' }
