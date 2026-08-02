@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(reolink-client
-    VERSION 0.1.4
+    VERSION 0.1.5
     DESCRIPTION "Native Linux client for Reolink cameras and NVRs"
     LANGUAGES CXX)
 
@@ -142,7 +142,7 @@ endforeach()
 # Tests
 # ---------------------------------------------------------------------------
 enable_testing()
-foreach(t IN ITEMS test_protocol test_database)
+foreach(t IN ITEMS test_protocol test_database test_singleinstance)
     qt_add_executable(${t} tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE reolink_core Qt6::Test)
     add_test(NAME ${t} COMMAND ${t})

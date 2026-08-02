@@ -27,6 +27,9 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.1.5" date="2026-08-02">
+      <description><p>Launching the app again now raises the running window instead of starting a second copy, so tray icons no longer pile up. Hardware video decoding works on hosts with VAAPI, cutting CPU use during live view.</p></description>
+    </release>
     <release version="0.1.4" date="2026-08-01">
       <description><p>System tray with background monitoring, camera offline alerts, event thumbnails and per-camera filtering, detection markers on the playback timeline, clip export, and a weekly recording-schedule editor.</p></description>
     </release>

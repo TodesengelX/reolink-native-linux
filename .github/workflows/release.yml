@@ -58,13 +58,8 @@ jobs:
             chmod +x "/tmp/$t"
           done
           DESKTOP=AppDir/usr/share/applications/io.github.todesengelx.ReolinkLinux.desktop
-          # Phase 1: deploy Qt into the AppDir (no packaging yet). libva is
-          # excluded: a bundled libva can't find the host's VAAPI driver, which
-          # forced software decode everywhere — the host's own libva (paired
-          # with its driver) enables hardware decode, and hosts without it fall
-          # back to software exactly as before.
-          /tmp/linuxdeploy --appdir AppDir --plugin qt -d "$DESKTOP" \
-            --exclude-library "libva.so*" --exclude-library "libva-*.so*"
+          # Phase 1: deploy Qt into the AppDir (no packaging yet).
+          /tmp/linuxdeploy --appdir AppDir --plugin qt -d "$DESKTOP"
           # linuxdeploy-plugin-qt deploys the wayland decoration + shell-integration
           # plugins but NOT graphics-integration-client (the EGL client-buffer
           # integration) — without it Qt Quick aborts on Wayland ("Failed to create
@@ -72,8 +67,29 @@ jobs:
           # in usr/lib as a dep of the wayland platform plugin, so copy the plugin
           # in by hand, then package.
           cp -av "$QT_ROOT_DIR/plugins/wayland-graphics-integration-client" AppDir/usr/plugins/
+          # Drop libva before packaging. libva is a thin loader that dlopen()s a
+          # driver (radeonsi/iHD/...) which must match the host's Mesa; a bundled
+          # copy finds the host driver's ABI unfamiliar and every decode silently
+          # fell back to software. The host's own libva pairs correctly with its
+          # driver, and hosts without libva behave exactly as they do today. This
+          # is a plain rm on purpose: linuxdeploy accepts --exclude-library and
+          # then SILENTLY IGNORES IT, which is why v0.1.4 shipped with libva
+          # bundled despite carrying the flag.
+          rm -fv AppDir/usr/lib/libva*.so* || true
+          # Fail loudly rather than ship another release that only looks fixed.
+          if ls AppDir/usr/lib/libva*.so* >/dev/null 2>&1; then
+            echo "::error::libva still present in AppDir after removal"; exit 1
+          fi
           # Phase 2: package the populated AppDir into the AppImage.
           /tmp/linuxdeploy --appdir AppDir --output appimage -d "$DESKTOP"
+          # Verify the *shipped artifact*, not the AppDir: extract and look. The
+          # AppImage is a compressed squashfs, so `strings` on it proves nothing.
+          ./reolink-native-linux-x86_64.AppImage --appimage-extract 'usr/lib/*' >/dev/null
+          if ls squashfs-root/usr/lib/libva*.so* >/dev/null 2>&1; then
+            echo "::error::libva present in the packaged AppImage"; exit 1
+          fi
+          echo "verified: no libva in the shipped AppImage"
+          rm -rf squashfs-root
       - uses: actions/upload-artifact@v4
         with: { name: appimage, path: '*.AppImage' }
 

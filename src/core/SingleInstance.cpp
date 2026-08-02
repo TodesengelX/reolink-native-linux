@@ -83,6 +83,10 @@ void SingleInstance::readCommands(QLocalSocket *client)
         const QByteArray token = line.mid(qstrlen("ACTIVATE")).trimmed();
         if (!token.isEmpty())
             qputenv("XDG_ACTIVATION_TOKEN", token);
+        // Worth logging: if a raise ever fails to happen, this distinguishes
+        // "the handoff never arrived" from "the compositor refused the raise".
+        qCInfo(lcCore) << "activation requested by a second launch; token"
+                       << (token.isEmpty() ? "absent" : "present");
         emit activationRequested();
     }
 }

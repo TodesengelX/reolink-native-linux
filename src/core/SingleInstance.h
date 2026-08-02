@@ -28,6 +28,10 @@ public:
     // false when it should exit immediately.
     bool acquire(bool startHidden);
 
+    // Where the primary listens. Public so tests can drive the protocol
+    // directly rather than reimplementing the path and drifting from it.
+    QString socketPath() const;
+
 signals:
     // A later launch asked for the window. Any XDG activation token it carried
     // is already in this process's environment, so requestActivate() is honoured
@@ -35,7 +39,6 @@ signals:
     void activationRequested();
 
 private:
-    QString socketPath() const;
     void readCommands(QLocalSocket *client);
 
     QLocalServer *m_server = nullptr;
