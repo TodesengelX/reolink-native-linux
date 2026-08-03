@@ -61,6 +61,7 @@ set(APP_QML_FILES
     src/ui/qml/components/ThemedMenuItem.qml
     src/ui/qml/components/ThemedMenuSeparator.qml
     src/ui/qml/components/LivePane.qml
+    src/ui/qml/components/PlaybackPane.qml
     src/ui/qml/components/PtzPad.qml
     src/ui/qml/components/Timeline.qml
     src/ui/qml/components/MonthCalendar.qml

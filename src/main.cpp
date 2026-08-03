@@ -169,6 +169,8 @@ int main(int argc, char *argv[])
         QStringLiteral("mockDoorbell"), qEnvironmentVariableIsSet("RL_MOCK_DOORBELL"));
     engine.rootContext()->setContextProperty(
         QStringLiteral("playbackAutoplay"), qEnvironmentVariableIsSet("RL_PLAYBACK_AUTOPLAY"));
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("playbackGrid"), qEnvironmentVariableIsSet("RL_PLAYBACK_GRID"));
     engine.rootContext()->setContextProperty(QStringLiteral("startHidden"),
                                              parser.isSet(hiddenOption) && tray.available());
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,

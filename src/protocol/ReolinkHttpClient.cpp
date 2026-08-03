@@ -193,6 +193,8 @@ bool ReolinkHttpClient::downloadToFile(const QString &url, const QString &destPa
 
 QByteArray ReolinkHttpClient::fetchSnapshot(int channel, QString *error)
 {
+    // Snap rides the same fragile api.cgi endpoint as commands — same queue.
+    QMutexLocker requestLock(&m_requestMutex);
     for (int attempt = 0; attempt < 2; ++attempt) {
         if (!ensureLogin(error))
             return {};
@@ -304,6 +306,9 @@ api::BatchResult ReolinkHttpClient::call(const Json &commands)
         out.error = QStringLiteral("call() requires a non-empty command array");
         return out;
     }
+
+    // One command exchange at a time per device — see the class comment.
+    QMutexLocker requestLock(&m_requestMutex);
 
     for (int attempt = 0; attempt < 2; ++attempt) {
         QString loginError;

@@ -1,3 +1,4 @@
+import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -31,20 +32,174 @@ Item {
     // light sub-stream (FLV) scrubbing.
     property bool hdMode: false
 
+    // ---- Synced multi-camera playback ---------------------------------------
+    // Like the official client: up to 4 panes, one calendar and one timeline
+    // driving all of them, forced to the sub stream (the device's published
+    // budget is 10 sub + 2 main, and its spec caps synchronous playback at 4).
+    // Sync is one shared playhead asking every camera for the same wall-clock
+    // moment — the protocol has no cross-stream sync mechanism.
+    property int paneCount: 1
+    property var gridRows: [-1, -1, -1, -1]   // pane -> device row
+    property var gridSegs: ({})               // device row -> that day's segments
+    property int streamingPanes: 0            // recount kept by the panes
+
+    // Stored as hostId:channel — rows shift when devices are added or removed.
+    Settings {
+        id: pbStore
+        category: "playback"
+        property string gridArrangement: ""
+    }
+
+    function gridPane(i) { return paneRepeater.itemAt(i); }
+    function stopAllPanes() {
+        for (var i = 0; i < 4; i++) {
+            var p = gridPane(i);
+            if (p) p.stopPlayback();
+        }
+    }
+    function countStreaming() {
+        var n = 0;
+        for (var i = 0; i < 4; i++) {
+            var p = gridPane(i);
+            if (p && p.streaming) n++;
+        }
+        page.streamingPanes = n;
+    }
+
+    // The union track lets you scrub to anything any pane has; each lane shows
+    // who actually has footage where. Overlapping segments simply overdraw on
+    // the union track, so no interval merging is needed.
+    function recomputeGrid() {
+        var lanes = [];
+        var union = [];
+        for (var i = 0; i < 4; i++) {
+            var r = page.gridRows[i];
+            if (r === undefined || r < 0)
+                continue;
+            var segs = page.gridSegs[r] || [];
+            var info = Devices.cameraInfo(r);
+            lanes.push({ name: info && info.name ? info.name : qsTr("Camera %1").arg(i + 1),
+                         segments: segs });
+            union = union.concat(segs);
+        }
+        timeline.lanes = lanes;
+        timeline.segments = union;
+        statusText.text = qsTr("Synced playback — %n camera(s)", "", lanes.length);
+    }
+
+    function saveGridLayout() {
+        var out = [];
+        for (var i = 0; i < 4; i++) {
+            var r = page.gridRows[i];
+            if (r === undefined || r < 0) { out.push("-"); continue; }
+            var c = Devices.cameraInfo(r);
+            out.push(c && c.hostId !== undefined ? c.hostId + ":" + c.channel : "-");
+        }
+        pbStore.gridArrangement = out.join(",");
+    }
+
+    // Fill the panes: the saved arrangement where it still matches a device,
+    // else the first cameras in sidebar order.
+    function initGridRows() {
+        var byKey = ({});
+        for (var r = 0; r < Devices.count; ++r) {
+            var c = Devices.cameraInfo(r);
+            if (c && c.hostId !== undefined)
+                byKey[c.hostId + ":" + c.channel] = r;
+        }
+        var parts = pbStore.gridArrangement.split(",");
+        var g = [];
+        var used = ({});
+        for (var i = 0; i < 4; i++) {
+            var key = i < parts.length ? parts[i] : "-";
+            var row = (key !== "-" && byKey[key] !== undefined) ? byKey[key] : -1;
+            if (row >= 0 && used[row]) row = -1;
+            if (row >= 0) used[row] = true;
+            g.push(row);
+        }
+        var free = [];
+        for (r = 0; r < Devices.count; ++r)
+            if (!used[r]) free.push(r);
+        for (i = 0; i < 4 && free.length > 0; i++)
+            if (g[i] < 0) { g[i] = free.shift(); }
+        page.gridRows = g;
+    }
+
+    // Pane combo picked a camera. If it's already on the grid the panes swap,
+    // so a choice never silently drops a camera from the layout.
+    function assignGridPane(pane, row) {
+        var g = page.gridRows.slice();
+        var prev = g.indexOf(row);
+        if (prev >= 0 && prev !== pane)
+            g[prev] = g[pane];
+        g[pane] = row;
+        page.gridRows = g;
+        saveGridLayout();
+        page.refresh();
+    }
+
+    function setPaneCount(n) {
+        if (n === page.paneCount)
+            return;
+        if (n === 4) {
+            player.stop();
+            page.paneCount = 4;
+            page.initGridRows();
+            // Mock hook: seed staggered segments per pane so the grid + lanes
+            // render without an NVR (RL_MOCK_RECORDINGS + RL_PLAYBACK_GRID).
+            if (typeof mockRecordings !== "undefined" && mockRecordings) {
+                var base = timeline.segments.length > 0 ? timeline.segments : [];
+                var s = ({});
+                for (var i = 0; i < 4; i++) {
+                    var r = page.gridRows[i];
+                    if (r === undefined || r < 0) continue;
+                    s[r] = base.map(function (seg) {
+                        return { start: Math.min(86399, seg.start + i * 1800),
+                                 end: Math.min(86399, seg.end + i * 1800),
+                                 type: seg.type };
+                    });
+                }
+                page.gridSegs = s;
+                page.recomputeGrid();
+            } else {
+                page.refresh();
+            }
+        } else {
+            stopAllPanes();
+            page.paneCount = 1;
+            timeline.lanes = [];
+            timeline.segments = [];
+            page.refresh();
+        }
+    }
+
     // False when the Playback page isn't on screen — stop streaming so a Baichuan
     // session (or FLV stream) isn't left running on the connection-limited NVR.
     property bool active: true
-    onActiveChanged: if (!active) player.stop()
+    onActiveChanged: if (!active) { player.stop(); stopAllPanes(); }
 
     // Advance the playhead in realtime while streaming, so the timeline cursor
     // tracks the current position (and play/pause resumes from where you are).
     Timer {
         interval: 1000; repeat: true
-        running: player.state === StreamPlayer.Streaming
+        running: player.state === StreamPlayer.Streaming || page.streamingPanes > 0
         onTriggered: if (page.playheadSecs < 86399) page.playheadSecs += 1
     }
 
     function refresh() {
+        if (page.paneCount === 4) {
+            // One Search per distinct grid camera. These queue behind the
+            // per-device request lock in ReolinkHttpClient rather than racing —
+            // concurrent api.cgi commands are what 502 the NVR's web server.
+            var done = ({});
+            for (var i = 0; i < 4; i++) {
+                var r = page.gridRows[i];
+                if (r === undefined || r < 0 || done[r]) continue;
+                done[r] = true;
+                Devices.searchRecordings(r, page.selYear, page.selMonth, page.selDay);
+            }
+            return;
+        }
         if (page.deviceRow >= 0)
             Devices.searchRecordings(page.deviceRow, page.selYear, page.selMonth, page.selDay);
     }
@@ -64,6 +219,16 @@ Item {
     // Move the playhead and, if a recording covers that moment, play from it.
     function playAt(sec) {
         page.playheadSecs = sec;
+        if (page.paneCount === 4) {
+            // One commit fans out to every pane at the same wall-clock moment;
+            // each pane answers from its own footage (play, or "no footage").
+            var epoch = epochAt(sec);
+            for (var i = 0; i < 4; i++) {
+                var p = gridPane(i);
+                if (p) p.playAtSecs(sec, epoch);
+            }
+            return;
+        }
         if (!inRecording(sec)) {
             player.stop();
             return;
@@ -116,6 +281,8 @@ Item {
     }
 
     function openAt(hostId, channel, timestamp) {
+        // Event jump targets one specific camera and moment — single-pane flow.
+        setPaneCount(1);
         var d = new Date(timestamp * 1000);
         page.selYear = d.getFullYear();
         page.selMonth = d.getMonth() + 1;
@@ -144,6 +311,15 @@ Item {
             statusText.text = qsTr("Export failed: %1").arg(error);
         }
         function onRecordingsFound(row, segments) {
+            if (page.paneCount === 4) {
+                if (page.gridRows.indexOf(row) < 0)
+                    return;
+                var s = Object.assign({}, page.gridSegs);
+                s[row] = segments;
+                page.gridSegs = s;   // wholesale reassign so pane bindings re-evaluate
+                page.recomputeGrid();
+                return;
+            }
             if (row === page.deviceRow) {
                 timeline.segments = segments;
                 statusText.text = segments.length + qsTr(" recordings");
@@ -180,10 +356,24 @@ Item {
             }
         }
         function onRecordingDaysFound(row, year, month, days) {
-            if (row === page.deviceRow && year === page.selYear && month === page.selMonth)
+            // In grid mode the calendar follows the first pane's camera.
+            var calRow = page.paneCount === 4 ? page.gridRows[0] : page.deviceRow;
+            if (row === calRow && year === page.selYear && month === page.selMonth)
                 page.recordingDays = days;
         }
         function onRecordingsFailed(row, error) {
+            if (page.paneCount === 4) {
+                if (page.gridRows.indexOf(row) < 0)
+                    return;
+                // An empty lane is the honest render of a failed search; the
+                // status line carries the reason.
+                var s = Object.assign({}, page.gridSegs);
+                s[row] = [];
+                page.gridSegs = s;
+                page.recomputeGrid();
+                statusText.text = error;
+                return;
+            }
             if (row === page.deviceRow) {
                 timeline.segments = [];
                 statusText.text = error;
@@ -192,9 +382,28 @@ Item {
         // Re-fetch once the selected device finishes connecting (its client
         // isn't primed at page-load time, so the initial fetch returns empty).
         function onDataChanged(topLeft, bottomRight) {
+            if (page.paneCount === 4) {
+                for (var i = 0; i < 4; i++) {
+                    var r = page.gridRows[i];
+                    if (r >= topLeft.row && r <= bottomRight.row
+                        && page.gridSegs[r] === undefined) {
+                        page.refresh();
+                        return;
+                    }
+                }
+                return;
+            }
             if (page.deviceRow >= topLeft.row && page.deviceRow <= bottomRight.row
                 && timeline.segments.length === 0)
                 page.refresh();
+        }
+        // Rows shift when devices come or go; the arrangement tracks cameras,
+        // not indices, so rebuild it from the store rather than patching.
+        function onRowsRemoved() {
+            if (page.paneCount === 4) { page.gridSegs = ({}); page.initGridRows(); page.refresh(); }
+        }
+        function onRowsInserted() {
+            if (page.paneCount === 4) { page.gridSegs = ({}); page.initGridRows(); page.refresh(); }
         }
     }
 
@@ -211,9 +420,11 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
-                Text { text: qsTr("Camera:"); color: Theme.textMuted; font.pixelSize: 12 }
+                Text { visible: page.paneCount === 1
+                       text: qsTr("Camera:"); color: Theme.textMuted; font.pixelSize: 12 }
                 CameraComboBox {
                     id: deviceCombo
+                    visible: page.paneCount === 1   // each grid pane has its own
                     Layout.preferredWidth: 240
                     onCurrentIndexChanged: {
                         // Switching cameras keeps the date and playhead: once the new
@@ -227,6 +438,38 @@ Item {
                         page.refresh();
                     }
                 }
+                // 1 / 4 pane layout — like the official client's split playback.
+                Repeater {
+                    model: [1, 4]
+                    Rectangle {
+                        required property int modelData
+                        width: 34; height: 26; radius: Theme.radius
+                        color: page.paneCount === modelData ? Theme.accentDim
+                             : pcHover.hovered ? Theme.surfaceAlt : Theme.surface
+                        border.color: Theme.border
+                        Text {
+                            anchors.centerIn: parent
+                            text: parent.modelData
+                            color: page.paneCount === parent.modelData ? Theme.text : Theme.textMuted
+                            font.pixelSize: 12
+                        }
+                        HoverHandler { id: pcHover }
+                        TapHandler { onTapped: page.setPaneCount(parent.modelData) }
+                        ToolTip {
+                            visible: pcHover.hovered
+                            delay: 500
+                            x: (parent.width - width) / 2
+                            y: parent.height + 6
+                            contentItem: Text {
+                                text: modelData === 1 ? qsTr("Single camera")
+                                    : qsTr("Synced 4-camera grid")
+                                color: Theme.text; font.pixelSize: 11
+                            }
+                            background: Rectangle { color: Theme.surfaceAlt
+                                                    border.color: Theme.border; radius: 4 }
+                        }
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 Text {
                     id: statusText
@@ -238,6 +481,7 @@ Item {
 
             Rectangle {
                 id: videoBox
+                visible: page.paneCount === 1
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 color: Theme.paneBackground
@@ -338,9 +582,44 @@ Item {
                 }
             }
 
+            // ---- Synced 4-camera grid (paneCount === 4) --------------------
+            Item {
+                id: gridBox
+                visible: page.paneCount === 4
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                Grid {
+                    anchors.fill: parent
+                    columns: 2
+                    spacing: 4
+                    Repeater {
+                        id: paneRepeater
+                        model: 4
+                        PlaybackPane {
+                            required property int index
+                            width: (gridBox.width - 4) / 2
+                            height: (gridBox.height - 4) / 2
+                            deviceRow: page.gridRows[index] !== undefined ? page.gridRows[index] : -1
+                            label: {
+                                if (deviceRow < 0) return "";
+                                var c = Devices.cameraInfo(deviceRow);
+                                return c && c.name ? c.name : "";
+                            }
+                            segments: page.gridSegs[deviceRow] || []
+                            playheadSecs: page.playheadSecs
+                            onStreamingChanged: page.countStreaming()
+                            onCameraRequested: (row) => page.assignGridPane(index, row)
+                        }
+                    }
+                }
+            }
+
             // Test hook: RL_MOCK_RECORDINGS seeds the timeline so its two-tone
             // rendering can be verified without a real NVR.
             Component.onCompleted: {
+                if (typeof playbackGrid !== "undefined" && playbackGrid)
+                    Qt.callLater(function () { page.setPaneCount(4); });
                 if (typeof mockRecordings !== "undefined" && mockRecordings) {
                     timeline.segments = [
                         { start: 3600, end: 12600, type: "timer", name: "a" },
@@ -386,14 +665,29 @@ Item {
                 }
                 // Play/pause resumes at the current playhead in the active quality
                 // (a StreamPlayer session is one-shot, so "play" re-opens the stream).
-                Ctl { glyph: player.state === StreamPlayer.Streaming ? "⏸" : "▶"
-                      tip: player.state === StreamPlayer.Streaming ? qsTr("Pause") : qsTr("Play")
-                      onActivated: player.state === StreamPlayer.Streaming
-                                   ? player.stop() : page.playAt(page.playheadSecs) }
-                Ctl { glyph: "⏹"; tip: qsTr("Stop"); onActivated: player.stop() }
+                // In grid mode the one control drives every pane.
+                Ctl {
+                    readonly property bool playing: page.paneCount === 4
+                        ? page.streamingPanes > 0
+                        : player.state === StreamPlayer.Streaming
+                    glyph: playing ? "⏸" : "▶"
+                    tip: playing ? qsTr("Pause") : qsTr("Play")
+                    onActivated: {
+                        if (playing) {
+                            if (page.paneCount === 4) page.stopAllPanes();
+                            else player.stop();
+                        } else {
+                            page.playAt(page.playheadSecs);
+                        }
+                    }
+                }
+                Ctl { glyph: "⏹"; tip: qsTr("Stop")
+                      onActivated: { player.stop(); page.stopAllPanes(); } }
                 // Export: save a main-stream MP4 of the moment at the playhead.
+                // Single-pane only — it targets THE camera, and grid mode has four.
                 Rectangle {
                     id: exportBtn
+                    visible: page.paneCount === 1
                     property bool busy: false
                     width: expRow.implicitWidth + 18; height: 30; radius: Theme.radius
                     color: expHover.hovered && !busy ? Theme.surfaceAlt : Theme.surface
@@ -423,8 +717,11 @@ Item {
                 }
                 Item { Layout.fillWidth: true }
                 // Quality toggle: SD = light sub-stream (FLV) scrubbing; HD = full-res
-                // main stream over native Baichuan.
+                // main stream over native Baichuan. Grid mode is forced to the sub
+                // stream (as in the official client): the device budget allows only
+                // 2 concurrent main streams, and a 4-pane grid would blow past it.
                 Rectangle {
+                    visible: page.paneCount === 1
                     width: 52; height: 30; radius: Theme.radius
                     color: page.hdMode ? Theme.accent : (hdHover.hovered ? Theme.surfaceAlt : Theme.surface)
                     border.color: page.hdMode ? Theme.accent : Theme.border

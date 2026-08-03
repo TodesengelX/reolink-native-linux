@@ -12,7 +12,14 @@ namespace rl {
 // Owns the login token lifecycle: logs in on demand, refreshes before the
 // lease expires, retries once on "please login first". Call from a worker
 // thread (DeviceManager wraps calls in QtConcurrent) — never the GUI thread.
-// Thread-safe: concurrent call() invocations serialize on the token state.
+//
+// Thread-safe, and deliberately SERIAL: one api.cgi request in flight per
+// device at a time. The NVR's web server degrades under concurrent commands
+// (404/502 bursts — the same behavior reolink_aio works around by putting
+// every request behind one per-device lock), and a multi-pane playback page
+// fires several Search calls at once. Queueing them here costs a little
+// latency; racing them costs whole requests. Bulk clip downloads are exempt —
+// they run for minutes and would starve every command behind them.
 class ReolinkHttpClient
 {
 public:
@@ -66,7 +73,10 @@ private:
     QString m_username;
     QString m_password;
 
-    QMutex m_mutex; // guards token state
+    // Lock order: m_requestMutex (outer, held across a whole HTTP exchange)
+    // then m_mutex (inner, brief). Never the reverse.
+    QMutex m_requestMutex; // serializes api.cgi requests to this device
+    QMutex m_mutex;        // guards token state
     QString m_token;
     QDateTime m_tokenExpiry;
 };

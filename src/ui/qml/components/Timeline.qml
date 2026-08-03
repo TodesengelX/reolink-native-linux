@@ -107,6 +107,7 @@ Rectangle {
         Repeater {
             model: root.lanes
             Item {
+                id: laneItem
                 required property var modelData
                 width: root.width
                 height: root.laneHeight
@@ -136,7 +137,9 @@ Rectangle {
                     x: 4
                     y: -22
                     contentItem: Text {
-                        text: parent.parent.modelData.name
+                        // By id, not parent-chain: a popup's contentItem is
+                        // reparented, so parent.parent lands on null mid-teardown.
+                        text: laneItem.modelData ? laneItem.modelData.name : ""
                         color: Theme.text
                         font.pixelSize: 10
                     }
