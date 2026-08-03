@@ -125,9 +125,16 @@ Item {
         page.gridRows = g;
     }
 
-    // Pane combo picked a camera. If it's already on the grid the panes swap,
-    // so a choice never silently drops a camera from the layout.
+    // Replay here once the reassigned grid's searches land — so a drop during
+    // playback resumes every pane at the moment being watched, instead of
+    // leaving the grid stopped.
+    property real _gridResumeSecs: -1
+
+    // A pane was pointed at a camera (combo pick or drag-drop). If it's already
+    // on the grid the panes swap, so a choice never silently drops a camera.
     function assignGridPane(pane, row) {
+        if (page.gridRows[pane] === row)
+            return;
         var g = page.gridRows.slice();
         var prev = g.indexOf(row);
         if (prev >= 0 && prev !== pane)
@@ -135,6 +142,8 @@ Item {
         g[pane] = row;
         page.gridRows = g;
         saveGridLayout();
+        if (page.streamingPanes > 0)
+            page._gridResumeSecs = page.playheadSecs;
         page.refresh();
     }
 
@@ -318,6 +327,22 @@ Item {
                 s[row] = segments;
                 page.gridSegs = s;   // wholesale reassign so pane bindings re-evaluate
                 page.recomputeGrid();
+                // A camera change asked for a resume: replay every pane at the
+                // watched moment once each placed camera has its day loaded
+                // (replaying per-arrival would restart the streams repeatedly).
+                if (page._gridResumeSecs >= 0) {
+                    var ready = true;
+                    for (var i = 0; i < 4; i++) {
+                        var r = page.gridRows[i];
+                        if (r !== undefined && r >= 0 && page.gridSegs[r] === undefined)
+                            ready = false;
+                    }
+                    if (ready) {
+                        var sec = page._gridResumeSecs;
+                        page._gridResumeSecs = -1;
+                        page.playAt(sec);
+                    }
+                }
                 return;
             }
             if (row === page.deviceRow) {
@@ -487,6 +512,31 @@ Item {
                 color: Theme.paneBackground
                 border.color: Theme.border
 
+                // Sidebar drops work in single-pane mode too: switch to that
+                // camera (through the combo, so the resume-at-playhead path in
+                // its change handler runs exactly as if it had been picked).
+                property bool dropTarget: false
+                DropArea {
+                    anchors.fill: parent
+                    keys: ["reolink/camera"]
+                    onEntered: videoBox.dropTarget = true
+                    onExited: videoBox.dropTarget = false
+                    onDropped: (drop) => {
+                        videoBox.dropTarget = false;
+                        if (drop.source && drop.source.deviceRow >= 0)
+                            deviceCombo.currentIndex = drop.source.deviceRow;
+                    }
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    visible: videoBox.dropTarget
+                    color: Theme.accent
+                    opacity: 0.18
+                    border.color: Theme.accent
+                    border.width: 2
+                    z: 50
+                }
+
                 // Digital zoom on the footage: wheel to zoom, drag to pan when
                 // zoomed — the same interaction as a live pane's video.
                 property real zoom: 1.0
@@ -608,8 +658,10 @@ Item {
                             }
                             segments: page.gridSegs[deviceRow] || []
                             playheadSecs: page.playheadSecs
+                            paneIndex: index
                             onStreamingChanged: page.countStreaming()
                             onCameraRequested: (row) => page.assignGridPane(index, row)
+                            onCameraDropped: (pane, row) => page.assignGridPane(pane, row)
                         }
                     }
                 }

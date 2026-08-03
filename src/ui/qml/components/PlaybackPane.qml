@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import QtMultimedia
 import ReolinkApp
 import ReolinkApp.Core
@@ -19,6 +20,7 @@ Rectangle {
     clip: true
 
     property int deviceRow: -1
+    property int paneIndex: -1     // cell in the playback grid
     property string label: ""
     property bool selected: false
     // This camera's recordings for the selected day ({start,end,type} seconds).
@@ -31,6 +33,11 @@ Rectangle {
     // re-searches, and replays (the pane can't do that alone — the day's
     // segments and the union track live above it).
     signal cameraRequested(int row)
+    // A camera was dropped onto this pane — from the sidebar or another pane.
+    signal cameraDropped(int pane, int row)
+
+    // True while a drag hovers this pane.
+    property bool dropTarget: false
 
     readonly property bool hasSource: deviceRow >= 0
     readonly property bool streaming: player.state === StreamPlayer.Streaming
@@ -117,12 +124,108 @@ Rectangle {
         }
     }
 
+    // ---- Drag and drop (mirrors the live grid) ----------------------------
+    // Dropping re-points this cell; the page swaps if the camera is already
+    // placed, so a drag can never silently knock a camera off the grid.
+    DropArea {
+        anchors.fill: parent
+        keys: ["reolink/camera"]
+        onEntered: (drag) => {
+            root.dropTarget = !(drag.source && drag.source.sourcePane === root.paneIndex);
+        }
+        onExited: root.dropTarget = false
+        onDropped: (drop) => {
+            root.dropTarget = false;
+            if (drop.source && drop.source.deviceRow >= 0)
+                root.cameraDropped(root.paneIndex, drop.source.deviceRow);
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: root.dropTarget
+        color: Theme.accent
+        opacity: 0.18
+        border.color: Theme.accent
+        border.width: 2
+        z: 50
+    }
+
+    // Drag ghost, parented to the window so the pane's clip can't cut it off.
+    Item {
+        id: paneDrag
+        parent: Window.contentItem
+        width: 190
+        height: 108
+        visible: Drag.active
+        z: 100
+        Drag.active: false
+        Drag.keys: ["reolink/camera"]
+        Drag.hotSpot: Qt.point(width / 2, height / 2)
+        property int deviceRow: root.deviceRow
+        property int sourcePane: root.paneIndex
+
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.radius
+            color: Theme.surface
+            border.color: Theme.accent
+            border.width: 2
+            opacity: 0.95
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 16
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                text: root.label
+                color: Theme.text
+                font.pixelSize: 12
+            }
+        }
+    }
+
     HoverHandler { id: paneHover }
     MouseArea {
         anchors.fill: parent
-        onClicked: root.clicked()
         // Let the combo above receive its own clicks.
         z: -1
+
+        property real pressX: 0
+        property real pressY: 0
+        property bool dragging: false
+
+        onClicked: {
+            if (dragging)      // the release that ended a drag isn't a click
+                return;
+            root.clicked();
+        }
+        onPressed: (m) => { pressX = m.x; pressY = m.y; dragging = false; }
+        onPositionChanged: (m) => {
+            if (!(m.buttons & Qt.LeftButton) || !root.hasSource)
+                return;
+            if (!dragging
+                && Math.hypot(m.x - pressX, m.y - pressY) > Theme.dragThreshold) {
+                dragging = true;
+                paneDrag.Drag.active = true;
+            }
+            if (dragging) {
+                var p = mapToItem(paneDrag.parent, m.x, m.y);
+                paneDrag.x = p.x - paneDrag.width / 2;
+                paneDrag.y = p.y - paneDrag.height / 2;
+            }
+        }
+        onReleased: {
+            if (!dragging)
+                return;
+            paneDrag.Drag.drop();
+            paneDrag.Drag.active = false;
+        }
+        onCanceled: {
+            if (!dragging)
+                return;
+            paneDrag.Drag.active = false;
+            dragging = false;
+        }
     }
 
     // Hover camera selector, top-right — how a pane is re-pointed at another
