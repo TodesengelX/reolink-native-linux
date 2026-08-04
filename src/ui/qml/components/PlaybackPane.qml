@@ -29,6 +29,8 @@ Rectangle {
     property real playheadSecs: 0
 
     signal clicked()
+    // Double-click toggles maximize (the page owns which pane is maximized).
+    signal doubleClicked()
     // The pane's hover combo picked a different camera; the page reassigns,
     // re-searches, and replays (the pane can't do that alone — the day's
     // segments and the union track live above it).
@@ -78,15 +80,33 @@ Rectangle {
     StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true }
     Component.onDestruction: player.stop()
 
-    VideoOutput {
-        id: video
+    // ---- Video with digital zoom (same interaction as a live pane) --------
+    property real zoom: 1.0
+    property real panX: 0
+    property real panY: 0
+
+    Item {
         anchors.fill: parent
         anchors.margins: 1
-        fillMode: VideoOutput.PreserveAspectFit
-        visible: root.streaming
+        clip: true
+        VideoOutput {
+            id: video
+            anchors.fill: parent
+            fillMode: VideoOutput.PreserveAspectFit
+            visible: root.streaming
+            transform: [
+                Scale {
+                    origin.x: video.width / 2
+                    origin.y: video.height / 2
+                    xScale: root.zoom
+                    yScale: root.zoom
+                },
+                Translate { x: root.panX; y: root.panY }
+            ]
+        }
     }
 
-    // Name badge (matches the live grid's).
+    // Name + zoom badge (matches the live grid's).
     Rectangle {
         visible: root.hasSource
         anchors.top: parent.top
@@ -94,10 +114,20 @@ Rectangle {
         anchors.margins: 6
         radius: 3
         color: "#80000000"
-        width: nameText.implicitWidth + 12
-        height: nameText.implicitHeight + 6
-        Text { id: nameText; anchors.centerIn: parent; text: root.label
-               color: "white"; font.pixelSize: 11 }
+        width: nameRow.implicitWidth + 12
+        height: nameRow.implicitHeight + 6
+        Row {
+            id: nameRow
+            anchors.centerIn: parent
+            spacing: 6
+            Text { text: root.label; color: "white"; font.pixelSize: 11 }
+            Text {
+                visible: root.zoom > 1.01
+                text: root.zoom.toFixed(1) + "×"
+                color: Theme.accent
+                font.pixelSize: 11
+            }
+        }
     }
 
     // Per-camera state at the shared playhead.
@@ -196,16 +226,43 @@ Rectangle {
 
         property real pressX: 0
         property real pressY: 0
+        property real lastX: 0
+        property real lastY: 0
         property bool dragging: false
+        // Zoomed in, dragging pans the image — the older and more frequent
+        // gesture — so a pane can only be picked up at 1× (same rule as live).
+        readonly property bool canDrag: root.hasSource && root.zoom <= 1.0
+
+        // Keep the zoomed footage pinned to the viewport edges.
+        function clampPan() {
+            var mx = Math.max(0, (video.contentRect.width * root.zoom - video.width) / 2);
+            var my = Math.max(0, (video.contentRect.height * root.zoom - video.height) / 2);
+            root.panX = Math.max(-mx, Math.min(mx, root.panX));
+            root.panY = Math.max(-my, Math.min(my, root.panY));
+        }
 
         onClicked: {
             if (dragging)      // the release that ended a drag isn't a click
                 return;
             root.clicked();
         }
-        onPressed: (m) => { pressX = m.x; pressY = m.y; dragging = false; }
+        onDoubleClicked: if (root.hasSource) root.doubleClicked()
+        onPressed: (m) => {
+            pressX = m.x; pressY = m.y;
+            lastX = m.x; lastY = m.y;
+            dragging = false;
+        }
         onPositionChanged: (m) => {
-            if (!(m.buttons & Qt.LeftButton) || !root.hasSource)
+            if (!(m.buttons & Qt.LeftButton))
+                return;
+            if (root.zoom > 1.0) {
+                root.panX += (m.x - lastX);
+                root.panY += (m.y - lastY);
+                lastX = m.x; lastY = m.y;
+                clampPan();
+                return;
+            }
+            if (!canDrag)
                 return;
             if (!dragging
                 && Math.hypot(m.x - pressX, m.y - pressY) > Theme.dragThreshold) {
@@ -229,6 +286,14 @@ Rectangle {
                 return;
             paneDrag.Drag.active = false;
             dragging = false;
+        }
+        onWheel: (w) => {
+            if (!root.hasSource)
+                return;
+            var z = root.zoom * (w.angleDelta.y > 0 ? 1.15 : 0.87);
+            root.zoom = Math.max(1.0, Math.min(8.0, z));
+            if (root.zoom <= 1.0) { root.panX = 0; root.panY = 0; }
+            else clampPan();
         }
     }
 

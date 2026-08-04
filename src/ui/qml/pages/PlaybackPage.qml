@@ -42,6 +42,10 @@ Item {
     property var gridRows: [-1, -1, -1, -1]   // pane -> device row
     property var gridSegs: ({})               // device row -> that day's segments
     property int streamingPanes: 0            // recount kept by the panes
+    // Double-clicked pane, expanded OVER the grid rather than instead of it —
+    // the covered panes keep playing, so restoring reconnects nothing and the
+    // grid comes back still in sync. (Hiding them would stop their streams.)
+    property int maximizedRow: -1
 
     // Stored as hostId:channel — rows shift when devices are added or removed.
     Settings {
@@ -157,6 +161,9 @@ Item {
             g[prev] = displaced;
         page.gridRows = g;
         saveGridLayout();
+        // If the maximized camera just left the grid, drop the maximize.
+        if (page.maximizedRow >= 0 && g.indexOf(page.maximizedRow) < 0)
+            page.maximizedRow = -1;
         if (prev >= 0) {
             // Pure rearrangement: the panes slide to their new cells with their
             // running streams. Only the lane order needs recomputing.
@@ -180,6 +187,7 @@ Item {
     function setPaneCount(n) {
         if (n === page.paneCount)
             return;
+        page.maximizedRow = -1;
         if (n === 4) {
             player.stop();
             page.paneCount = 4;
@@ -692,22 +700,28 @@ Item {
                         required property int index
                         required property string name
                         readonly property int slot: page.gridRows.indexOf(index)
+                        readonly property bool isMax: page.maximizedRow === index
                         visible: slot >= 0
-                        width: gridBox.cw
-                        height: gridBox.ch
-                        x: slot >= 0 ? gridBox.slotX(slot) : 0
-                        y: slot >= 0 ? gridBox.slotY(slot) : 0
+                        width: isMax ? gridBox.width : gridBox.cw
+                        height: isMax ? gridBox.height : gridBox.ch
+                        x: isMax ? 0 : (slot >= 0 ? gridBox.slotX(slot) : 0)
+                        y: isMax ? 0 : (slot >= 0 ? gridBox.slotY(slot) : 0)
+                        z: isMax ? 10 : 0
                         deviceRow: index      // fixed: the pane follows its camera
                         paneIndex: slot
                         label: name
                         segments: page.gridSegs[index] || []
                         playheadSecs: page.playheadSecs
                         onStreamingChanged: page.countStreaming()
+                        onDoubleClicked: page.maximizedRow = isMax ? -1 : index
                         onCameraRequested: (row) => page.assignGridPane(slot, row)
                         onCameraDropped: (pane, row) => page.assignGridPane(pane, row)
-                        // Slide to the new cell so a swap reads as movement.
+                        // Slide to the new cell (or grow to full size) so the
+                        // change reads as movement.
                         Behavior on x { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
                         Behavior on y { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+                        Behavior on width { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+                        Behavior on height { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
                     }
                 }
             }
