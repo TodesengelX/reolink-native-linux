@@ -44,6 +44,41 @@ Rectangle {
     readonly property bool hasSource: deviceRow >= 0
     readonly property bool streaming: player.state === StreamPlayer.Streaming
 
+    // ---- Maximized-pane HD ------------------------------------------------
+    // Full-resolution main stream over native Baichuan, exactly like the
+    // single-pane page's HD mode. The page enables the toggle only on the
+    // maximized pane: the device allows just 2 concurrent main streams, and
+    // DeviceManager's in-place-seek slot holds one playback session — one HD
+    // pane at a time is the constraint, not a style choice.
+    property bool showHdToggle: false
+    property bool hdActive: false
+    // Epoch at 00:00 of the selected day, so the pane can turn playhead
+    // seconds into wall-clock time without reaching into the page.
+    property real dayEpoch: 0
+
+    function epochOf(sec) { return Math.floor(dayEpoch + sec); }
+
+    function playHd(sec) {
+        // Seek the running Baichuan session in place when possible (no
+        // reconnect); otherwise open one at this moment.
+        if (streaming && Devices.seekBaichuanPlayback(deviceRow, epochOf(sec)))
+            return;
+        player.loop = false;
+        Devices.startBaichuanPlayback(deviceRow, epochOf(sec), player, true);
+    }
+
+    function setHd(on) {
+        if (hdActive === on)
+            return;
+        hdActive = on;
+        // Mid-playback, carry the watched moment across the transport switch.
+        if (streaming || player.state === StreamPlayer.Connecting)
+            playAtSecs(playheadSecs, epochOf(playheadSecs));
+    }
+    // Restoring the grid (or losing maximize any other way) drops back to the
+    // sub stream — a grid cell must not keep holding a main-stream session.
+    onShowHdToggleChanged: if (!showHdToggle && hdActive) setHd(false)
+
     function covered(sec) {
         for (var i = 0; i < segments.length; i++)
             if (sec >= segments[i].start && sec <= segments[i].end)
@@ -58,6 +93,10 @@ Rectangle {
             return;
         if (!covered(sec)) {
             player.stop();
+            return;
+        }
+        if (hdActive) {
+            playHd(sec);
             return;
         }
         var url = Devices.playbackUrl(deviceRow, epoch, false); // sub stream
@@ -215,6 +254,47 @@ Rectangle {
                 color: Theme.text
                 font.pixelSize: 12
             }
+        }
+    }
+
+    // Quality toggle, maximized pane only.
+    Rectangle {
+        visible: root.showHdToggle
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        anchors.margins: 10
+        width: 48
+        height: 28
+        radius: Theme.radius
+        color: root.hdActive ? Theme.accent : (hdHover.hovered ? Theme.surfaceAlt : "#cc0d141b")
+        border.color: root.hdActive ? Theme.accent : Theme.border
+        z: 60
+        Text {
+            anchors.centerIn: parent
+            text: root.hdActive ? qsTr("HD") : qsTr("SD")
+            color: root.hdActive ? Theme.window : Theme.text
+            font.pixelSize: 12
+            font.bold: true
+        }
+        HoverHandler { id: hdHover }
+        // ReleaseWithinBounds takes an exclusive grab on press so the pane's
+        // own MouseArea can't read the tap as a click or a drag start.
+        TapHandler {
+            gesturePolicy: TapHandler.ReleaseWithinBounds
+            onTapped: root.setHd(!root.hdActive)
+        }
+        ToolTip {
+            visible: hdHover.hovered
+            delay: 500
+            x: (parent.width - width) / 2
+            y: -height - 8
+            contentItem: Text {
+                text: root.hdActive ? qsTr("Switch to SD (light scrubbing)")
+                                    : qsTr("Switch to HD (full resolution)")
+                color: Theme.text
+                font.pixelSize: 11
+            }
+            background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: 4 }
         }
     }
 

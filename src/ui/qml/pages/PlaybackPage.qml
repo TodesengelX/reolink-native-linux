@@ -712,6 +712,11 @@ Item {
                         label: name
                         segments: page.gridSegs[index] || []
                         playheadSecs: page.playheadSecs
+                        // HD only while maximized; restoring forces SD (the pane
+                        // handles the switch-back itself when this goes false).
+                        showHdToggle: isMax
+                        dayEpoch: new Date(page.selYear, page.selMonth - 1,
+                                           page.selDay, 0, 0, 0).getTime() / 1000
                         onStreamingChanged: page.countStreaming()
                         onDoubleClicked: page.maximizedRow = isMax ? -1 : index
                         onCameraRequested: (row) => page.assignGridPane(slot, row)
