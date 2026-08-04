@@ -69,6 +69,10 @@ Rectangle {
 
     function stopPlayback() { player.stop(); }
 
+    // A pane that leaves the layout (loses its slot, or its page/grid hides)
+    // must not keep a playback stream open on the connection-limited NVR.
+    onVisibleChanged: if (!visible) player.stop()
+
     // Retry on connection error: NVRs are connection-limited and may
     // momentarily refuse a playback stream while others are opening.
     StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true }

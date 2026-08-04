@@ -50,16 +50,18 @@ Item {
         property string gridArrangement: ""
     }
 
-    function gridPane(i) { return paneRepeater.itemAt(i); }
+    // Panes are per-CAMERA (model: Devices), so these iterate device rows —
+    // paneRepeater.itemAt(row) is that camera's pane wherever it sits.
+    function gridPane(row) { return paneRepeater.itemAt(row); }
     function stopAllPanes() {
-        for (var i = 0; i < 4; i++) {
+        for (var i = 0; i < paneRepeater.count; i++) {
             var p = gridPane(i);
             if (p) p.stopPlayback();
         }
     }
     function countStreaming() {
         var n = 0;
-        for (var i = 0; i < 4; i++) {
+        for (var i = 0; i < paneRepeater.count; i++) {
             var p = gridPane(i);
             if (p && p.streaming) n++;
         }
@@ -125,26 +127,54 @@ Item {
         page.gridRows = g;
     }
 
-    // Replay here once the reassigned grid's searches land — so a drop during
-    // playback resumes every pane at the moment being watched, instead of
-    // leaving the grid stopped.
+    // When a NEW camera joins mid-playback, resume just that camera's pane at
+    // the watched moment once its day loads — the panes already playing carry
+    // their streams with them and are never touched.
+    property int _resumeRow: -1
     property real _gridResumeSecs: -1
+
+    function resumePaneIfPending(row) {
+        if (page._resumeRow !== row || page._gridResumeSecs < 0)
+            return;
+        var sec = page._gridResumeSecs;
+        page._resumeRow = -1;
+        page._gridResumeSecs = -1;
+        var p = gridPane(row);
+        if (p && p.slot >= 0)
+            p.playAtSecs(sec, epochAt(sec));
+    }
 
     // A pane was pointed at a camera (combo pick or drag-drop). If it's already
     // on the grid the panes swap, so a choice never silently drops a camera.
     function assignGridPane(pane, row) {
-        if (page.gridRows[pane] === row)
+        if (pane < 0 || row < 0 || page.gridRows[pane] === row)
             return;
         var g = page.gridRows.slice();
         var prev = g.indexOf(row);
-        if (prev >= 0 && prev !== pane)
-            g[prev] = g[pane];
+        var displaced = g[pane];
         g[pane] = row;
+        if (prev >= 0)
+            g[prev] = displaced;
         page.gridRows = g;
         saveGridLayout();
-        if (page.streamingPanes > 0)
+        if (prev >= 0) {
+            // Pure rearrangement: the panes slide to their new cells with their
+            // running streams. Only the lane order needs recomputing.
+            recomputeGrid();
+            return;
+        }
+        // A camera new to the grid (the displaced one stops itself as its pane
+        // loses its slot). Fetch its day if unknown; resume only THIS pane.
+        if (page.streamingPanes > 0) {
+            page._resumeRow = row;
             page._gridResumeSecs = page.playheadSecs;
-        page.refresh();
+        }
+        if (page.gridSegs[row] === undefined) {
+            Devices.searchRecordings(row, page.selYear, page.selMonth, page.selDay);
+        } else {
+            recomputeGrid();
+            resumePaneIfPending(row);
+        }
     }
 
     function setPaneCount(n) {
@@ -229,12 +259,12 @@ Item {
     function playAt(sec) {
         page.playheadSecs = sec;
         if (page.paneCount === 4) {
-            // One commit fans out to every pane at the same wall-clock moment;
-            // each pane answers from its own footage (play, or "no footage").
+            // One commit fans out to every placed pane at the same wall-clock
+            // moment; each answers from its own footage (play, or "no footage").
             var epoch = epochAt(sec);
-            for (var i = 0; i < 4; i++) {
+            for (var i = 0; i < paneRepeater.count; i++) {
                 var p = gridPane(i);
-                if (p) p.playAtSecs(sec, epoch);
+                if (p && p.slot >= 0) p.playAtSecs(sec, epoch);
             }
             return;
         }
@@ -327,22 +357,9 @@ Item {
                 s[row] = segments;
                 page.gridSegs = s;   // wholesale reassign so pane bindings re-evaluate
                 page.recomputeGrid();
-                // A camera change asked for a resume: replay every pane at the
-                // watched moment once each placed camera has its day loaded
-                // (replaying per-arrival would restart the streams repeatedly).
-                if (page._gridResumeSecs >= 0) {
-                    var ready = true;
-                    for (var i = 0; i < 4; i++) {
-                        var r = page.gridRows[i];
-                        if (r !== undefined && r >= 0 && page.gridSegs[r] === undefined)
-                            ready = false;
-                    }
-                    if (ready) {
-                        var sec = page._gridResumeSecs;
-                        page._gridResumeSecs = -1;
-                        page.playAt(sec);
-                    }
-                }
+                // If this camera just joined mid-playback, start it (alone) at
+                // the watched moment — the other panes never stopped.
+                page.resumePaneIfPending(row);
                 return;
             }
             if (row === page.deviceRow) {
@@ -633,36 +650,64 @@ Item {
             }
 
             // ---- Synced 4-camera grid (paneCount === 4) --------------------
+            // A pane belongs to a CAMERA and is positioned by its slot — the
+            // same architecture as the live grid. Rearranging moves the pane,
+            // stream and all; a swap of two playing cameras reconnects nothing.
+            // Only a camera newly entering the grid opens a stream (and the one
+            // it displaces stops via the visibility handler in PlaybackPane).
             Item {
                 id: gridBox
                 visible: page.paneCount === 4
                 Layout.fillWidth: true
                 Layout.fillHeight: true
 
-                Grid {
-                    anchors.fill: parent
-                    columns: 2
-                    spacing: 4
-                    Repeater {
-                        id: paneRepeater
-                        model: 4
-                        PlaybackPane {
-                            required property int index
-                            width: (gridBox.width - 4) / 2
-                            height: (gridBox.height - 4) / 2
-                            deviceRow: page.gridRows[index] !== undefined ? page.gridRows[index] : -1
-                            label: {
-                                if (deviceRow < 0) return "";
-                                var c = Devices.cameraInfo(deviceRow);
-                                return c && c.name ? c.name : "";
-                            }
-                            segments: page.gridSegs[deviceRow] || []
-                            playheadSecs: page.playheadSecs
-                            paneIndex: index
-                            onStreamingChanged: page.countStreaming()
-                            onCameraRequested: (row) => page.assignGridPane(index, row)
-                            onCameraDropped: (pane, row) => page.assignGridPane(pane, row)
-                        }
+                readonly property real cw: (width - 4) / 2
+                readonly property real ch: (height - 4) / 2
+                function slotX(s) { return (s % 2) * (cw + 4); }
+                function slotY(s) { return Math.floor(s / 2) * (ch + 4); }
+
+                // Empty cells: drop targets for slots no camera occupies.
+                Repeater {
+                    model: 4
+                    PlaybackPane {
+                        required property int index
+                        visible: page.gridRows[index] === undefined || page.gridRows[index] < 0
+                        width: gridBox.cw
+                        height: gridBox.ch
+                        x: gridBox.slotX(index)
+                        y: gridBox.slotY(index)
+                        deviceRow: -1
+                        paneIndex: index
+                        playheadSecs: page.playheadSecs
+                        onCameraRequested: (row) => page.assignGridPane(index, row)
+                        onCameraDropped: (pane, row) => page.assignGridPane(pane, row)
+                    }
+                }
+
+                Repeater {
+                    id: paneRepeater
+                    model: Devices
+                    PlaybackPane {
+                        id: pbPane
+                        required property int index
+                        required property string name
+                        readonly property int slot: page.gridRows.indexOf(index)
+                        visible: slot >= 0
+                        width: gridBox.cw
+                        height: gridBox.ch
+                        x: slot >= 0 ? gridBox.slotX(slot) : 0
+                        y: slot >= 0 ? gridBox.slotY(slot) : 0
+                        deviceRow: index      // fixed: the pane follows its camera
+                        paneIndex: slot
+                        label: name
+                        segments: page.gridSegs[index] || []
+                        playheadSecs: page.playheadSecs
+                        onStreamingChanged: page.countStreaming()
+                        onCameraRequested: (row) => page.assignGridPane(slot, row)
+                        onCameraDropped: (pane, row) => page.assignGridPane(pane, row)
+                        // Slide to the new cell so a swap reads as movement.
+                        Behavior on x { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+                        Behavior on y { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
                     }
                 }
             }
@@ -827,6 +872,10 @@ Item {
                 markedDays: page.recordingDays
                 onDateSelected: (y, m, d) => {
                     page.selYear = y; page.selMonth = m; page.selDay = d;
+                    // Cached per-camera days are for the OLD date; a stale entry
+                    // would make assignGridPane skip the search for a camera
+                    // re-entering the grid and play the wrong day.
+                    page.gridSegs = ({});
                     page.refresh();
                 }
             }
