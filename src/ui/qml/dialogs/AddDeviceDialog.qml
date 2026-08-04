@@ -10,6 +10,66 @@ Dialog {
     modal: true
     width: 460
 
+    // The device is probed BEFORE anything is persisted, so a typo'd address
+    // or rejected password is an inline message here — not a phantom row stuck
+    // on "connecting…" in the sidebar.
+    property bool testing: false
+    property string errorText: ""
+
+    function tryAdd() {
+        if (testing)
+            return;
+        errorText = "";
+        if (tabs.currentIndex === 1) {
+            if (streamUrlField.text.trim().length === 0) {
+                errorText = qsTr("Enter a stream URL or file path.");
+                return;
+            }
+            Devices.addStreamUrl(streamNameField.text, streamUrlField.text);
+            dialog.close();
+            return;
+        }
+        if (addrField.text.trim().length === 0) {
+            errorText = qsTr("Enter the device's IP address or hostname.");
+            return;
+        }
+        if (userField.text.trim().length === 0) {
+            errorText = qsTr("Enter the username.");
+            return;
+        }
+        testing = true;
+        Devices.testDevice(addrField.text.trim(), userField.text, passwordField.text,
+                           httpsCheck.checked,
+                           portField.text.length > 0 ? parseInt(portField.text) : 0);
+    }
+
+    Connections {
+        target: Devices
+        function onTestDeviceResult(ok, message, name, model, problem) {
+            if (!dialog.visible || !dialog.testing)
+                return;
+            dialog.testing = false;
+            if (ok) {
+                Devices.addDevice(addrField.text.trim(), userField.text,
+                                  passwordField.text, httpsCheck.checked,
+                                  portField.text.length > 0 ? parseInt(portField.text) : 0);
+                dialog.close();
+                return;
+            }
+            if (problem === "transport") {
+                dialog.errorText = qsTr("Can't reach %1 — check the address and port, and that the device is powered on and on your network.")
+                    .arg(addrField.text.trim()) + "\n" + message;
+            } else if (problem === "auth") {
+                dialog.errorText = qsTr("The device rejected the sign-in: %1").arg(message);
+            } else if (problem === "locked") {
+                dialog.errorText = qsTr("The account is locked after too many failed sign-ins. Wait a few minutes (or reboot the device) before trying again. %1").arg(message);
+            } else {
+                dialog.errorText = qsTr("Unexpected reply from %1 — is this a Reolink device? %2")
+                    .arg(addrField.text.trim()).arg(message);
+            }
+        }
+    }
+
     // Opens the dialog and immediately scans the network (first-run flow).
     function openAndScan() {
         tabs.currentIndex = 0;
@@ -62,12 +122,27 @@ Dialog {
                 TapHandler { onTapped: dialog.reject() }
             }
             Rectangle {
-                implicitWidth: addLbl.implicitWidth + 28; implicitHeight: 34; radius: Theme.radius
-                color: addHov.hovered ? Theme.accent : Theme.accentDim
-                border.color: Theme.accent
-                Text { id: addLbl; anchors.centerIn: parent; text: qsTr("Add"); color: Theme.text; font.pixelSize: 13 }
+                implicitWidth: addRow.implicitWidth + 28; implicitHeight: 34; radius: Theme.radius
+                color: dialog.testing ? Theme.surfaceAlt
+                     : addHov.hovered ? Theme.accent : Theme.accentDim
+                border.color: dialog.testing ? Theme.border : Theme.accent
+                Row {
+                    id: addRow
+                    anchors.centerIn: parent
+                    spacing: 6
+                    BusyIndicator {
+                        visible: dialog.testing; running: visible
+                        width: 14; height: 14
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: dialog.testing ? qsTr("Checking…") : qsTr("Add")
+                        color: Theme.text; font.pixelSize: 13
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
                 HoverHandler { id: addHov }
-                TapHandler { onTapped: dialog.accept() }
+                TapHandler { onTapped: dialog.tryAdd() }
             }
         }
     }
@@ -291,15 +366,16 @@ Dialog {
                 }
             }
         }
-    }
 
-    onAccepted: {
-        if (tabs.currentIndex === 0 && addrField.text.length > 0) {
-            Devices.addDevice(addrField.text, userField.text, passwordField.text,
-                              httpsCheck.checked,
-                              portField.text.length > 0 ? parseInt(portField.text) : 0);
-        } else if (tabs.currentIndex === 1 && streamUrlField.text.length > 0) {
-            Devices.addStreamUrl(streamNameField.text, streamUrlField.text);
+        // Why the device couldn't be added, in place — the dialog stays open
+        // so the field at fault can be corrected and retried.
+        Text {
+            Layout.fillWidth: true
+            visible: dialog.errorText.length > 0
+            text: dialog.errorText
+            color: Theme.danger
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
         }
     }
 
@@ -310,5 +386,7 @@ Dialog {
         streamNameField.text = "";
         streamUrlField.text = "";
         discoveredModel.clear();
+        testing = false;
+        errorText = "";
     }
 }

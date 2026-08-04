@@ -26,6 +26,13 @@ public:
     ReolinkHttpClient(QString host, int port, bool https, QString username, QString password);
     ~ReolinkHttpClient();
 
+    // Why the last exchange failed. Callers need the distinction because the
+    // right reaction differs: Transport (device off/wrong address) is safe to
+    // retry; Auth/Locked must NOT be auto-retried — every rejected login burns
+    // the firmware's 10-attempt counter toward locking the account out.
+    enum class FailKind { None, Transport, Auth, Locked, Protocol };
+    FailKind lastFailKind();
+
     // Sends a batch of commands (api::command(...)), handling login transparently.
     api::BatchResult call(const Json &commands);
 
@@ -75,10 +82,13 @@ private:
 
     // Lock order: m_requestMutex (outer, held across a whole HTTP exchange)
     // then m_mutex (inner, brief). Never the reverse.
+    void setFailKind(FailKind kind);
+
     QMutex m_requestMutex; // serializes api.cgi requests to this device
     QMutex m_mutex;        // guards token state
     QString m_token;
     QDateTime m_tokenExpiry;
+    FailKind m_failKind = FailKind::None;
 };
 
 } // namespace rl

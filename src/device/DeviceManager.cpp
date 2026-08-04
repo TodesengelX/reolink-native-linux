@@ -129,6 +129,21 @@ void DeviceManager::pollDetections()
     if (!m_pushWarmed)
         warmPushCache();
 
+    // Recovery probes ride the poll tick: hosts that failed with a TRANSPORT
+    // problem revalidate when their backoff expires, so an NVR that was off at
+    // app launch appears by itself once it's back — previously a host with no
+    // client was skipped by everything and stayed "connecting…" until restart.
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    for (auto it = m_nextRetryAt.begin(); it != m_nextRetryAt.end();) {
+        if (it.value() <= now) {
+            const qint64 hostId = it.key();
+            it = m_nextRetryAt.erase(it);
+            validateAsync(hostId);
+        } else {
+            ++it;
+        }
+    }
+
     // Poll each HOST with a SINGLE batched request covering all its online
     // channels — Reolink NVRs are connection-limited, so opening one connection
     // per channel (5+ at once) starves live/playback streams. One connection per
@@ -271,6 +286,15 @@ QVariant DeviceManager::data(const QModelIndex &index, int role) const
         return e.online;
     case StatusRole:
         return e.status;
+    case ProblemRole:
+        switch (e.problem) {
+        case Problem::Connecting: return QStringLiteral("connecting");
+        case Problem::Unreachable: return QStringLiteral("unreachable");
+        case Problem::Auth: return QStringLiteral("auth");
+        case Problem::Locked: return QStringLiteral("locked");
+        case Problem::None: break;
+        }
+        return QString();
     case HostIdRole:
         return e.rec.id;
     case ChannelRole:
@@ -323,7 +347,98 @@ QHash<int, QByteArray> DeviceManager::roleNames() const
         {IsAdminRole, "isAdmin"},
         {BatteryPercentRole, "batteryPercent"},
         {BatteryChargingRole, "batteryCharging"},
+        {ProblemRole, "problem"},
     };
+}
+
+void DeviceManager::testDevice(const QString &addr, const QString &username,
+                               const QString &password, bool https, int port)
+{
+    const int portv = port > 0 ? port : (https ? 443 : 80);
+    m_pending.addFuture(QtConcurrent::run([this, addr, username, password, https, portv] {
+        ReolinkHttpClient client(addr, portv, https, username, password);
+        const api::BatchResult b =
+            client.call(Json::array({api::command(QStringLiteral("GetDevInfo"))}));
+
+        bool ok = false;
+        QString name, model, message;
+        if (b.transportOk && !b.results.isEmpty() && b.results.first().ok) {
+            const Json info = jsonObj(b.results.first().value, "DevInfo");
+            name = QString::fromStdString(jsonStr(info, "name"));
+            model = QString::fromStdString(jsonStr(info, "model"));
+            ok = true;
+        } else if (!b.error.isEmpty()) {
+            message = b.error;
+        } else if (b.transportOk && !b.results.isEmpty()) {
+            message = b.results.first().detail;
+        }
+        if (!ok && message.isEmpty())
+            message = tr("the device did not answer like a Reolink camera or NVR");
+
+        QString problem;
+        switch (client.lastFailKind()) {
+        case ReolinkHttpClient::FailKind::Transport: problem = QStringLiteral("transport"); break;
+        case ReolinkHttpClient::FailKind::Auth: problem = QStringLiteral("auth"); break;
+        case ReolinkHttpClient::FailKind::Locked: problem = QStringLiteral("locked"); break;
+        case ReolinkHttpClient::FailKind::Protocol: problem = QStringLiteral("protocol"); break;
+        case ReolinkHttpClient::FailKind::None: break;
+        }
+        if (!ok && problem.isEmpty())
+            problem = QStringLiteral("protocol");
+
+        QMetaObject::invokeMethod(
+            this,
+            [this, ok, message, name, model, problem] {
+                emit testDeviceResult(ok, message, name, model, problem);
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::reconnect(int row)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    const qint64 hostId = m_entries.at(row).rec.id;
+    // Reset the backoff — this is the user saying "try NOW".
+    m_nextRetryAt.remove(hostId);
+    m_retryDelaySecs.remove(hostId);
+    for (int i = 0; i < m_entries.size(); ++i) {
+        if (m_entries[i].rec.id != hostId)
+            continue;
+        m_entries[i].status = tr("connecting…");
+        m_entries[i].problem = Problem::Connecting;
+        emit dataChanged(index(i), index(i));
+    }
+    validateAsync(hostId);
+}
+
+void DeviceManager::updateCredentials(int row, const QString &username, const QString &password)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    const qint64 hostId = m_entries.at(row).rec.id;
+    if (!username.trimmed().isEmpty()) {
+        for (int i = 0; i < m_entries.size(); ++i) {
+            if (m_entries[i].rec.id == hostId)
+                m_entries[i].rec.username = username.trimmed();
+        }
+        const int first = rowForHostId(hostId);
+        if (first >= 0)
+            m_db->updateHost(m_entries.at(first).rec);
+    }
+    m_nextRetryAt.remove(hostId);
+    m_retryDelaySecs.remove(hostId);
+    for (int i = 0; i < m_entries.size(); ++i) {
+        if (m_entries[i].rec.id != hostId)
+            continue;
+        m_entries[i].status = tr("connecting…");
+        m_entries[i].problem = Problem::Connecting;
+        emit dataChanged(index(i), index(i));
+    }
+    // A non-empty password is stored to the keyring and used; empty keeps the
+    // stored one (username-only fix).
+    validateAsync(hostId, password, /*storeNew=*/!password.isEmpty());
 }
 
 void DeviceManager::addDevice(const QString &addr, const QString &username,
@@ -432,18 +547,40 @@ void DeviceManager::applyValidation(qint64 hostId, const Validation &v)
 
     HostRecord rec = m_entries.at(first).rec;
 
+    m_validating.remove(hostId);
+
     if (!v.online || v.channels.isEmpty()) {
+        // Only announce a CHANGE — the retry loop re-lands the same failure
+        // every backoff interval, and repeating it would spam any listener.
+        const bool changed = m_entries.at(first).status != v.status
+                             || m_entries.at(first).problem != v.problem;
         // Failed/offline: keep the existing rows, just mark them.
         for (int i = first; i < first + oldCount; ++i) {
             m_entries[i].online = false;
             m_entries[i].status = v.status;
+            m_entries[i].problem = v.problem;
             m_entries[i].primed = true;
             m_entries[i].password = v.password;
         }
         emit dataChanged(index(first), index(first + oldCount - 1));
-        emit deviceError(rec.addr, v.status);
+        if (changed)
+            emit deviceError(rec.addr, v.status);
+        // Schedule the recovery probe. Unreachable retries with doubling
+        // backoff (15s..300s); Auth/Locked never auto-retry — every rejected
+        // login burns the firmware's 10-attempt lockout counter, so recovery
+        // there is Reconnect / Update credentials in the sidebar.
+        if (v.problem == Problem::Unreachable) {
+            const int delay = m_retryDelaySecs.value(hostId, 15);
+            m_nextRetryAt[hostId] = QDateTime::currentDateTimeUtc().addSecs(delay);
+            m_retryDelaySecs[hostId] = qMin(delay * 2, 300);
+        } else {
+            m_nextRetryAt.remove(hostId);
+            m_retryDelaySecs.remove(hostId);
+        }
         return;
     }
+    m_nextRetryAt.remove(hostId);
+    m_retryDelaySecs.remove(hostId);
 
     // Update the host record (name/model/kind), persist once.
     if (!v.hostName.isEmpty())
@@ -472,6 +609,7 @@ void DeviceManager::applyValidation(qint64 hostId, const Validation &v)
         e.isAdmin = v.isAdmin;
         e.password = v.password;
         e.primed = true;
+        e.problem = Problem::None;
         e.client = v.client;
         if (ch.channel == 0)
             e.battery = v.battery;
@@ -500,6 +638,11 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
     const int row = rowForHostId(hostId);
     if (row < 0)
         return;
+    // One validation per host at a time — the retry tick and a user-driven
+    // Reconnect must not stack logins on a struggling device.
+    if (m_validating.contains(hostId))
+        return;
+    m_validating.insert(hostId);
     const HostRecord rec = m_entries.at(row).rec;
     const bool isStream = rec.kind == QLatin1String("stream");
 
@@ -524,6 +667,7 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
                         m_entries[r].password = pw;
                         m_entries[r].primed = true;
                     }
+                    m_validating.remove(hostId);
                 },
                 Qt::QueuedConnection);
             return;
@@ -532,6 +676,7 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
         if (!havePassword && storeNew) {
             Validation v;
             v.status = tr("keyring unavailable — password not saved");
+            v.problem = Problem::Auth; // needs the user, not a retry loop
             postValidation(hostId, v);
             return;
         }
@@ -585,9 +730,17 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
         if (!v.online) {
             if (!b1.error.isEmpty())
                 v.status = b1.error;
+            // The client knows WHY: transport failures are retried with
+            // backoff; auth failures wait for the user (lockout counter).
+            switch (client->lastFailKind()) {
+            case ReolinkHttpClient::FailKind::Auth: v.problem = Problem::Auth; break;
+            case ReolinkHttpClient::FailKind::Locked: v.problem = Problem::Locked; break;
+            default: v.problem = Problem::Unreachable; break;
+            }
             postValidation(hostId, v);
             return;
         }
+        v.problem = Problem::None;
         v.isAdmin = caps.isAdmin;
 
         auto capsFor = [&](int ch) {
@@ -1207,6 +1360,14 @@ QVariantMap DeviceManager::hostInfo(qint64 hostId) const
     m["onlineCount"] = onlineCount;
     m["isAdmin"] = host->isAdmin;
     m["firstRow"] = firstRow;
+    m["status"] = host->status;
+    switch (host->problem) {
+    case Problem::Connecting: m["problem"] = QStringLiteral("connecting"); break;
+    case Problem::Unreachable: m["problem"] = QStringLiteral("unreachable"); break;
+    case Problem::Auth: m["problem"] = QStringLiteral("auth"); break;
+    case Problem::Locked: m["problem"] = QStringLiteral("locked"); break;
+    case Problem::None: m["problem"] = QString(); break;
+    }
     return m;
 }
 
@@ -1222,6 +1383,8 @@ QVariantMap DeviceManager::cameraInfo(int row) const
     m["name"] = e.chanName.isEmpty() ? e.rec.name : e.chanName;
     m["hostName"] = e.rec.name;
     m["hostId"] = e.rec.id;
+    m["username"] = e.rec.username;
+    m["addr"] = e.rec.addr;
     m["channel"] = e.channel;
     m["kind"] = e.rec.kind;
     m["model"] = e.rec.model;

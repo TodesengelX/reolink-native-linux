@@ -5,8 +5,10 @@
 #include "protocol/ReolinkApi.h"
 
 #include <QAbstractListModel>
+#include <QDateTime>
 #include <QFutureSynchronizer>
 #include <QHash>
+#include <QSet>
 #include <QSize>
 #include <QTimer>
 
@@ -51,6 +53,7 @@ public:
         BatteryPercentRole,
         BatteryChargingRole,
         ChannelRole,
+        ProblemRole,
     };
 
     DeviceManager(Database *db, CredentialStore *credentials, QObject *parent = nullptr);
@@ -62,6 +65,19 @@ public:
 
     // Camera/NVR by IP or hostname. Validates asynchronously; the row appears
     // immediately with status "connecting…".
+    // Probe a device WITHOUT persisting anything: the Add Device dialog calls
+    // this first so a typo'd address or rejected password becomes an inline
+    // error instead of a phantom "connecting…" row. Result via testDeviceResult.
+    Q_INVOKABLE void testDevice(const QString &addr, const QString &username,
+                                const QString &password, bool https, int port);
+    // User-driven revalidation of a host (sidebar "Reconnect").
+    Q_INVOKABLE void reconnect(int row);
+    // Fix a host's credentials in place (sidebar "Update credentials…"): stores
+    // the new username/password and revalidates. Empty password keeps the stored
+    // one (username-only fix).
+    Q_INVOKABLE void updateCredentials(int row, const QString &username,
+                                       const QString &password);
+
     Q_INVOKABLE void addDevice(const QString &addr, const QString &username,
                                const QString &password, bool https = true, int port = 0);
     // Direct stream URL (rtsp://…, file …) — testing and generic-RTSP escape hatch.
@@ -201,6 +217,10 @@ public:
 signals:
     void countChanged();
     void deviceError(const QString &addr, const QString &message);
+    // Outcome of testDevice. problem is "", "transport", "auth", "locked" or
+    // "protocol" so the dialog can phrase the failure usefully.
+    void testDeviceResult(bool ok, const QString &message, const QString &name,
+                          const QString &model, const QString &problem);
     void snapshotSaved(int row, const QString &path);
     void snapshotFailed(int row, const QString &error);
     void recordingsFound(int row, const QVariantList &segments);
@@ -231,12 +251,19 @@ private:
     // One model row = one camera. A standalone camera is a host with a single
     // channel (0); an NVR fans out into one Entry per online channel, all sharing
     // the same host connection (hostId, addr, credentials, client).
+    // Why a host isn't online. Drives both the sidebar visuals and the retry
+    // policy: Unreachable is auto-retried with backoff (device off, wrong IP,
+    // network down — retrying is free); Auth/Locked are NEVER auto-retried,
+    // because each rejected login burns the firmware's lockout counter.
+    enum class Problem { None, Connecting, Unreachable, Auth, Locked };
+
     struct Entry {
         HostRecord rec;    // host connection (shared across an NVR's channels)
         int channel = 0;   // channel index on the host
         QString chanName;  // camera name for this channel
         bool online = false;
         QString status;
+        Problem problem = Problem::Connecting; // until first validation lands
         QString mainCodec = QStringLiteral("h264"); // sub stream is always h264
         QSize mainSize;                             // GetEnc-declared main resolution
         QSize subSize;                              // GetEnc-declared sub resolution
@@ -275,6 +302,7 @@ private:
     struct Validation {
         bool online = false;
         QString status;
+        Problem problem = Problem::Unreachable;
         QString hostName; // device/NVR name from GetDevInfo
         QString model;
         int channelNum = 0;
@@ -312,6 +340,13 @@ private:
     QHash<int, int> m_pushEnabled;  // row -> push enable (1/0/-1) for notif gating
     QHash<qint64, int> m_hostFails; // consecutive poll transport failures per host
     bool m_pushWarmed = false;      // one-time warm of the push cache after priming
+
+    // Auto-retry of Unreachable hosts, driven by the poll tick. Backoff doubles
+    // 15s -> 300s cap; cleared on success or when the failure is Auth/Locked
+    // (those wait for the user — see Problem).
+    QHash<qint64, QDateTime> m_nextRetryAt;
+    QHash<qint64, int> m_retryDelaySecs;
+    QSet<qint64> m_validating;      // hosts with a validation in flight
 
     // The in-flight Baichuan playback session, so a scrub can seek it in place.
     // Weak: the StreamPlayer owns the client's lifetime.

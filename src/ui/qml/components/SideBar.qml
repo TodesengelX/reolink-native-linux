@@ -115,6 +115,21 @@ Rectangle {
                 required property string section
                 property var host: Devices.hostInfo(parseInt(section))
                 property bool isNvr: host && host.kind === "nvr"
+                readonly property bool inTrouble:
+                    host && (host.problem === "unreachable" || host.problem === "auth"
+                             || host.problem === "locked")
+                // hostInfo() is a snapshot, not a live binding — refresh it when
+                // the model changes so the header's dot, counts and name track
+                // reality instead of showing the state at first render.
+                Connections {
+                    target: Devices
+                    function onDataChanged() {
+                        nvrHeader.host = Devices.hostInfo(parseInt(nvrHeader.section));
+                    }
+                    function onCountChanged() {
+                        nvrHeader.host = Devices.hostInfo(parseInt(nvrHeader.section));
+                    }
+                }
                 width: ListView.view.width
                 height: isNvr ? 44 : 0
                 visible: isNvr
@@ -149,15 +164,22 @@ Rectangle {
                             Rectangle {
                                 width: 7; height: 7; radius: 3.5
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: nvrHeader.host && nvrHeader.host.online ? Theme.online : Theme.textMuted
+                                color: nvrHeader.host && nvrHeader.host.online ? Theme.online
+                                     : nvrHeader.inTrouble ? Theme.danger : Theme.textMuted
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: nvrHeader.host
-                                    ? (nvrHeader.host.model + " · " + nvrHeader.host.onlineCount
-                                       + "/" + nvrHeader.host.channelCount + qsTr(" cameras"))
-                                    : ""
-                                color: Theme.textMuted; font.pixelSize: 10
+                                text: {
+                                    if (!nvrHeader.host) return "";
+                                    // Lead with the problem when there is one —
+                                    // "0/1 cameras" alone explains nothing.
+                                    if (nvrHeader.inTrouble)
+                                        return nvrHeader.host.status;
+                                    return nvrHeader.host.model + " · " + nvrHeader.host.onlineCount
+                                           + "/" + nvrHeader.host.channelCount + qsTr(" cameras");
+                                }
+                                color: nvrHeader.inTrouble ? Theme.danger : Theme.textMuted
+                                font.pixelSize: 10
                                 elide: Text.ElideRight
                             }
                         }
@@ -185,6 +207,11 @@ Rectangle {
                     ThemedMenuItem { text: qsTr("Settings")
                                onTriggered: root.openSettings(nvrHeader.host.firstRow) }
                     ThemedMenuSeparator {}
+                    ThemedMenuItem { text: qsTr("Reconnect")
+                               onTriggered: Devices.reconnect(nvrHeader.host.firstRow) }
+                    ThemedMenuItem { text: qsTr("Update credentials…")
+                               onTriggered: credsDialog.openFor(nvrHeader.host.firstRow) }
+                    ThemedMenuSeparator {}
                     ThemedMenuItem { text: qsTr("Reboot NVR")
                                enabled: nvrHeader.host && nvrHeader.host.isAdmin
                                onTriggered: Devices.reboot(nvrHeader.host.firstRow) }
@@ -204,6 +231,12 @@ Rectangle {
                 required property bool online
                 required property int batteryPercent
                 required property bool batteryCharging
+                required property string problem
+
+                // A problem that needs the user's eyes (or just their patience):
+                // red dot + red status, unlike plain "offline" grey.
+                readonly property bool inTrouble:
+                    problem === "unreachable" || problem === "auth" || problem === "locked"
 
                 readonly property bool underNvr: kind === "nvr"
                 readonly property bool hidden: underNvr && root.collapsed[hostId] === true
@@ -255,13 +288,15 @@ Rectangle {
                             Rectangle {
                                 width: 7; height: 7; radius: 3.5
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: online ? Theme.online : Theme.textMuted
+                                color: online ? Theme.online
+                                     : camRow.inTrouble ? Theme.danger : Theme.textMuted
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
+                                width: Math.min(implicitWidth, camRow.width - 80)
                                 text: camRow.underNvr ? status
                                     : (model.length > 0 ? model + " · " + status : status)
-                                color: Theme.textMuted
+                                color: camRow.inTrouble ? Theme.danger : Theme.textMuted
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
                             }
@@ -404,6 +439,11 @@ Rectangle {
                     ThemedMenuItem { text: qsTr("Settings")
                                onTriggered: root.openSettings(camRow.index) }
                     ThemedMenuSeparator {}
+                    ThemedMenuItem { text: qsTr("Reconnect")
+                               onTriggered: Devices.reconnect(camRow.index) }
+                    ThemedMenuItem { text: qsTr("Update credentials…")
+                               onTriggered: credsDialog.openFor(camRow.index) }
+                    ThemedMenuSeparator {}
                     // Standalone cameras are their own host and can be removed here;
                     // an NVR's channels are managed on the NVR (remove it whole).
                     ThemedMenuItem {
@@ -420,6 +460,111 @@ Rectangle {
                 color: Theme.textMuted
                 font.pixelSize: 12
                 horizontalAlignment: Text.AlignHCenter
+            }
+        }
+    }
+
+    // Fix a host's sign-in without removing and re-adding it — the recovery
+    // path for the auth/locked states (which are never auto-retried, since
+    // every rejected login burns the firmware's lockout counter).
+    Dialog {
+        id: credsDialog
+        modal: true
+        width: 360
+        anchors.centerIn: Overlay.overlay
+        property int targetRow: -1
+
+        function openFor(row) {
+            targetRow = row;
+            var info = Devices.cameraInfo(row);
+            credsUser.text = info && info.username !== undefined ? info.username : "";
+            credsPassword.text = "";
+            credsTitle.text = qsTr("Update credentials — %1")
+                .arg(info && info.hostName ? info.hostName : (info && info.addr ? info.addr : ""));
+            open();
+        }
+
+        background: Rectangle {
+            color: Theme.surface
+            border.color: Theme.border
+            radius: Theme.radius
+        }
+        header: Item {
+            implicitHeight: 44
+            Text {
+                id: credsTitle
+                anchors.left: parent.left
+                anchors.leftMargin: Theme.spacing * 2
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.right: parent.right
+                anchors.rightMargin: Theme.spacing
+                elide: Text.ElideRight
+                color: Theme.text
+                font.pixelSize: 14
+                font.bold: true
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: Theme.spacing
+            TextField {
+                id: credsUser
+                Layout.fillWidth: true
+                placeholderText: qsTr("Username")
+                color: Theme.text
+                placeholderTextColor: Theme.textMuted
+                background: Rectangle {
+                    color: Theme.surfaceAlt
+                    border.color: parent.activeFocus ? Theme.accent : Theme.border
+                    radius: 4
+                }
+            }
+            TextField {
+                id: credsPassword
+                Layout.fillWidth: true
+                placeholderText: qsTr("New password (blank keeps the current one)")
+                echoMode: TextInput.Password
+                color: Theme.text
+                placeholderTextColor: Theme.textMuted
+                background: Rectangle {
+                    color: Theme.surfaceAlt
+                    border.color: parent.activeFocus ? Theme.accent : Theme.border
+                    radius: 4
+                }
+            }
+        }
+
+        footer: Item {
+            implicitHeight: 52
+            RowLayout {
+                anchors.right: parent.right
+                anchors.rightMargin: Theme.spacing * 2
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Theme.spacing
+                Rectangle {
+                    implicitWidth: ccLbl.implicitWidth + 26; implicitHeight: 32; radius: Theme.radius
+                    color: ccHov.hovered ? Theme.surfaceAlt : "transparent"
+                    border.color: Theme.border
+                    Text { id: ccLbl; anchors.centerIn: parent; text: qsTr("Cancel")
+                           color: Theme.text; font.pixelSize: 13 }
+                    HoverHandler { id: ccHov }
+                    TapHandler { onTapped: credsDialog.close() }
+                }
+                Rectangle {
+                    implicitWidth: csLbl.implicitWidth + 26; implicitHeight: 32; radius: Theme.radius
+                    color: csHov.hovered ? Theme.accent : Theme.accentDim
+                    border.color: Theme.accent
+                    Text { id: csLbl; anchors.centerIn: parent; text: qsTr("Save & reconnect")
+                           color: Theme.text; font.pixelSize: 13 }
+                    HoverHandler { id: csHov }
+                    TapHandler {
+                        onTapped: {
+                            Devices.updateCredentials(credsDialog.targetRow,
+                                                      credsUser.text, credsPassword.text);
+                            credsDialog.close();
+                        }
+                    }
+                }
             }
         }
     }

@@ -242,12 +242,26 @@ bool ReolinkHttpClient::tokenValidLocked() const
     return !m_token.isEmpty() && m_tokenExpiry > QDateTime::currentDateTimeUtc();
 }
 
+ReolinkHttpClient::FailKind ReolinkHttpClient::lastFailKind()
+{
+    QMutexLocker lock(&m_mutex);
+    return m_failKind;
+}
+
+void ReolinkHttpClient::setFailKind(FailKind kind)
+{
+    QMutexLocker lock(&m_mutex);
+    m_failKind = kind;
+}
+
 bool ReolinkHttpClient::loginLocked(QString *error)
 {
     const QString url = api::apiUrl(m_host, m_port, m_https, QStringLiteral("Login"));
     const Json body = api::loginBody(m_username, m_password);
     const HttpResponse resp = post(url, QByteArray::fromStdString(body.dump()));
     if (!resp.ok) {
+        // Note: called with m_mutex already held — set the kind directly.
+        m_failKind = FailKind::Transport;
         if (error)
             *error = resp.error;
         qCWarning(lcProto) << m_host << "login transport error:" << resp.error;
@@ -259,11 +273,21 @@ bool ReolinkHttpClient::loginLocked(QString *error)
         if (login.wrongPassword && login.remainingAttempts >= 0)
             msg += QStringLiteral(" (%1 attempts left before lockout)")
                        .arg(login.remainingAttempts);
+        // Every rejection except a malformed response is a credentials problem
+        // (wrong password, unknown user). remain_times 0 means the firmware has
+        // locked the account.
+        if (login.error.contains(QLatin1String("response"), Qt::CaseInsensitive))
+            m_failKind = FailKind::Protocol;
+        else if (login.wrongPassword && login.remainingAttempts == 0)
+            m_failKind = FailKind::Locked;
+        else
+            m_failKind = FailKind::Auth;
         if (error)
             *error = msg;
         qCWarning(lcProto) << m_host << "login rejected:" << msg;
         return false;
     }
+    m_failKind = FailKind::None;
     m_token = login.token;
     // Fall back to the documented 3600s when firmware omits/zeros the lease, then
     // subtract the refresh margin and floor it so a session never expires instantly
@@ -325,10 +349,12 @@ api::BatchResult ReolinkHttpClient::call(const Json &commands)
         const QString url = api::apiUrl(m_host, m_port, m_https, firstCmd, token);
         const HttpResponse resp = post(url, QByteArray::fromStdString(commands.dump()));
         if (!resp.ok) {
+            setFailKind(FailKind::Transport);
             out.error = resp.error;
             return out;
         }
         out = api::parseBatch(resp.body);
+        setFailKind(out.transportOk ? FailKind::None : FailKind::Protocol);
         if (out.transportOk && out.needsRelogin() && attempt == 0) {
             // Token invalidated server-side (reboot, credential change) — relogin once.
             // Compare-and-clear: only drop the token WE used, so a token another
