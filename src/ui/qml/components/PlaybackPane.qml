@@ -21,6 +21,8 @@ Rectangle {
 
     property int deviceRow: -1
     property int paneIndex: -1     // cell in the playback grid
+    // Manual per-camera view rotation (matches the live pane's).
+    property int viewRotation: 0
     property string label: ""
     property bool selected: false
     // This camera's recordings for the selected day ({start,end,type} seconds).
@@ -133,6 +135,7 @@ Rectangle {
             anchors.fill: parent
             fillMode: VideoOutput.PreserveAspectFit
             visible: root.streaming
+            orientation: root.viewRotation
             transform: [
                 Scale {
                     origin.x: video.width / 2

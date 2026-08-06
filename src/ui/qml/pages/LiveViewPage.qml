@@ -315,6 +315,7 @@ Item {
                     required property bool hasSiren
                     required property bool hasFloodlight
                     required property bool hasTalk
+                    required property int rotationOverride
 
                     readonly property int slot: page.paneOfRow(index)
                     readonly property bool isMaximized: page.maximizedIndex === index
@@ -330,6 +331,7 @@ Item {
                     paneIndex: slot
                     deviceRow: index
                     label: name
+                    viewRotation: rotationOverride
                     selected: page.selectedIndex === index
                     pageActive: page.active && page.visible
                     // Sub-stream in the grid, main stream when maximized (DESIGN §5.7).

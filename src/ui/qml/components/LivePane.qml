@@ -20,6 +20,8 @@ Rectangle {
     property string label: ""
     property bool selected: false
     property bool forceMain: false // maximizing DEFAULTS a pane to the main stream
+    // Manual per-camera view rotation (degrees; sidebar right-click sets it).
+    property int viewRotation: 0
     property bool pageActive: true // false when the Live View page isn't on screen
 
     // Capabilities (from the Devices model; false for empty slots). Named cap*
@@ -246,6 +248,7 @@ Rectangle {
             anchors.fill: parent
             fillMode: VideoOutput.PreserveAspectFit
             visible: player.state === StreamPlayer.Streaming
+            orientation: root.viewRotation
             transform: [
                 Scale {
                     origin.x: video.width / 2

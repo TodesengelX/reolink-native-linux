@@ -27,6 +27,12 @@ Item {
 
     property var recordingDays: []
     property real playheadSecs: 0    // playhead position (seconds into the day)
+    // Manual view-rotation for the single-pane camera (grid panes carry their own).
+    property int camRotation: 0
+    function refreshRotation() {
+        var i = Devices.cameraInfo(page.deviceRow);
+        camRotation = i && i.rotationOverride ? i.rotationOverride : 0;
+    }
     property bool _autoplayed: false // test hook guard
     // HD mode streams the full-resolution main stream over native Baichuan; off =
     // light sub-stream (FLV) scrubbing.
@@ -432,6 +438,8 @@ Item {
         // Re-fetch once the selected device finishes connecting (its client
         // isn't primed at page-load time, so the initial fetch returns empty).
         function onDataChanged(topLeft, bottomRight) {
+            if (page.deviceRow >= topLeft.row && page.deviceRow <= bottomRight.row)
+                page.refreshRotation();
             if (page.paneCount === 4) {
                 for (var i = 0; i < 4; i++) {
                     var r = page.gridRows[i];
@@ -483,6 +491,7 @@ Item {
                         var resume = page.deviceRow >= 0 && page.playheadSecs > 0
                                      && page._pendingPlayEpoch <= 0;
                         page.deviceRow = currentIndex;
+                        page.refreshRotation();
                         if (resume)
                             page._pendingPlaySecs = page.playheadSecs;
                         page.refresh();
@@ -578,6 +587,7 @@ Item {
                         anchors.fill: parent
                         fillMode: VideoOutput.PreserveAspectFit
                         visible: player.state === StreamPlayer.Streaming
+                        orientation: page.camRotation
                         transform: [
                             Scale {
                                 origin.x: video.width / 2
@@ -699,6 +709,7 @@ Item {
                         id: pbPane
                         required property int index
                         required property string name
+                        required property int rotationOverride
                         readonly property int slot: page.gridRows.indexOf(index)
                         readonly property bool isMax: page.maximizedRow === index
                         visible: slot >= 0
@@ -710,6 +721,7 @@ Item {
                         deviceRow: index      // fixed: the pane follows its camera
                         paneIndex: slot
                         label: name
+                        viewRotation: rotationOverride
                         segments: page.gridSegs[index] || []
                         playheadSecs: page.playheadSecs
                         // HD only while maximized; restoring forces SD (the pane

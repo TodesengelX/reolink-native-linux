@@ -54,6 +54,7 @@ public:
         BatteryChargingRole,
         ChannelRole,
         ProblemRole,
+        RotationRole,
     };
 
     DeviceManager(Database *db, CredentialStore *credentials, QObject *parent = nullptr);
@@ -77,6 +78,10 @@ public:
     // one (username-only fix).
     Q_INVOKABLE void updateCredentials(int row, const QString &username,
                                        const QString &password);
+    // Manual view-rotation correction for a camera (degrees, multiples of 90),
+    // persisted per hostId:channel. For streams whose rotation our heuristics
+    // can't know (hub-attached doorbells and the like) — issue #3.
+    Q_INVOKABLE void setRotationOverride(int row, int degrees);
 
     Q_INVOKABLE void addDevice(const QString &addr, const QString &username,
                                const QString &password, bool https = true, int port = 0);
@@ -264,6 +269,7 @@ private:
         bool online = false;
         QString status;
         Problem problem = Problem::Connecting; // until first validation lands
+        int rotationOverride = 0;              // user view-rotation fix (degrees CW)
         QString mainCodec = QStringLiteral("h264"); // sub stream is always h264
         QSize mainSize;                             // GetEnc-declared main resolution
         QSize subSize;                              // GetEnc-declared sub resolution
@@ -291,7 +297,7 @@ private:
         int channel = 0;
         QString name;
         bool online = false;
-        QString codec = QStringLiteral("h264");
+        QString codec; // empty = unknown; the stream is probed instead of assumed
         QSize mainSize; // GetEnc-declared main/sub resolution (for rotation detection)
         QSize subSize;
         QString uid;

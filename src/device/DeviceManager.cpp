@@ -13,6 +13,7 @@
 #include <QFileInfo>
 #include <QImage>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QSet>
 #include <QUrl>
 #include <QVariant>
@@ -20,6 +21,34 @@
 #include <QtConcurrent/QtConcurrent>
 
 namespace rl {
+
+namespace {
+// Firmware spells the codec several ways ("h265", "H265", "hevc") and newer
+// builds sometimes omit the field entirely. Empty result = unknown, and an
+// unknown codec is PROBED from the stream rather than assumed — assuming h264
+// for an HEVC main stream is exactly issue #4.
+QString normalizeCodec(const QString &vtype)
+{
+    const QString v = vtype.toLower();
+    if (v.contains(QLatin1String("265")) || v.contains(QLatin1String("hevc")))
+        return QStringLiteral("h265");
+    if (v.contains(QLatin1String("264")) || v.contains(QLatin1String("avc")))
+        return QStringLiteral("h264");
+    return {};
+}
+
+// Per-camera manual view-rotation fix (issue #3), keyed by identity rather
+// than row because rows shift when devices come and go.
+QString rotationKey(qint64 hostId, int channel)
+{
+    return QStringLiteral("rotation/%1:%2").arg(hostId).arg(channel);
+}
+int loadRotation(qint64 hostId, int channel)
+{
+    return QSettings().value(rotationKey(hostId, channel), 0).toInt();
+}
+} // namespace
+
 
 namespace {
 // Declared display size of a GetEnc stream ("mainStream"/"subStream"), e.g.
@@ -42,6 +71,7 @@ DeviceManager::DeviceManager(Database *db, CredentialStore *credentials, QObject
         Entry e;
         e.rec = rec;
         e.chanName = rec.name;
+        e.rotationOverride = loadRotation(rec.id, 0);
         e.online = rec.kind == QLatin1String("stream");
         e.status = e.online ? tr("ready") : tr("connecting…");
         m_entries.append(e);
@@ -299,6 +329,8 @@ QVariant DeviceManager::data(const QModelIndex &index, int role) const
         return e.rec.id;
     case ChannelRole:
         return e.channel;
+    case RotationRole:
+        return e.rotationOverride;
     case HasPtzRole:
         return e.caps.ptz;
     case HasPtzPresetRole:
@@ -348,6 +380,7 @@ QHash<int, QByteArray> DeviceManager::roleNames() const
         {BatteryPercentRole, "batteryPercent"},
         {BatteryChargingRole, "batteryCharging"},
         {ProblemRole, "problem"},
+        {RotationRole, "rotationOverride"},
     };
 }
 
@@ -462,6 +495,7 @@ void DeviceManager::addDevice(const QString &addr, const QString &username,
     e.rec = rec;
     e.chanName = addr;
     e.status = tr("connecting…");
+    e.rotationOverride = loadRotation(rec.id, 0);
     m_entries.append(e);
     endInsertRows();
     emit countChanged();
@@ -600,7 +634,7 @@ void DeviceManager::applyValidation(qint64 hostId, const Validation &v)
         e.chanName = ch.name.isEmpty() ? rec.name : ch.name;
         e.online = ch.online;
         e.status = ch.online ? tr("online") : tr("offline");
-        e.mainCodec = ch.codec.isEmpty() ? QStringLiteral("h264") : ch.codec;
+        e.mainCodec = ch.codec; // may be empty = unknown -> probe
         e.mainSize = ch.mainSize;
         e.subSize = ch.subSize;
         e.uid = ch.uid;
@@ -610,6 +644,7 @@ void DeviceManager::applyValidation(qint64 hostId, const Validation &v)
         e.password = v.password;
         e.primed = true;
         e.problem = Problem::None;
+        e.rotationOverride = loadRotation(rec.id, ch.channel);
         e.client = v.client;
         if (ch.channel == 0)
             e.battery = v.battery;
@@ -714,8 +749,8 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
                     v.client = client;
                 } else if (r.cmd == QLatin1String("GetEnc") && r.ok) {
                     const Json enc = jsonObj(r.value, "Enc");
-                    ch0codec = QString::fromStdString(
-                        jsonStr(jsonObj(enc, "mainStream"), "vType", "h264"));
+                    ch0codec = normalizeCodec(QString::fromStdString(
+                        jsonStr(jsonObj(enc, "mainStream"), "vType")));
                     ch0MainSize = encStreamSize(enc, "mainStream");
                     ch0SubSize = encStreamSize(enc, "subStream");
                 } else if (r.cmd == QLatin1String("GetAbility") && r.ok) {
@@ -781,8 +816,8 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
                         if (r.cmd == QLatin1String("GetEnc") && r.ok) {
                             const Json enc = jsonObj(r.value, "Enc");
                             const int ch = jsonInt(enc, "channel", 0);
-                            codecByChannel[ch] = QString::fromStdString(
-                                jsonStr(jsonObj(enc, "mainStream"), "vType", "h264"));
+                            codecByChannel[ch] = normalizeCodec(QString::fromStdString(
+                                jsonStr(jsonObj(enc, "mainStream"), "vType")));
                             mainSizeByChannel[ch] = encStreamSize(enc, "mainStream");
                             subSizeByChannel[ch] = encStreamSize(enc, "subStream");
                         }
@@ -1207,11 +1242,19 @@ void DeviceManager::startBaichuan(int row, qint64 startEpoch, StreamPlayer *play
         m_playbackRow = row;
     }
     // The sub stream is always H.264; the main stream's codec is per-channel.
-    const bool h265 = mainStream && e.mainCodec == QLatin1String("h265");
+    // An UNKNOWN main codec (firmware omitted/mangled GetEnc vType — issue #4)
+    // passes an empty format so avformat probes the stream instead: forcing
+    // h264 onto an HEVC bitstream yields "Could not find codec parameters".
+    QString format = QStringLiteral("h264");
+    if (mainStream)
+        format = e.mainCodec.isEmpty()
+                     ? QString()
+                     : (e.mainCodec == QLatin1String("h265") ? QStringLiteral("hevc")
+                                                             : QStringLiteral("h264"));
     player->setExpectedSize(mainStream ? e.mainSize : e.subSize);
     player->setPacketSource(
         [client](unsigned char *buf, int size) { return client->read(buf, size); },
-        h265 ? QStringLiteral("hevc") : QStringLiteral("h264"),
+        format,
         [client] { client->stop(); });
     player->start();
 }
@@ -1401,7 +1444,21 @@ QVariantMap DeviceManager::cameraInfo(int row) const
     m["capFloodlight"] = e.caps.floodlight;
     m["capBattery"] = e.caps.battery;
     m["capTalk"] = e.talk;
+    m["rotationOverride"] = e.rotationOverride;
     return m;
+}
+
+void DeviceManager::setRotationOverride(int row, int degrees)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    Entry &e = m_entries[row];
+    const int deg = ((degrees % 360) + 360) % 360;
+    if (e.rotationOverride == deg)
+        return;
+    e.rotationOverride = deg;
+    QSettings().setValue(rotationKey(e.rec.id, e.channel), deg);
+    emit dataChanged(index(row), index(row), {RotationRole});
 }
 
 QVariantList DeviceManager::hostIds() const
@@ -1765,7 +1822,8 @@ QString DeviceManager::liveUrl(int row, bool mainStream)
     if (!e.primed)
         return {};
     // Sub stream ("Fluent") is h264 on all models; main ("Clear") may be h265.
-    const QString codec = mainStream ? e.mainCodec : QStringLiteral("h264");
+    const QString codec = (mainStream && !e.mainCodec.isEmpty()) ? e.mainCodec
+                                                                 : QStringLiteral("h264");
     return api::rtspUrl(e.rec.addr, e.rec.username, e.password, e.channel, mainStream, codec);
 }
 

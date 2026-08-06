@@ -232,6 +232,7 @@ Rectangle {
                 required property int batteryPercent
                 required property bool batteryCharging
                 required property string problem
+                required property int rotationOverride
 
                 // A problem that needs the user's eyes (or just their patience):
                 // red dot + red status, unlike plain "offline" grey.
@@ -443,6 +444,22 @@ Rectangle {
                                onTriggered: Devices.reconnect(camRow.index) }
                     ThemedMenuItem { text: qsTr("Update credentials…")
                                onTriggered: credsDialog.openFor(camRow.index) }
+                    ThemedMenuSeparator {}
+                    // For cameras our rotation heuristics can't know (issue #3):
+                    // each click turns the view another 90° — cycle until right.
+                    ThemedMenuItem {
+                        text: camRow.rotationOverride !== 0
+                              ? qsTr("Rotate view 90° (now %1°)").arg(camRow.rotationOverride)
+                              : qsTr("Rotate view 90°")
+                        onTriggered: Devices.setRotationOverride(camRow.index,
+                                                                 camRow.rotationOverride + 90)
+                    }
+                    ThemedMenuItem {
+                        visible: camRow.rotationOverride !== 0
+                        height: visible ? implicitHeight : 0
+                        text: qsTr("Reset rotation")
+                        onTriggered: Devices.setRotationOverride(camRow.index, 0)
+                    }
                     ThemedMenuSeparator {}
                     // Standalone cameras are their own host and can be removed here;
                     // an NVR's channels are managed on the NVR (remove it whole).

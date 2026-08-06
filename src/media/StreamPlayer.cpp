@@ -126,10 +126,14 @@ QtVideo::Rotation streamRotation(const AVStream *stream, QSize expected)
     const int w = stream->codecpar->width;
     const int h = stream->codecpar->height;
 
-    // When the NVR told us the declared size, it is authoritative: rotate iff the
-    // decoded frame is its exact transpose (and no rotation otherwise).
+    // When the NVR told us the declared size, rotate iff the decoded frame is
+    // its exact transpose AND the decoded frame is portrait. Cameras transmit
+    // transposed as portrait (a landscape sensor turned sideways — Duo 3), so
+    // an upright LANDSCAPE stream whose declared size merely looks transposed
+    // is metadata being wrong, not a rotated picture: hub-attached doorbells
+    // report exactly that, and rotating them broke their view (issue #3).
     if (expected.isValid()) {
-        if (w > 0 && h > 0 && expected.width() == h && expected.height() == w)
+        if (w > 0 && h > w && expected.width() == h && expected.height() == w)
             return QtVideo::Rotation::Clockwise270;
         return QtVideo::Rotation::None;
     }
