@@ -27,6 +27,9 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.1.6" date="2026-08-05">
+      <description><p>Synced 4-camera playback on one timeline with per-camera coverage lanes, drag-and-drop camera arrangement in both live view and playback, double-click maximize with an HD toggle, digital zoom in playback panes, honest device error states with automatic recovery for unreachable devices, credential repair from the sidebar, and pre-validated Add Device with inline errors.</p></description>
+    </release>
     <release version="0.1.5" date="2026-08-02">
       <description><p>Launching the app again now raises the running window instead of starting a second copy, so tray icons no longer pile up. Hardware video decoding works on hosts with VAAPI, cutting CPU use during live view.</p></description>
     </release>

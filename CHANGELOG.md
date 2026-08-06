@@ -6,6 +6,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the project is pre-1.0, minor versions may still change behaviour.
 
+## [0.1.6] — 2026-08-05
+
+### Added
+
+- **Synced multi-camera playback**: a 4-pane playback grid driven by one
+  calendar and one timeline, like the official client's split playback. The
+  timeline shows the union of every camera's recordings with a thin coverage
+  lane per camera, and one playhead drives all panes to the same wall-clock
+  moment; a camera with no footage there says so instead of looking broken.
+- Playback grid interactions: drag cameras in from the sidebar or between
+  panes (swaps, never drops), double-click to maximize a pane and again to
+  restore, digital zoom with drag-to-pan in every pane, and an SD/HD toggle
+  on the maximized pane that plays the full-resolution main stream with
+  in-place seeking.
+- Live view: drag cameras from the sidebar into any grid cell and drag panes
+  between cells to rearrange; the arrangement persists across restarts.
+- Sidebar recovery actions: right-click a device for **Reconnect** and
+  **Update credentials…** — fix a wrong password in place instead of
+  removing and re-adding the device.
+
+### Fixed
+
+- A device that was unreachable when the app started stayed "connecting…"
+  forever; unreachable devices now retry automatically with backoff and
+  recover on their own. Sign-in failures are shown with the device's
+  attempts-left lockout warning and are deliberately never auto-retried.
+- Adding a device now checks it first: a wrong address or rejected password
+  is an inline message in the dialog instead of a phantom row.
+- Rearranging grids no longer reconnects running streams — panes carry their
+  streams with them, in live view and playback both. Restoring a maximized
+  view reconnects nothing.
+- Switching live-view layouts briefly holds hidden panes' streams so flipping
+  between presets (or maximize and back) is instant.
+- Concurrent commands to a device are now queued instead of racing, which
+  was the main source of the NVR web server's intermittent 502 errors.
+
 ## [0.1.5] — 2026-08-02
 
 ### Fixed
