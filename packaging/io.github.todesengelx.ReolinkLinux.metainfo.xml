@@ -27,6 +27,9 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.1.7" date="2026-08-05">
+      <description><p>Fixes HD streaming on cameras whose firmware doesn't report the main-stream codec (the stream is now probed instead of assumed), fixes false 90-degree rotation of hub-attached cameras, and adds a persisted per-camera Rotate View override.</p></description>
+    </release>
     <release version="0.1.6" date="2026-08-05">
       <description><p>Synced 4-camera playback on one timeline with per-camera coverage lanes, drag-and-drop camera arrangement in both live view and playback, double-click maximize with an HD toggle, digital zoom in playback panes, honest device error states with automatic recovery for unreachable devices, credential repair from the sidebar, and pre-validated Add Device with inline errors.</p></description>
     </release>

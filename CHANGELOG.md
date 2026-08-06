@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the project is pre-1.0, minor versions may still change behaviour.
 
+## [0.1.7] — 2026-08-05
+
+### Added
+
+- Per-camera view rotation: right-click a camera in the sidebar →
+  **Rotate view 90°** turns its picture in 90° steps, persisted per camera
+  and applied in live view and both playback modes — for devices whose
+  firmware misreports orientation. ([#3])
+
+### Fixed
+
+- HD live view failed ("Could not find codec parameters") on cameras whose
+  newer firmware doesn't report the main-stream codec the way the app
+  expected — it assumed H.264 and choked on H.265 streams. The codec report
+  is now normalized across firmware spellings, and when it's genuinely
+  unknown the stream is probed instead of assumed. ([#4])
+- Cameras attached through a Home Hub could show rotated 90° because the hub
+  declares their resolution transposed while the stream arrives upright; the
+  auto-rotation heuristic now also requires the decoded frame to actually be
+  portrait before correcting. ([#3])
+
+[#3]: https://github.com/TodesengelX/reolink-native-linux/issues/3
+[#4]: https://github.com/TodesengelX/reolink-native-linux/issues/4
+
 ## [0.1.6] — 2026-08-05
 
 ### Added
@@ -115,6 +139,8 @@ While the project is pre-1.0, minor versions may still change behaviour.
 Initial development release: live view, playback, events and device settings,
 published as an AppImage and a Flatpak bundle.
 
+[0.1.7]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.6...v0.1.7
+[0.1.6]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/TodesengelX/reolink-native-linux/compare/v0.1.2...v0.1.3
