@@ -1,14 +1,15 @@
 # Reolink Native Linux Client
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/TodesengelX/reolink-native-linux)](../../releases/latest)
 
-A fully **native Linux desktop client** for Reolink cameras and NVRs — built to work like the official Reolink Client (Windows/macOS/Android): the 1/4/9/16 live grid, double-click maximize, fullscreen, PTZ, a color-coded playback timeline, and a full device-settings surface.
+A fully **native Linux desktop client** for Reolink cameras and NVRs — built to work like the official Reolink Client (Windows/macOS/Android): the 1/4/6/9/16 live grid, synced multi-camera playback on one timeline, double-click maximize, fullscreen, PTZ, and a full device-settings surface.
 
 **No Wine, no Electron, no web wrappers, no bundled third-party NVR software.** Compiled C++/Qt6 talking directly to the devices over their own protocols — including the native **Baichuan** protocol (TCP 9000) the official apps use, which is why live HD, recorded playback, and settings work reliably where third-party RTSP/HTTP tools struggle.
 
-> **Status: alpha.** Actively developed and validated against a real RLN8-410 NVR. Live view, playback, events, notifications and device settings all work; two-way talk audio and remote/P2P access are still in progress.
+> **Status: alpha.** Actively developed against a real RLN8-410 NVR, with community-confirmed setups on an RLC-823S1 standalone camera and a Home Hub Pro. Live view, playback, events, notifications and device settings all work; two-way talk audio and remote/P2P access are still in progress.
 
-Latest release: **v0.1.5** — see the [changelog](CHANGELOG.md).
+Grab the [latest release](../../releases/latest), and see the [changelog](CHANGELOG.md) for what's new. Found a bug? [Issues](../../issues) are read and acted on — recent reports were fixed and released within a day.
 
 ## Install
 
@@ -32,13 +33,14 @@ flatpak run io.github.todesengelx.ReolinkLinux
 
 *(A Flathub listing — `flatpak install flathub io.github.todesengelx.ReolinkLinux` — is planned.)*
 
-### Arch Linux (AUR)
+### Arch Linux
+
+Not on the AUR yet — build from the repo's PKGBUILD:
 
 ```sh
-yay -S reolink-native-linux        # or: paru -S reolink-native-linux
+git clone https://github.com/TodesengelX/reolink-native-linux.git
+cd reolink-native-linux/packaging/aur && makepkg -si
 ```
-
-*(PKGBUILD lives in [`packaging/aur/`](packaging/aur/).)*
 
 ### Build from source
 
@@ -52,8 +54,9 @@ Requires Qt 6.5+ (base / declarative / multimedia / shadertools / tools), FFmpeg
 
 ## Features
 
-- **Live view** — 1/4/6/9/16 grid; hardware-accelerated H.264/H.265 decode (VAAPI/NVDEC) with software fallback; double-click a camera (or single-click it in the sidebar) to maximize; F11 fullscreen; per-pane floating toolbar (SD/HD, snapshot, record, digital zoom with edge-clamped pan, PTZ, talk, siren, floodlight, pop-out); auto-reconnect. Maximized/pop-out HD streams use Baichuan, which avoids the corruption some Reolink NVRs emit on their RTSP main stream.
-- **Playback** — month calendar, two-tone timeline (timer/alarm) with red ticks marking detections, recording search, in-place seek and a live playhead, pan/zoom the timeline, clip export, HD playback over Baichuan.
+- **Live view** — 1/4/6/9/16 grid; drag cameras in from the sidebar or between cells to arrange them (the layout persists); hardware-accelerated H.264/H.265 decode (VAAPI/NVDEC) with software fallback; double-click a camera (or single-click it in the sidebar) to maximize; F11 fullscreen; per-pane floating toolbar (SD/HD, snapshot, record, digital zoom with edge-clamped pan, PTZ, talk, siren, floodlight, pop-out); auto-reconnect. Maximized/pop-out HD streams use Baichuan, which avoids the corruption some Reolink NVRs emit on their RTSP main stream.
+- **Playback** — month calendar, two-tone timeline (timer/alarm) with red ticks marking detections, recording search, in-place seek and a live playhead, pan/zoom the timeline, clip export, HD playback over Baichuan. **Synced multi-camera playback**: a 4-pane grid driven by one timeline showing every camera's coverage as per-camera lanes, with one playhead driving all panes to the same moment — drag cameras in, swap panes without interrupting their streams, double-click to maximize with an SD/HD toggle, digital zoom in every pane.
+- **Honest failure handling** — unreachable devices show why and retry themselves with backoff; sign-in failures surface the device's attempts-left lockout warning and are never auto-retried; right-click a device to Reconnect or fix its credentials in place; adding a device validates it first, so a typo'd address or wrong password is an inline message instead of a stuck row. Per-camera **Rotate view** override for devices whose firmware misreports orientation.
 - **Events** — notification inbox with thumbnails, AI-type filters (person/vehicle/pet/visitor/motion) and per-camera filtering, detection polling, jump-to-playback, unread badge.
 - **Background monitoring** — lives in the system tray with the window closed, so alerts keep arriving; optional start-on-login. Desktop notifications fire for detections (gated on each camera's Push setting) and for cameras or the NVR going offline; clicking one opens the app and plays that event back.
 - **Device tree** — NVR shown as an expandable parent with its cameras nested; right-click for Properties / Settings / Reboot / Remove.
