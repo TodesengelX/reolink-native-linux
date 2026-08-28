@@ -1,6 +1,7 @@
 #include "DeviceDiscovery.h"
 
 #include "core/Log.h"
+#include "protocol/BaichuanSession.h"
 
 #include <QNetworkInterface>
 #include <QTcpSocket>
@@ -142,14 +143,18 @@ void DeviceDiscovery::scan()
         connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher] {
             const QString ip = watcher->result();
             watcher->deleteLater();
-            if (!ip.isEmpty())
-                reportFound(ip, QStringLiteral("https"));
+            if (!ip.isEmpty()) {
+                const QStringList result = ip.split(u'\n');
+                reportFound(result.value(0), result.value(1));
+            }
             if (--m_pending <= 0)
                 setScanning(false);
         });
         watcher->setFuture(QtConcurrent::run(pool, [ip]() -> QString {
-            if (portOpen(ip, kReolinkPort) && confirmReolink(ip))
-                return ip;
+            if (confirmReolink(ip))
+                return ip + QStringLiteral("\nhttps");
+            if (BaichuanSession::probe(ip, kReolinkPort))
+                return ip + QStringLiteral("\nbaichuan");
             return {};
         }));
     }

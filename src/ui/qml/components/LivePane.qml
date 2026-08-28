@@ -105,7 +105,9 @@ Rectangle {
         var want = deviceRow >= 0 && visible && pageActive;
         var key = "";
         if (want) {
-            if (effectiveMain && !bcFallback)
+            if (Devices.transportAt(deviceRow) === "baichuan" && !bcFallback)
+                key = "bc:" + deviceRow + ":" + (effectiveMain ? "main" : "sub");
+            else if (effectiveMain && !bcFallback)
                 key = "bc:" + deviceRow;
             else
                 key = Devices.liveUrl(deviceRow, effectiveMain);
@@ -117,7 +119,7 @@ Rectangle {
             player.stop();
         } else if (key.substring(0, 3) === "bc:") {
             player.loop = false;
-            Devices.startBaichuanLive(root.deviceRow, player, true);
+            Devices.startBaichuanLive(root.deviceRow, player, effectiveMain);
         } else {
             // Set loop before start() so the worker sees the right value from
             // frame one (the declarative `loop:` binding can lag the handler).
@@ -144,7 +146,8 @@ Rectangle {
     Connections {
         target: player
         function onStateChanged() {
-            if (player.state === StreamPlayer.Error && !root.bcFallback
+            if (player.state === StreamPlayer.Error && Devices.transportAt(root.deviceRow) !== "baichuan"
+                && !root.bcFallback
                 && root.streamKey.substring(0, 3) === "bc:") {
                 root.bcFallback = true;
                 root.updateSource();

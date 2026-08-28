@@ -5,6 +5,7 @@
 #include "media/StreamPlayer.h"
 #include "protocol/BaichuanClient.h"
 #include "protocol/BaichuanControl.h"
+#include "protocol/BaichuanSession.h"
 #include "protocol/ReolinkHttpClient.h"
 
 #include <QDateTime>
@@ -310,6 +311,8 @@ QVariant DeviceManager::data(const QModelIndex &index, int role) const
         return e.rec.addr;
     case KindRole:
         return e.rec.kind;
+    case TransportRole:
+        return e.rec.transport;
     case ModelRole:
         return e.rec.model;
     case OnlineRole:
@@ -322,6 +325,7 @@ QVariant DeviceManager::data(const QModelIndex &index, int role) const
         case Problem::Unreachable: return QStringLiteral("unreachable");
         case Problem::Auth: return QStringLiteral("auth");
         case Problem::Locked: return QStringLiteral("locked");
+        case Problem::Protocol: return QStringLiteral("protocol");
         case Problem::None: break;
         }
         return QString();
@@ -381,6 +385,7 @@ QHash<int, QByteArray> DeviceManager::roleNames() const
         {BatteryChargingRole, "batteryCharging"},
         {ProblemRole, "problem"},
         {RotationRole, "rotationOverride"},
+        {TransportRole, "transport"},
     };
 }
 
@@ -389,6 +394,26 @@ void DeviceManager::testDevice(const QString &addr, const QString &username,
 {
     const int portv = port > 0 ? port : (https ? 443 : 80);
     m_pending.addFuture(QtConcurrent::run([this, addr, username, password, https, portv] {
+        if (portv == 9000) {
+            const BaichuanSession::LoginResult result =
+                BaichuanSession::login(addr, portv, username, password);
+            QString problem;
+            switch (result.failKind) {
+            case BaichuanSession::FailKind::Transport: problem = QStringLiteral("transport"); break;
+            case BaichuanSession::FailKind::Auth: problem = QStringLiteral("auth"); break;
+            case BaichuanSession::FailKind::Locked: problem = QStringLiteral("locked"); break;
+            case BaichuanSession::FailKind::Protocol: problem = QStringLiteral("protocol"); break;
+            case BaichuanSession::FailKind::None: break;
+            }
+            QMetaObject::invokeMethod(
+                this,
+                [this, result, problem] {
+                    emit testDeviceResult(result.ok, result.error, result.device.name,
+                                          result.device.model, problem);
+                },
+                Qt::QueuedConnection);
+            return;
+        }
         ReolinkHttpClient client(addr, portv, https, username, password);
         const api::BatchResult b =
             client.call(Json::array({api::command(QStringLiteral("GetDevInfo"))}));
@@ -483,6 +508,7 @@ void DeviceManager::addDevice(const QString &addr, const QString &username,
     rec.addr = addr;
     rec.https = https;
     rec.port = port > 0 ? port : (https ? 443 : 80);
+    rec.transport = rec.port == 9000 ? QStringLiteral("baichuan") : QStringLiteral("http");
     rec.username = username;
     rec.id = m_db->addHost(rec);
     if (rec.id < 0) {
@@ -681,7 +707,9 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
     const HostRecord rec = m_entries.at(row).rec;
     const bool isStream = rec.kind == QLatin1String("stream");
 
-    m_pending.addFuture(QtConcurrent::run([this, rec, newPassword, storeNew, isStream, hostId] {
+    const bool isBaichuan = rec.transport == QLatin1String("baichuan");
+    m_pending.addFuture(QtConcurrent::run([this, rec, newPassword, storeNew, isStream,
+                                            isBaichuan, hostId] {
         if (storeNew && !newPassword.isEmpty())
             m_credentials->store(hostId, newPassword);
 
@@ -712,6 +740,40 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
             Validation v;
             v.status = tr("keyring unavailable — password not saved");
             v.problem = Problem::Auth; // needs the user, not a retry loop
+            postValidation(hostId, v);
+            return;
+        }
+
+        if (isBaichuan) {
+            const BaichuanSession::LoginResult result =
+                BaichuanSession::login(rec.addr, rec.port, rec.username, password);
+            Validation v;
+            v.password = password;
+            v.hostName = result.device.name;
+            v.model = result.device.model;
+            v.channelNum = 1;
+            if (result.ok) {
+                v.online = true;
+                v.status = tr("online");
+                v.problem = Problem::None;
+                ChannelResult ch;
+                ch.channel = 0;
+                ch.name = result.device.name;
+                ch.online = true;
+                ch.codec = normalizeCodec(result.device.mainCodec);
+                ch.mainSize = result.device.mainSize;
+                ch.subSize = result.device.subSize;
+                v.channels.append(ch);
+            } else {
+                v.status = result.error;
+                v.problem = result.failKind == BaichuanSession::FailKind::Auth
+                                ? Problem::Auth
+                                : result.failKind == BaichuanSession::FailKind::Locked
+                                    ? Problem::Locked
+                                    : result.failKind == BaichuanSession::FailKind::Protocol
+                                        ? Problem::Protocol
+                                        : Problem::Unreachable;
+            }
             postValidation(hostId, v);
             return;
         }
@@ -1393,6 +1455,7 @@ QVariantMap DeviceManager::hostInfo(qint64 hostId) const
         return m;
     m["name"] = host->rec.name;
     m["kind"] = host->rec.kind;
+    m["transport"] = host->rec.transport;
     m["model"] = host->rec.model;
     m["addr"] = host->rec.addr;
     m["port"] = host->rec.port;
@@ -1409,6 +1472,7 @@ QVariantMap DeviceManager::hostInfo(qint64 hostId) const
     case Problem::Unreachable: m["problem"] = QStringLiteral("unreachable"); break;
     case Problem::Auth: m["problem"] = QStringLiteral("auth"); break;
     case Problem::Locked: m["problem"] = QStringLiteral("locked"); break;
+    case Problem::Protocol: m["problem"] = QStringLiteral("protocol"); break;
     case Problem::None: m["problem"] = QString(); break;
     }
     return m;

@@ -1,5 +1,6 @@
 #include "media/BcMediaParser.h"
 #include "protocol/BcCrypto.h"
+#include "protocol/BaichuanSession.h"
 #include "protocol/ReolinkApi.h"
 
 #include <QtTest>
@@ -31,6 +32,26 @@ private slots:
         QCOMPARE(user.value("userName", std::string{}), std::string("admin"));
         QCOMPARE(user.value("password", std::string{}), std::string("pw123"));
         QCOMPARE(user.value("Version", std::string{}), std::string("0"));
+    }
+
+    void baichuanDeviceInfoXml()
+    {
+        const QByteArray xml = R"(<body><DeviceInfo><name>Porch</name><type>E430</type>
+            <channelNum>1</channelNum></DeviceInfo><encodeTable>
+            <type>mainStream</type><width>2560</width><height>1440</height></encodeTable>
+            <encodeTable><type>subStream</type><width>640</width><height>360</height></encodeTable></body>)";
+        const BaichuanSession::DeviceInfo info = BaichuanSession::parseDeviceInfo(xml);
+        QCOMPARE(info.name, QStringLiteral("Porch"));
+        QCOMPARE(info.model, QStringLiteral("E430"));
+        QCOMPARE(info.channelNum, 1);
+        QCOMPARE(info.mainSize, QSize(2560, 1440));
+        QCOMPARE(info.subSize, QSize(640, 360));
+    }
+
+    void baichuanPasswordHashIs31Chars()
+    {
+        const QByteArray hash = bc::modernHash(QString(80, u'x'), QStringLiteral("nonce"));
+        QCOMPARE(hash.size(), 31);
     }
 
     void apiUrlBuilding()

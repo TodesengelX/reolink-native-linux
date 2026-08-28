@@ -265,6 +265,7 @@ Dialog {
                         model: discoveredModel
                         delegate: Rectangle {
                             required property string ip
+                                            required property string info
                             required property int index
                             width: ListView.view.width
                             height: 28
@@ -289,7 +290,18 @@ Dialog {
                                 }
                             }
                             HoverHandler { id: dHover }
-                            TapHandler { onTapped: addrField.text = parent.ip }
+                            TapHandler {
+                                onTapped: {
+                                    addrField.text = parent.ip;
+                                    if (parent.info === "baichuan") {
+                                        portField.text = "9000";
+                                        httpsCheck.checked = false;
+                                    } else {
+                                        portField.text = "";
+                                        httpsCheck.checked = true;
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -100,10 +100,15 @@ bool Database::migrate()
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC)"),
     };
 
+    static const QStringList migrationsV3 = {
+        QStringLiteral("ALTER TABLE hosts ADD COLUMN transport TEXT NOT NULL DEFAULT 'http'"),
+    };
+
     // Ordered migrations; each bumps the stored version by one.
     const QVector<QPair<int, const QStringList *>> steps = {
         {1, &migrationsV1},
         {2, &migrationsV2},
+        {3, &migrationsV3},
     };
 
     const int current = schemaVersion();
@@ -222,9 +227,12 @@ qint64 Database::addHost(const HostRecord &rec)
 {
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
-        "INSERT INTO hosts (kind, name, addr, port, https, username, model)"
-        " VALUES (:kind, :name, :addr, :port, :https, :username, :model)"));
+        "INSERT INTO hosts (kind, transport, name, addr, port, https, username, model)"
+        " VALUES (:kind, :transport, :name, :addr, :port, :https, :username, :model)"));
     q.bindValue(QStringLiteral(":kind"), rec.kind);
+    q.bindValue(QStringLiteral(":transport"), rec.transport == QLatin1String("baichuan")
+                                                   ? QStringLiteral("baichuan")
+                                                   : QStringLiteral("http"));
     q.bindValue(QStringLiteral(":name"), sqlText(rec.name));
     q.bindValue(QStringLiteral(":addr"), rec.addr);
     q.bindValue(QStringLiteral(":port"), rec.port);
@@ -254,9 +262,12 @@ bool Database::updateHost(const HostRecord &rec)
 {
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
-        "UPDATE hosts SET kind=:kind, name=:name, addr=:addr, port=:port, https=:https,"
+        "UPDATE hosts SET kind=:kind, transport=:transport, name=:name, addr=:addr, port=:port, https=:https,"
         " username=:username, model=:model WHERE id=:id"));
     q.bindValue(QStringLiteral(":kind"), rec.kind);
+    q.bindValue(QStringLiteral(":transport"), rec.transport == QLatin1String("baichuan")
+                                                   ? QStringLiteral("baichuan")
+                                                   : QStringLiteral("http"));
     q.bindValue(QStringLiteral(":name"), sqlText(rec.name));
     q.bindValue(QStringLiteral(":addr"), rec.addr);
     q.bindValue(QStringLiteral(":port"), rec.port);
@@ -276,18 +287,19 @@ QVector<HostRecord> Database::hosts() const
     QVector<HostRecord> out;
     QSqlQuery q(db());
     if (!q.exec(QStringLiteral(
-            "SELECT id, kind, name, addr, port, https, username, model FROM hosts ORDER BY id")))
+            "SELECT id, kind, transport, name, addr, port, https, username, model FROM hosts ORDER BY id")))
         return out;
     while (q.next()) {
         HostRecord r;
         r.id = q.value(0).toLongLong();
         r.kind = q.value(1).toString();
-        r.name = q.value(2).toString();
-        r.addr = q.value(3).toString();
-        r.port = q.value(4).toInt();
-        r.https = q.value(5).toInt() != 0;
-        r.username = q.value(6).toString();
-        r.model = q.value(7).toString();
+        r.transport = q.value(2).toString();
+        r.name = q.value(3).toString();
+        r.addr = q.value(4).toString();
+        r.port = q.value(5).toInt();
+        r.https = q.value(6).toInt() != 0;
+        r.username = q.value(7).toString();
+        r.model = q.value(8).toString();
         out.append(r);
     }
     return out;

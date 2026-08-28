@@ -10,7 +10,7 @@ class TestDatabase : public QObject
     Q_OBJECT
 
     // Current schema version; bump alongside new migrations in Database.cpp.
-    static constexpr int kSchemaVersion = 2;
+    static constexpr int kSchemaVersion = 3;
 
 private slots:
     void migratesToCurrent()
@@ -77,6 +77,11 @@ private slots:
         QCOMPARE(hosts.size(), 1);
         QCOMPARE(hosts[0].name, QStringLiteral("Front Door"));
         QCOMPARE(hosts[0].https, true);
+        QCOMPARE(hosts[0].transport, QStringLiteral("http"));
+
+        hosts[0].transport = QStringLiteral("baichuan");
+        QVERIFY(db.updateHost(hosts[0]));
+        QCOMPARE(db.hosts()[0].transport, QStringLiteral("baichuan"));
 
         hosts[0].name = QStringLiteral("Back Door");
         hosts[0].model = QStringLiteral("RLC-810A");
