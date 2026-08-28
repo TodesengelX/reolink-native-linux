@@ -69,7 +69,99 @@
    - Bad password does not trigger repeated auto-retries.
    - Existing HTTP/NVR devices still work unchanged.
 
+10. **Baichuan Camera Settings Read Path**
+    - Define a small command/schema registry for settings supported by the target
+       Lumus/E1-class cameras, including command id, XML request shape, response
+       tags, channel scope, and whether a setting is safe to expose.
+    - Reuse `BaichuanControl` for authenticated GET transactions and expose a
+       structured result containing `ok`, `transport`, `protocol`, `status`, and
+       parsed fields rather than leaking raw XML into QML.
+    - Implement reads for the first useful camera controls: image tuning
+       (brightness, contrast, saturation, sharpness), mirror/flip, day/night
+       mode and threshold, detection sensitivity, recording pre-record/delay,
+       and weekly recording schedule.
+    - Preserve unknown XML fields and tolerate firmware-specific omissions so a
+       newer or older camera does not make the whole settings page fail.
+    - Mark each command/schema with provenance from MIT `reolink_aio`, official
+       Reolink documentation, or observed wire behavior. Do not port from AGPL
+       `neolink`.
+
+11. **Baichuan Camera Settings Write Path**
+    - Use read-modify-write for every setting: fetch the current command payload,
+       change only the requested leaf fields, and submit the matching Set command.
+    - Validate ranges, enum values, boolean fields, schedule dimensions, and
+       channel ownership before sending; reject invalid values locally.
+    - Serialize writes per camera/channel and refresh the affected setting after
+       success so the UI reflects the device's normalized value.
+    - Return structured auth, locked, transport, protocol, and device-rejected
+       errors; never retry writes automatically after an auth or locked failure.
+    - Disable unsupported controls per capability/model and keep HTTP-only
+       settings hidden for Baichuan transport rows.
+    - Add UI loading, success, and failure states for settings reads and writes;
+       do not leave stale controls appearing successfully changed after a failed
+       write.
+
+12. **Recorded Search and Time Conversion**
+    - Add Baichuan recording search for a selected channel and local calendar
+       day, returning normalized segments with start/end epoch, recording type,
+       and camera name.
+    - Parse the camera/NVR playback clock and recording-file boundaries, keeping
+       the conversion between wall-clock Unix time and Baichuan playback time in
+       one tested helper.
+    - Handle empty days, overlapping segments, midnight boundaries, timezone
+       changes, malformed records, and cameras whose clock differs from the host.
+    - Keep HTTP recording search as the existing path and select Baichuan search
+       strictly from the persisted transport field.
+
+13. **Native Recorded Clip Playback and Export**
+    - Start Baichuan recorded playback directly into `StreamPlayer` using the
+       selected file boundary and playback offset; do not require an RTSP or
+       HTTP-FLV URL for Baichuan-only rows.
+    - Support main/sub stream selection, H.264/H.265 probing, keyframe startup,
+       stop, reconnect, and in-place seek without opening duplicate sessions.
+    - Expose playback errors distinctly from authentication and transport errors,
+       and release the Baichuan session when leaving playback or switching rows.
+    - Add a native export path that writes the selected recording to a local
+       media file, preserving the original elementary stream where possible;
+       make cancellation and partial-file cleanup explicit.
+    - Keep snapshot, detection polling, and other HTTP-dependent features gated
+       off for Baichuan-only devices until equivalent Baichuan implementations
+       exist.
+
+14. **Settings / Playback Tests**
+    - Add fixture-based tests for each supported settings XML response and for
+       read-modify-write payload preservation, including unknown tags and omitted
+       optional fields.
+    - Add validation tests for ranges, schedules, per-channel addressing, write
+       serialization, and auth/locked/protocol failure classification.
+    - Add recording parser tests for empty, boundary, overlapping, malformed,
+       and clock-offset cases, plus wall-clock/playback-time round trips.
+    - Add `DeviceManager` seam tests proving Baichuan rows never construct an
+       HTTP client, select Baichuan search/playback, and produce one stream
+       session that can seek and stop cleanly.
+    - Add media tests for H.264/H.265 probing, truncated clips, missing keyframes,
+       and export cleanup.
+
+15. **Expanded Manual Verification**
+    - Read settings from a Baichuan-only camera after restart and confirm values
+       match the device rather than cached defaults.
+    - Change image, day/night, detection, and recording schedule settings; verify
+       the device applies only the requested fields and the UI refreshes them.
+    - Search a day containing recordings, play both stream modes, scrub across a
+       file boundary, stop playback, and reopen the same clip.
+    - Export a clip, cancel an export, and verify no unusable partial file is
+       left behind.
+    - Confirm bad credentials do not trigger repeated setting writes or playback
+       login attempts, and confirm existing HTTP/NVR settings and playback remain
+       unchanged.
+
 **Estimate**
 Discovery/add/login/live-view MVP: `4-7 engineering days`.
 
-The risky parts are not discovery itself; they are cleanly separating “device identity/validation” from the existing HTTP client assumptions, and making the UI route live playback without first demanding an RTSP URL.
+Settings and recorded-playback expansion: `5-10 engineering days`, depending
+on the number of camera firmware variants that need wire/schema fixtures.
+
+The risky parts are command/schema variation between firmware versions, safe
+read-modify-write behavior, camera clock conversion, and keeping native
+playback sessions bounded while the UI switches between live view, search, and
+export.

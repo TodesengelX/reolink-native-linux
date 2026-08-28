@@ -327,6 +327,13 @@ Item {
         // Scrub against the sub stream: it is light and always landscape, so the
         // timeline stays responsive. (HD mode below plays the full-res main.)
         player.loop = false;
+        if (Devices.transportAt(page.deviceRow) === "baichuan") {
+            if (player.state === StreamPlayer.Streaming
+                && Devices.seekBaichuanPlayback(page.deviceRow, epochAt(sec)))
+                return;
+            Devices.startBaichuanPlayback(page.deviceRow, epochAt(sec), player, false);
+            return;
+        }
         var url = Devices.playbackUrl(page.deviceRow, epochAt(sec), false);
         if (url.length > 0) {
             player.expectedSize = Devices.declaredSize(page.deviceRow, false); // sub

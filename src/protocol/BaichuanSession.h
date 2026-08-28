@@ -22,6 +22,7 @@ public:
         QString mainCodec; // empty = let FFmpeg probe
         QSize mainSize;
         QSize subSize;
+        bool isAdmin = false;
     };
 
     struct LoginResult {

@@ -14,6 +14,7 @@
 #include <QSet>
 #include <QSize>
 #include <QTimer>
+#include <QMutex>
 
 #include <memory>
 
@@ -257,9 +258,13 @@ signals:
     void clipExportFailed(int row, const QString &error);
     void settingsLoaded(int row, const QVariantMap &values);
     void settingsFailed(int row, const QString &error);
+    void settingStarted(int row, const QString &command);
     void settingApplied(int row, const QString &command, bool ok, const QString &error);
     void alertsLoaded(int row, const QVariantMap &values);
     void bcConfigLoaded(int row, int cmdId, const QVariantMap &values);
+    void bcSettingsLoaded(int row, int cmdId, bool ok, bool transport, bool protocol,
+                          int status, const QVariantMap &fields,
+                          const QVariantMap &unknownFields);
     void recScheduleLoaded(int row, const QVariantMap &values);
     // Emitted on each detection 0->1 transition (feeds the event inbox).
     void detectionEvent(qint64 hostId, int channel, const QString &type, const QString &camera);
@@ -365,6 +370,7 @@ private:
     QHash<QString, bool> m_pollInFlight;                 // avoid overlapping polls
     QHash<int, int> m_pushEnabled;  // row -> push enable (1/0/-1) for notif gating
     QHash<qint64, int> m_hostFails; // consecutive poll transport failures per host
+    QMutex m_bcWriteMutex;
     bool m_pushWarmed = false;      // one-time warm of the push cache after priming
 
     // Auto-retry of Unreachable hosts, driven by the poll tick. Backoff doubles

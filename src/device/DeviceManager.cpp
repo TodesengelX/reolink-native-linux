@@ -5,6 +5,7 @@
 #include "media/StreamPlayer.h"
 #include "protocol/BaichuanClient.h"
 #include "protocol/BaichuanControl.h"
+#include "protocol/BaichuanRecording.h"
 #include "protocol/BaichuanSession.h"
 #include "protocol/ReolinkHttpClient.h"
 
@@ -189,7 +190,8 @@ void DeviceManager::pollDetections()
     QVector<qint64> order;
     for (const Entry &e : m_entries) {
         // Offline entries stay in the poll: that's how we notice recovery.
-        if (e.rec.kind == QLatin1String("stream") || !e.client)
+        if (e.rec.kind == QLatin1String("stream")
+            || e.rec.transport == QLatin1String("baichuan") || !e.client)
             continue;
         if (!byHost.contains(e.rec.id)) {
             byHost[e.rec.id] = HostPoll{e.client, {}, {}, {}};
@@ -752,6 +754,14 @@ void DeviceManager::validateAsync(qint64 hostId, const QString &newPassword, boo
             v.hostName = result.device.name;
             v.model = result.device.model;
             v.channelNum = 1;
+            // Most camera login replies omit privilege metadata. Reolink's
+            // canonical admin account is the only account with a stable name
+            // across those Baichuan firmware variants.
+            v.isAdmin = result.device.isAdmin
+                        || rec.username.compare(QStringLiteral("admin"), Qt::CaseInsensitive) == 0;
+            qCInfo(lcProto) << rec.addr << "Baichuan validation: username" << rec.username
+                            << "loginOk" << result.ok << "deviceAdmin" << result.device.isAdmin
+                            << "effectiveAdmin" << v.isAdmin;
             if (result.ok) {
                 v.online = true;
                 v.status = tr("online");
@@ -1027,9 +1037,146 @@ void DeviceManager::captureEventThumbnail(qint64 hostId, int channel, qint64 eve
 
 void DeviceManager::searchRecordings(int row, int year, int month, int day)
 {
-    auto client = clientFor(row);
     const QDate date(year, month, day);
-    if (!client || !date.isValid()) {
+    if (row < 0 || row >= m_entries.size() || !date.isValid()) {
+        emit recordingsFailed(row, tr("device not ready"));
+        return;
+    }
+    const Entry &entry = m_entries.at(row);
+    if (entry.rec.transport == QLatin1String("baichuan")) {
+        if (!entry.primed) {
+            emit recordingsFailed(row, tr("device not ready"));
+            return;
+        }
+        BaichuanControl::Params params{entry.rec.addr, 9000, entry.rec.username,
+                                       entry.password};
+        const int ch = entry.channel;
+        const QString cameraName = entry.chanName.isEmpty() ? entry.rec.name : entry.chanName;
+        const QDateTime dayStart(date, QTime(0, 0, 0));
+        const QByteArray time = QByteArrayLiteral("<startTime><year>") + QByteArray::number(year)
+            + QByteArrayLiteral("</year><month>") + QByteArray::number(month)
+            + QByteArrayLiteral("</month><day>") + QByteArray::number(day)
+            + QByteArrayLiteral("</day><hour>0</hour><minute>0</minute><second>0</second></startTime>")
+            + QByteArrayLiteral("<endTime><year>") + QByteArray::number(year)
+            + QByteArrayLiteral("</year><month>") + QByteArray::number(month)
+            + QByteArrayLiteral("</month><day>") + QByteArray::number(day)
+            + QByteArrayLiteral("</day><hour>23</hour><minute>59</minute><second>59</second></endTime>");
+        m_pending.addFuture(QtConcurrent::run(
+            [this, row, ch, date, year, month, dayStart, cameraName, params, time] {
+                QVariantList segments;
+                QVariantList days;
+                QVector<std::pair<qint64, qint64>> files;
+                QString error;
+                qint64 playbackOffset = 0;
+                BaichuanControl control(params);
+                quint16 status = 0;
+                QByteArray uidXml;
+                if (!control.open()) {
+                    error = tr("couldn't connect to the Baichuan device");
+                } else {
+                    uidXml = control.get(114, -1, &status);
+                    const int uidStart = uidXml.indexOf("<uid>");
+                    const int uidEnd = uidXml.indexOf("</uid>", uidStart);
+                    const QByteArray uid = uidStart >= 0 && uidEnd > uidStart
+                        ? uidXml.mid(uidStart + 5, uidEnd - uidStart - 5) : QByteArray();
+                    const QByteArray openRequest =
+                        QByteArrayLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n"
+                                          "<FileInfoList version=\"1.1\"><FileInfo><uid>")
+                        + uid + QByteArrayLiteral("</uid><searchAITrack>1</searchAITrack><channelId>")
+                        + QByteArray::number(ch)
+                        + QByteArrayLiteral("</channelId><logicChnBitmap>255</logicChnBitmap>"
+                                           "<streamType>mainStream</streamType><recordType>manual, sched, io, md, people, face, vehicle, dog_cat, visitor, other, package</recordType>")
+                        + time + QByteArrayLiteral("</FileInfo></FileInfoList></body>");
+                    const QByteArray openXml = control.transact(14, -1, openRequest, &status);
+                    qCInfo(lcProto) << params.host << "Baichuan recording search open: cmd" << 14
+                                    << "status" << status << "bytes" << openXml.size()
+                                    << "uidPresent" << !uid.isEmpty();
+                    const int handleStart = openXml.indexOf("<fileHandle>");
+                    const int handleEnd = openXml.indexOf("</fileHandle>", handleStart);
+                    const QByteArray handle = handleStart >= 0 && handleEnd > handleStart
+                        ? openXml.mid(handleStart + 12, handleEnd - handleStart - 12) : QByteArray();
+                    bcrecording::SearchResult parsed;
+                    if (handle.isEmpty()) {
+                        parsed = bcrecording::parseSearch(openXml);
+                        if (!parsed.ok) {
+                            error = parsed.error.isEmpty()
+                                ? tr("camera returned no recording search handle (status %1)")
+                                      .arg(status)
+                                : parsed.error;
+                        }
+                    } else {
+                        const QByteArray listRequest =
+                            QByteArrayLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>"
+                                              "<FileInfoList version=\"1.1\"><FileInfo><channelId>")
+                            + QByteArray::number(ch) + QByteArrayLiteral("</channelId><uid>")
+                            + uid + QByteArrayLiteral("</uid><searchAITrack>1</searchAITrack><handle>")
+                            + handle + QByteArrayLiteral("</handle></FileInfo></FileInfoList></body>");
+                        QByteArray listXml = control.transact(15, -1, listRequest, &status);
+                        for (int page = 0; page < 50; ++page) {
+                            parsed = bcrecording::parseSearch(listXml);
+                            const int finishedStart = listXml.indexOf("<bFinished>");
+                            const int finishedEnd = listXml.indexOf("</bFinished>", finishedStart);
+                            if (finishedStart < 0 || finishedEnd < 0
+                                || listXml.mid(finishedStart + 11,
+                                    finishedEnd - finishedStart - 11).trimmed() == "1")
+                                break;
+                            listXml = control.transact(16, -1, listRequest, &status);
+                        }
+                    }
+                    control.close();
+                    if (!parsed.ok)
+                        error = parsed.error.isEmpty() ? tr("recording search failed") : parsed.error;
+                    else {
+                        qCInfo(lcProto) << params.host << "Baichuan recording search: channel"
+                                        << ch << "status" << status << "segments"
+                                        << parsed.segments.size() << "directReply"
+                                        << handle.isEmpty();
+                        bool haveOffset = false;
+                        for (const bcrecording::Segment &segment : parsed.segments) {
+                            if (!haveOffset && segment.playbackStart.isValid()) {
+                                playbackOffset = segment.start.secsTo(segment.playbackStart);
+                                haveOffset = true;
+                            }
+                            const qint64 startEpoch = bcrecording::wallClockToEpoch(segment.start);
+                            const qint64 endEpoch = bcrecording::wallClockToEpoch(segment.end);
+                            const qint64 localStart = dayStart.toSecsSinceEpoch();
+                            const qint64 clippedStart = qMax(startEpoch, localStart);
+                            const qint64 clippedEnd = qMin(endEpoch, localStart + 86400);
+                            if (clippedEnd <= clippedStart)
+                                continue;
+                            QVariantMap item;
+                            item[QStringLiteral("start")] = static_cast<double>(clippedStart - localStart);
+                            item[QStringLiteral("end")] = static_cast<double>(clippedEnd - localStart);
+                            item[QStringLiteral("type")] = segment.type.isEmpty() ? QStringLiteral("timer") : segment.type;
+                            item[QStringLiteral("name")] = segment.name.isEmpty() ? cameraName : segment.name;
+                            item[QStringLiteral("startEpoch")] = static_cast<double>(clippedStart);
+                            segments.append(item);
+                            files.append({startEpoch, endEpoch});
+                        }
+                        if (!segments.isEmpty())
+                            days.append(date.day());
+                    }
+                }
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, row, segments, days, date, year, month, error, playbackOffset, files] {
+                        if (row >= 0 && row < m_entries.size()) {
+                            m_entries[row].playbackOffsetSecs = playbackOffset;
+                            m_entries[row].recordingFiles = files;
+                        }
+                        if (error.isEmpty()) {
+                            emit recordingsFound(row, segments);
+                            emit recordingDaysFound(row, year, month, days);
+                        } else {
+                            emit recordingsFailed(row, error);
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }));
+        return;
+    }
+    auto client = clientFor(row);
+    if (!client) {
         emit recordingsFailed(row, tr("device not ready"));
         return;
     }
@@ -1812,16 +1959,71 @@ void DeviceManager::fetchBcConfig(int row, int cmdId, const QString &reqBody)
     p.username = e.rec.username;
     p.password = e.password;
     const int ch = e.channel;
+    const bool isBaichuan = e.rec.transport == QLatin1String("baichuan");
     const QByteArray body = reqBody.toUtf8();
-    m_pending.addFuture(QtConcurrent::run([this, row, cmdId, p, ch, body] {
+    m_pending.addFuture(QtConcurrent::run([this, row, cmdId, p, ch, body, isBaichuan] {
         QVariantMap m;
+        bcsettings::Result structured;
+        const bcsettings::Schema *schema = bcsettings::schemaFor(static_cast<quint32>(cmdId));
         BaichuanControl bc(p);
         if (bc.open()) {
-            m = bc.getConfigFlat(static_cast<quint32>(cmdId), ch, body);
+            if (schema && body.isEmpty()) {
+                structured = bc.getConfig(*schema, ch);
+                m = structured.fields;
+            } else {
+                // AI detection GETs carry a type-specific request body and use
+                // the same schema with a caller-supplied request body.
+                quint16 status = 0;
+                const QByteArray xml = bc.transact(static_cast<quint32>(cmdId), ch, body, &status);
+                if (schema)
+                    structured = bcsettings::parse(xml, status, *schema);
+                m = structured.fields;
+            }
             bc.close();
+        } else if (schema) {
+            structured.transport = true;
+            structured.error = QStringLiteral("couldn't open Baichuan session");
+        }
+        if (isBaichuan) {
+            if (structured.ok) {
+                qCInfo(lcProto) << p.host << "Baichuan settings received: cmd" << cmdId
+                                << "channel" << ch << "status" << structured.status
+                                << "fields" << structured.fields
+                                << "unknownFields" << structured.unknownFields.keys();
+            } else {
+                qCWarning(lcProto) << p.host << "Baichuan settings failed: cmd" << cmdId
+                                   << "channel" << ch << "transport" << structured.transport
+                                   << "protocol" << structured.protocol << "status"
+                                   << structured.status << structured.error;
+            }
         }
         QMetaObject::invokeMethod(
-            this, [this, row, cmdId, m] { emit bcConfigLoaded(row, cmdId, m); },
+            this, [this, row, cmdId, m, structured] {
+                if (cmdId == 80 && m.contains(QStringLiteral("name"))) {
+                    const QString name = m.value(QStringLiteral("name")).toString().trimmed();
+                    if (!name.isEmpty() && row >= 0 && row < m_entries.size()) {
+                        const qint64 hostId = m_entries.at(row).rec.id;
+                        const QString oldName = m_entries.at(row).rec.name;
+                        for (int i = 0; i < m_entries.size(); ++i) {
+                            if (m_entries.at(i).rec.id != hostId)
+                                continue;
+                            if (m_entries.at(i).chanName.isEmpty()
+                                || m_entries.at(i).chanName == oldName
+                                || m_entries.at(i).chanName == m_entries.at(i).rec.addr)
+                                m_entries[i].chanName = name;
+                            m_entries[i].rec.name = name;
+                        }
+                        HostRecord updated = m_entries.at(row).rec;
+                        m_db->updateHost(updated);
+                        emit dataChanged(index(0), index(m_entries.size() - 1));
+                    }
+                }
+                emit bcConfigLoaded(row, cmdId, m);
+                if (structured.status != 0 || !structured.error.isEmpty())
+                    emit bcSettingsLoaded(row, cmdId, structured.ok, structured.transport,
+                                          structured.protocol, structured.status,
+                                          structured.fields, structured.unknownFields);
+            },
             Qt::QueuedConnection);
     }));
 }
@@ -1837,6 +2039,7 @@ void DeviceManager::writeBcConfig(int row, int getCmd, int setCmd, const QVarian
         emit settingApplied(row, label, false, tr("requires an administrator account"));
         return;
     }
+    emit settingStarted(row, label);
     BaichuanControl::Params p;
     p.host = e.rec.addr;
     p.username = e.rec.username;
@@ -1845,16 +2048,42 @@ void DeviceManager::writeBcConfig(int row, int getCmd, int setCmd, const QVarian
     const QByteArray body = reqBody.toUtf8();
     m_pending.addFuture(QtConcurrent::run(
         [this, row, getCmd, setCmd, p, ch, changes, body, label] {
+            QMutexLocker locker(&m_bcWriteMutex);
             BaichuanControl bc(p);
-            const bool ok = bc.open()
-                && bc.writeFields(static_cast<quint32>(getCmd), static_cast<quint32>(setCmd), ch,
-                                  changes, body);
+            const bcsettings::Schema *known =
+                bcsettings::schemaFor(static_cast<quint32>(getCmd));
+            bcsettings::WriteResult result;
+            if (!known) {
+                result.protocol = true;
+                result.error = QStringLiteral("unsupported Baichuan settings command");
+            } else if (!bc.open()) {
+                switch (bc.lastFailure()) {
+                case BaichuanControl::FailureKind::Auth:
+                    result.auth = true;
+                    result.error = QStringLiteral("invalid Baichuan username or password");
+                    break;
+                case BaichuanControl::FailureKind::Locked:
+                    result.locked = true;
+                    result.error = QStringLiteral("Baichuan login is locked");
+                    break;
+                case BaichuanControl::FailureKind::Protocol:
+                    result.protocol = true;
+                    result.error = QStringLiteral("unexpected Baichuan reply");
+                    break;
+                default:
+                    result.transport = true;
+                    result.error = QStringLiteral("couldn't open Baichuan session");
+                    break;
+                }
+            } else {
+                result = bc.writeConfig(*known, ch, changes, body);
+            }
             bc.close();
             QMetaObject::invokeMethod(
                 this,
-                [this, row, label, ok] {
-                    emit settingApplied(row, label, ok,
-                                        ok ? QString() : tr("couldn't reach the device"));
+                [this, row, label, result] {
+                    emit settingApplied(row, label, result.ok,
+                                        result.ok ? QString() : result.error);
                 },
                 Qt::QueuedConnection);
         }));

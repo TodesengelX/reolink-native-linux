@@ -3,6 +3,7 @@
 #include "protocol/BcCrypto.h"
 
 #include <QTcpSocket>
+#include <QList>
 #include <QXmlStreamReader>
 #include <QtEndian>
 
@@ -153,11 +154,27 @@ static bool recvMatch(QTcpSocket *sock, QByteArray &netBuf, quint32 wantCmd, Msg
     return false;
 }
 
+static bool recvMatchAny(QTcpSocket *sock, QByteArray &netBuf, const QList<quint32> &wantCmds,
+                         Msg &out)
+{
+    for (int i = 0; i < 40; ++i) {
+        while (parseMessage(netBuf, out))
+            if (wantCmds.contains(out.cmdId))
+                return true;
+        if (!sock->waitForReadyRead(300))
+            continue;
+        netBuf.append(sock->readAll());
+    }
+    return false;
+}
+
 bool BaichuanControl::open()
 {
+    m_lastFailure = FailureKind::None;
     m_sock = std::make_unique<QTcpSocket>();
     m_sock->connectToHost(m_p.host, static_cast<quint16>(m_p.port));
     if (!m_sock->waitForConnected(5000)) {
+        m_lastFailure = FailureKind::Transport;
         m_sock.reset();
         return false;
     }
@@ -167,6 +184,7 @@ bool BaichuanControl::open()
     m_sock->flush();
     Msg nonceMsg;
     if (!recvMatch(m_sock.get(), m_netBuf, 1, nonceMsg)) {
+        m_lastFailure = FailureKind::Protocol;
         close();
         return false;
     }
@@ -174,6 +192,7 @@ bool BaichuanControl::open()
     const int a = nonceXml.indexOf("<nonce>");
     const int z = nonceXml.indexOf("</nonce>");
     if (a < 0 || z < 0) {
+        m_lastFailure = FailureKind::Protocol;
         close();
         return false;
     }
@@ -194,10 +213,12 @@ bool BaichuanControl::open()
     m_sock->flush();
     Msg loginReply;
     if (!recvMatch(m_sock.get(), m_netBuf, 1, loginReply)) {
+        m_lastFailure = FailureKind::Transport;
         close();
         return false;
     }
     if (loginReply.status != 200) {
+        m_lastFailure = loginReply.status == 403 ? FailureKind::Locked : FailureKind::Auth;
         close();
         return false;
     }
@@ -226,6 +247,13 @@ static QByteArray decryptReply(const Msg &m, const QByteArray &key)
 QByteArray BaichuanControl::transact(quint32 cmdId, int channel, const QByteArray &bodyXml,
                                      quint16 *statusOut)
 {
+    return transactReply(cmdId, cmdId, channel, bodyXml, statusOut);
+}
+
+QByteArray BaichuanControl::transactReply(quint32 requestCmd, quint32 responseCmd,
+                                          int channel, const QByteArray &bodyXml,
+                                          quint16 *statusOut)
+{
     if (!isOpen())
         return {};
     const quint8 chId = channel < 0 ? 250 : static_cast<quint8>(channel + 1);
@@ -235,14 +263,38 @@ QByteArray BaichuanControl::transact(quint32 cmdId, int channel, const QByteArra
         bodyXml.isEmpty() ? QByteArray() : bc::aesCfb(bodyXml, m_aesKey, false);
     const quint32 messId = (++m_messId) & 0xFFFFFF;
 
-    m_sock->write(modernMessage(cmdId, chId, messId, encExt, encBody));
+    m_sock->write(modernMessage(requestCmd, chId, messId, encExt, encBody));
     m_sock->flush();
 
     Msg reply;
-    if (!recvMatch(m_sock.get(), m_netBuf, cmdId, reply))
+    if (!recvMatch(m_sock.get(), m_netBuf, responseCmd, reply))
         return {};
     if (statusOut)
         *statusOut = reply.status;
+    return decryptReply(reply, m_aesKey);
+}
+
+QByteArray BaichuanControl::transactReplyAny(quint32 requestCmd,
+                                             const QList<quint32> &responseCmds,
+                                             int channel, const QByteArray &bodyXml,
+                                             quint16 *statusOut, quint32 *matchedCmd)
+{
+    if (!isOpen() || responseCmds.isEmpty())
+        return {};
+    const quint8 chId = channel < 0 ? 250 : static_cast<quint8>(channel + 1);
+    const QByteArray ext = channel < 0 ? QByteArray() : channelExtension(channel);
+    const QByteArray encExt = ext.isEmpty() ? QByteArray() : bc::aesCfb(ext, m_aesKey, false);
+    const QByteArray encBody = bodyXml.isEmpty() ? QByteArray() : bc::aesCfb(bodyXml, m_aesKey, false);
+    const quint32 messId = (++m_messId) & 0xFFFFFF;
+    m_sock->write(modernMessage(requestCmd, chId, messId, encExt, encBody));
+    m_sock->flush();
+    Msg reply;
+    if (!recvMatchAny(m_sock.get(), m_netBuf, responseCmds, reply))
+        return {};
+    if (statusOut)
+        *statusOut = reply.status;
+    if (matchedCmd)
+        *matchedCmd = reply.cmdId;
     return decryptReply(reply, m_aesKey);
 }
 
@@ -295,6 +347,58 @@ QVariantMap BaichuanControl::getConfigFlat(quint32 cmdId, int channel, const QBy
         }
     }
     return out;
+}
+
+bcsettings::Result BaichuanControl::getConfig(const bcsettings::Schema &schema, int channel)
+{
+    if (schema.scope == bcsettings::ChannelScope::Host)
+        channel = -1;
+    quint16 status = 0;
+    const QByteArray xml = transact(schema.getCommand, channel, schema.requestBody, &status);
+    return bcsettings::parse(xml, status, schema);
+}
+
+bcsettings::WriteResult BaichuanControl::writeConfig(const bcsettings::Schema &schema,
+                                                     int channel,
+                                                     const QVariantMap &changes,
+                                                     const QByteArray &getBody)
+{
+    bcsettings::WriteResult result;
+    if (!bcsettings::validateChanges(schema.getCommand, changes, &result.error)) {
+        result.protocol = true;
+        return result;
+    }
+    if (schema.scope == bcsettings::ChannelScope::Host)
+        channel = -1;
+    if (!isOpen()) {
+        switch (m_lastFailure) {
+        case FailureKind::Auth:
+            result.auth = true;
+            result.error = QStringLiteral("invalid Baichuan username or password");
+            break;
+        case FailureKind::Locked:
+            result.locked = true;
+            result.error = QStringLiteral("Baichuan login is locked");
+            break;
+        case FailureKind::Protocol:
+            result.protocol = true;
+            result.error = QStringLiteral("unexpected Baichuan reply");
+            break;
+        default:
+            result.transport = true;
+            result.error = QStringLiteral("Baichuan session is not open");
+            break;
+        }
+        return result;
+    }
+    const bool ok = writeFields(schema.getCommand, schema.setCommand, channel, changes,
+                                getBody.isEmpty() ? schema.requestBody : getBody);
+    result.ok = ok;
+    if (!ok) {
+        result.deviceRejected = true;
+        result.error = QStringLiteral("device rejected Baichuan settings");
+    }
+    return result;
 }
 
 bool BaichuanControl::writeFields(quint32 getCmdId, quint32 setCmdId, int channel,

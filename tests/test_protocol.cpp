@@ -1,6 +1,8 @@
 #include "media/BcMediaParser.h"
 #include "protocol/BcCrypto.h"
 #include "protocol/BaichuanSession.h"
+#include "protocol/BaichuanSettings.h"
+#include "protocol/BaichuanRecording.h"
 #include "protocol/ReolinkApi.h"
 
 #include <QtTest>
@@ -48,10 +50,104 @@ private slots:
         QCOMPARE(info.subSize, QSize(640, 360));
     }
 
+    void baichuanDeviceInfoAdminMarker()
+    {
+        const QByteArray xml = R"(<body><DeviceInfo><name>Porch</name><userLevel>admin</userLevel>
+            </DeviceInfo></body>)";
+        QVERIFY(BaichuanSession::parseDeviceInfo(xml).isAdmin);
+    }
+
     void baichuanPasswordHashIs31Chars()
     {
         const QByteArray hash = bc::modernHash(QString(80, u'x'), QStringLiteral("nonce"));
         QCOMPARE(hash.size(), 31);
+    }
+
+    void baichuanSettingsSchemaParsesUnknownFields()
+    {
+        const auto *schema = rl::bcsettings::schemaFor(26);
+        QVERIFY(schema);
+        QCOMPARE(schema->setCommand, quint32(25));
+        const auto result = rl::bcsettings::parse(
+            R"(<body><Image><bright>120</bright><newFirmwareLeaf>x</newFirmwareLeaf></Image></body>)",
+            200, *schema);
+        QVERIFY(result.ok);
+        QVERIFY(!result.transport);
+        QVERIFY(!result.protocol);
+        QCOMPARE(result.fields.value("bright").toString(), QStringLiteral("120"));
+        QCOMPARE(result.unknownFields.value("newFirmwareLeaf").toString(), QStringLiteral("x"));
+    }
+
+    void baichuanSettingsSchemaRejectsMalformedReply()
+    {
+        const auto *schema = rl::bcsettings::schemaFor(54);
+        QVERIFY(schema);
+        const auto result = rl::bcsettings::parse("<body><Rec>", 200, *schema);
+        QVERIFY(!result.ok);
+        QVERIFY(result.protocol);
+        QVERIFY(!result.error.isEmpty());
+    }
+
+    void baichuanSettingsValidateWrites()
+    {
+        QString error;
+        QVERIFY(rl::bcsettings::validateChanges(26, {{"bright", 255}}, &error));
+        QVERIFY(!rl::bcsettings::validateChanges(26, {{"bright", 256}}, &error));
+        QVERIFY(error.contains(QStringLiteral("bright")));
+        QVERIFY(rl::bcsettings::validateChanges(
+            46, {{"valueTable", QStringLiteral("AA==")}}, &error));
+        QVERIFY(rl::bcsettings::validateChanges(
+            46, {{"sensitivityInfoList//sensitivity", 50}}, &error));
+        QVERIFY(!rl::bcsettings::validateChanges(342, {{"sensitivity", 101}}, &error));
+    }
+
+    void baichuanRecordingSearchParsesAndConverts()
+    {
+        const auto parsed = rl::bcrecording::parseSearch(
+            R"(<body><FileInfo><startTime>2026-08-28 10:00:00</startTime>
+                <endTime>2026-08-28 10:15:00</endTime><playbackTime>2026-08-28 09:59:30</playbackTime>
+                <recordType>motion</recordType><cameraName>West</cameraName></FileInfo></body>)");
+        QVERIFY(parsed.ok);
+        QCOMPARE(parsed.segments.size(), 1);
+        QCOMPARE(parsed.segments.first().type, QStringLiteral("motion"));
+        QCOMPARE(rl::bcrecording::wallClockToEpoch(parsed.segments.first().start, 30),
+                 QDateTime(QDate(2026, 8, 28), QTime(9, 59, 30)).toSecsSinceEpoch());
+        QCOMPARE(rl::bcrecording::epochToCameraTime(
+                     rl::bcrecording::wallClockToEpoch(parsed.segments.first().start, 30), 30),
+                 parsed.segments.first().start);
+    }
+
+    void baichuanRecordingSearchToleratesEmptyAndMalformed()
+    {
+        QVERIFY(!rl::bcrecording::parseSearch({}).ok);
+        QVERIFY(!rl::bcrecording::parseSearch("<body><FileInfo>").ok);
+        const auto empty = rl::bcrecording::parseSearch(
+            "<body><FileInfoList></FileInfoList></body>");
+        QVERIFY(empty.ok);
+        QVERIFY(empty.segments.isEmpty());
+    }
+
+    void baichuanRecordingSearchDirectReplyWithoutHandle()
+    {
+        const auto parsed = rl::bcrecording::parseSearch(
+            R"(<body><FileInfoList version="1.1"><FileInfo><startTime>2026-08-28 10:00:00</startTime><endTime>2026-08-28 10:15:00</endTime><recordType>motion</recordType><cameraName>West</cameraName></FileInfo></FileInfoList></body>)");
+        QVERIFY(parsed.ok);
+        QCOMPARE(parsed.segments.size(), 1);
+        QCOMPARE(parsed.segments.first().type, QStringLiteral("motion"));
+    }
+
+    void baichuanRecordingSearchParsesComponentTimes()
+    {
+        const auto parsed = rl::bcrecording::parseSearch(
+            R"(<body><FileInfo><startTime><year>2026</year><month>8</month><day>28</day>
+                <hour>10</hour><minute>0</minute><second>0</second></startTime>
+                <endTime><year>2026</year><month>8</month><day>28</day>
+                <hour>10</hour><minute>1</minute><second>0</second></endTime>
+                <type>timer</type></FileInfo></body>)");
+        QVERIFY(parsed.ok);
+        QCOMPARE(parsed.segments.size(), 1);
+        QCOMPARE(parsed.segments.first().start.time(), QTime(10, 0, 0));
+        QCOMPARE(parsed.segments.first().end.time(), QTime(10, 1, 0));
     }
 
     void apiUrlBuilding()

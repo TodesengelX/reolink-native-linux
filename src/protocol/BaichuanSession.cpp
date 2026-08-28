@@ -185,6 +185,11 @@ BaichuanSession::DeviceInfo parseLoginDeviceInfoImpl(const QByteArray &xml)
                 else if (tag == QLatin1String("analogChnNum") && out.channelNum <= 1)
                     out.channelNum = qMax(1, text.toInt());
             }
+            if (tag == QLatin1String("userLevel") || tag == QLatin1String("userType")
+                || tag == QLatin1String("privilege") || tag == QLatin1String("authority")) {
+                out.isAdmin = text.compare(QStringLiteral("admin"), Qt::CaseInsensitive) == 0
+                              || text == QLatin1String("0") || text == QLatin1String("1");
+            }
             if (inEncodeTable) {
                 if (tag == QLatin1String("type"))
                     encodeType = text;
