@@ -172,7 +172,7 @@ Rectangle {
             id: video
             anchors.fill: parent
             fillMode: VideoOutput.PreserveAspectFit
-            visible: root.streaming
+            visible: player.framesDecoded > 0
             orientation: root.viewRotation
             transform: [
                 Scale {

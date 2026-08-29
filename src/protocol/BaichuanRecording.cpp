@@ -134,6 +134,15 @@ SearchResult parseSearch(const QByteArray &xml)
                         fields, {QStringLiteral("endTime"), QStringLiteral("end")},
                         QStringLiteral("endTime"));
                     if (start.isValid() && end.isValid() && end > start) {
+                        // Skip search summaries: they have a <handle> but no filename.
+                        const QString name = leafText(fields, {QStringLiteral("name"),
+                                                              QStringLiteral("fileName")});
+                        if (fields.contains(QLatin1String("handle")) && name.isEmpty()) {
+                            fields.clear();
+                            inFile = false;
+                            continue;
+                        }
+
                         Segment segment;
                         segment.start = start;
                         segment.end = end;
@@ -149,6 +158,10 @@ SearchResult parseSearch(const QByteArray &xml)
                         if (!segment.playbackStart.isValid())
                             segment.playbackStart = filenameTimestamp(
                                 leafText(fields, {QStringLiteral("fileName")}));
+                        
+                        // Log the raw segment data
+                        // qCInfo(lcProto) is not available here, using printf for now or I can include Log.h
+                        // Actually, I'll just return it and let DeviceManager log it.
                         result.segments.append(segment);
                     }
                     fields.clear();

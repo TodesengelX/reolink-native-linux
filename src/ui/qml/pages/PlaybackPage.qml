@@ -236,7 +236,18 @@ Item {
     Timer {
         interval: 1000; repeat: true
         running: player.state === StreamPlayer.Streaming || page.streamingPanes > 0
-        onTriggered: if (page.playheadSecs < 86399) page.playheadSecs += 1
+        onTriggered: {
+            if (page.playheadSecs < 86399) {
+                // In 4-camera mode, only advance if at least half the assigned panes are streaming
+                // to prevent the timeline from drifting too far during heavy buffering.
+                var activeAssigned = 0;
+                for (var i = 0; i < 4; i++) if (page.gridRows[i] >= 0) activeAssigned++;
+
+                if (page.paneCount === 1 || page.streamingPanes >= Math.max(1, activeAssigned / 2)) {
+                    page.playheadSecs += 1;
+                }
+            }
+        }
     }
 
     function refresh() {
@@ -632,7 +643,7 @@ Item {
                         id: video
                         anchors.fill: parent
                         fillMode: VideoOutput.PreserveAspectFit
-                        visible: player.state === StreamPlayer.Streaming
+                        visible: player.framesDecoded > 0
                         orientation: page.camRotation
                         transform: [
                             Scale {

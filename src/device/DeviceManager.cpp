@@ -1085,19 +1085,34 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
                         + uid + QByteArrayLiteral("</uid><searchAITrack>1</searchAITrack><channelId>")
                         + QByteArray::number(ch)
                         + QByteArrayLiteral("</channelId><logicChnBitmap>255</logicChnBitmap>"
-                                           "<streamType>mainStream</streamType><recordType>manual, sched, io, md, people, face, vehicle, dog_cat, visitor, other, package</recordType>")
+                                           "<streamType>mainStream</streamType><recordType>manual,sched,io,md,people,face,vehicle,dog_cat,visitor,other,package</recordType>")
                         + time + QByteArrayLiteral("</FileInfo></FileInfoList></body>");
                     const QByteArray openXml = control.transact(14, -1, openRequest, &status);
                     qCInfo(lcProto) << params.host << "Baichuan recording search open: cmd" << 14
                                     << "status" << status << "bytes" << openXml.size()
                                     << "uidPresent" << !uid.isEmpty();
-                    const int handleStart = openXml.indexOf("<fileHandle>");
-                    const int handleEnd = openXml.indexOf("</fileHandle>", handleStart);
+                    int handleStart = openXml.indexOf("<fileHandle>");
+                    int tagLen = 12;
+                    if (handleStart < 0) {
+                        handleStart = openXml.indexOf("<handle>");
+                        tagLen = 8;
+                    }
+                    const int handleEnd = handleStart >= 0 ? openXml.indexOf("</", handleStart) : -1;
                     const QByteArray handle = handleStart >= 0 && handleEnd > handleStart
-                        ? openXml.mid(handleStart + 12, handleEnd - handleStart - 12) : QByteArray();
+                        ? openXml.mid(handleStart + tagLen, handleEnd - handleStart - tagLen).trimmed()
+                        : QByteArray();
                     bcrecording::SearchResult parsed;
+                    bcrecording::SearchResult totalParsed;
+                    totalParsed.ok = true;
+
+                    // Check if the initial openXml had recordings
+                    bcrecording::SearchResult openParsed = bcrecording::parseSearch(openXml);
+                    if (openParsed.ok && !openParsed.segments.isEmpty()) {
+                        totalParsed.segments.append(openParsed.segments);
+                    }
+
                     if (handle.isEmpty()) {
-                        parsed = bcrecording::parseSearch(openXml);
+                        parsed = openParsed;
                         if (!parsed.ok) {
                             error = parsed.error.isEmpty()
                                 ? tr("camera returned no recording search handle (status %1)")
@@ -1105,23 +1120,51 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
                                 : parsed.error;
                         }
                     } else {
-                        const QByteArray listRequest =
-                            QByteArrayLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>"
-                                              "<FileInfoList version=\"1.1\"><FileInfo><channelId>")
-                            + QByteArray::number(ch) + QByteArrayLiteral("</channelId><uid>")
-                            + uid + QByteArrayLiteral("</uid><searchAITrack>1</searchAITrack><handle>")
-                            + handle + QByteArrayLiteral("</handle></FileInfo></FileInfoList></body>");
-                        QByteArray listXml = control.transact(15, -1, listRequest, &status);
-                        for (int page = 0; page < 50; ++page) {
+                        QByteArray currentHandle = handle;
+                        for (int page = 0; page < 100; ++page) {
+                            const QByteArray listRequest =
+                                QByteArrayLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>"
+                                                  "<FileInfoList version=\"1.1\"><FileInfo><channelId>")
+                                + QByteArray::number(ch) + QByteArrayLiteral("</channelId><uid>")
+                                + uid + QByteArrayLiteral("</uid><searchAITrack>1</searchAITrack><handle>")
+                                + currentHandle + QByteArrayLiteral("</handle></FileInfo></FileInfoList></body>");
+
+                            QByteArray listXml = control.transact(15, -1, listRequest, &status);
                             parsed = bcrecording::parseSearch(listXml);
+                            qCInfo(lcProto) << params.host << "Baichuan search page" << page << "ok" << parsed.ok << "segments" << parsed.segments.size();
+
+                            if (parsed.ok && !parsed.segments.isEmpty()) {
+                                totalParsed.segments.append(parsed.segments);
+                            } else {
+                                if (!parsed.ok) {
+                                    totalParsed.ok = false;
+                                    totalParsed.error = parsed.error;
+                                }
+                                break;
+                            }
+
                             const int finishedStart = listXml.indexOf("<bFinished>");
                             const int finishedEnd = listXml.indexOf("</bFinished>", finishedStart);
-                            if (finishedStart < 0 || finishedEnd < 0
-                                || listXml.mid(finishedStart + 11,
-                                    finishedEnd - finishedStart - 11).trimmed() == "1")
+                            if (finishedStart >= 0 && finishedEnd > finishedStart
+                                && listXml.mid(finishedStart + 11, finishedEnd - finishedStart - 11).trimmed() == "1")
                                 break;
-                            listXml = control.transact(16, -1, listRequest, &status);
+
+                            // Update handle for next page
+                            int hStart = listXml.indexOf("<handle>");
+                            if (hStart < 0) hStart = listXml.indexOf("<fileHandle>");
+                            if (hStart >= 0) {
+                                int hEnd = listXml.indexOf("</", hStart);
+                                if (hEnd > hStart) {
+                                    int tagLen = listXml.at(hStart + 1) == 'f' ? 12 : 8;
+                                    currentHandle = listXml.mid(hStart + tagLen, hEnd - hStart - tagLen).trimmed();
+                                }
+                            }
+
+                            // If we got fewer than 40 segments, it's likely the last page
+                            if (parsed.segments.size() < 40)
+                                break;
                         }
+                        parsed = totalParsed;
                     }
                     control.close();
                     if (!parsed.ok)
@@ -1130,9 +1173,10 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
                         qCInfo(lcProto) << params.host << "Baichuan recording search: channel"
                                         << ch << "status" << status << "segments"
                                         << parsed.segments.size() << "directReply"
-                                        << handle.isEmpty();
+                                        << handle.isEmpty() << "offset" << playbackOffset;
                         bool haveOffset = false;
                         for (const bcrecording::Segment &segment : parsed.segments) {
+                            qCInfo(lcProto) << params.host << "Segment:" << segment.start.toString() << "to" << segment.end.toString() << "pbStart" << segment.playbackStart.toString() << "name" << segment.name;
                             if (!haveOffset && segment.playbackStart.isValid()) {
                                 playbackOffset = segment.start.secsTo(segment.playbackStart);
                                 haveOffset = true;
@@ -1442,7 +1486,7 @@ void DeviceManager::startBaichuan(int row, qint64 startEpoch, StreamPlayer *play
     p.channel = e.channel;
     p.uid = e.uid;
     p.mainStream = mainStream;
-    p.startEpoch = startEpoch; // <= 0 = live (cmd 3 Preview), else by-time playback
+    p.startEpoch = startEpoch > 0 ? startEpoch + e.playbackOffsetSecs : 0; // <= 0 = live (cmd 3 Preview), else by-time playback
 
     auto client = std::make_shared<BaichuanClient>(p);
     client->start();
