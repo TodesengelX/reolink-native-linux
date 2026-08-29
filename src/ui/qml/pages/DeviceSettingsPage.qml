@@ -17,10 +17,20 @@ Item {
     property bool isAdmin: false
     property string status: ""
 
+    function syncAdmin() {
+        page.isAdmin = page.deviceRow >= 0 ? Devices.isAdminAt(page.deviceRow) : false;
+    }
+
     // Called from the sidebar's Settings action: focus this device row.
     function showDevice(row) {
-        if (row >= 0 && row < Devices.count)
+        if (row >= 0 && row < Devices.count) {
             deviceCombo.currentIndex = row;
+            page.syncAdmin();
+            // If the requested row is already selected, ComboBox emits no
+            // change signal; explicitly load the initial category.
+            if (page.deviceRow === row)
+                page.fetch();
+        }
     }
 
     readonly property var categories: [
@@ -75,9 +85,12 @@ Item {
             // commands — don't fire an empty fetchSettings (it reports "device not
             // ready"); their BC fetches below drive their own loading state.
             var httpCmds = cmdsFor(page.category);
-            page.status = httpCmds.length > 0 ? qsTr("Loading…") : "";
-            if (httpCmds.length > 0)
+            var isBaichuan = Devices.transportAt(page.deviceRow) === "baichuan";
+            page.status = httpCmds.length > 0 && !isBaichuan ? qsTr("Loading…") : "";
+            if (httpCmds.length > 0 && !isBaichuan)
                 Devices.fetchSettings(page.deviceRow, httpCmds);
+            if (isBaichuan && page.category === "system")
+                Devices.fetchBcConfig(page.deviceRow, 80);
             if (page.category === "detection") {
                 page.alerts = ({});
                 Devices.fetchAlerts(page.deviceRow);
@@ -116,6 +129,9 @@ Item {
 
     Connections {
         target: Devices
+        function onDataChanged() { page.syncAdmin(); }
+        function onCountChanged() { page.syncAdmin(); }
+        function onModelReset() { page.syncAdmin(); }
         function onSettingsLoaded(row, values) {
             if (row === page.deviceRow) {
                 page.settings = values;
@@ -126,6 +142,10 @@ Item {
         }
         function onSettingsFailed(row, error) {
             if (row === page.deviceRow) { page.fetched = true; page.status = error; }
+        }
+        function onSettingStarted(row, command) {
+            if (row === page.deviceRow)
+                page.status = qsTr("Saving %1…").arg(command);
         }
         function onSettingApplied(row, command, ok, error) {
             if (row !== page.deviceRow)
@@ -164,6 +184,14 @@ Item {
             if (cmdId === 26) {
                 page.img = values;
                 page.imgReady = true;
+            } else if (cmdId === 80) {
+                var info = Object.assign({}, values);
+                if (info.model === undefined && info.type !== undefined)
+                    info.model = info.type;
+                if (info.firmVer === undefined && info.firmware !== undefined)
+                    info.firmVer = info.firmware;
+                page.settings = ({ "GetDevInfo": { "DevInfo": info } });
+                page.fetched = true;
             } else if (cmdId === 342 && values.type !== undefined) {
                 var a = Object.assign({}, page.aiSens);
                 a[values.type] = values;

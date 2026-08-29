@@ -236,7 +236,18 @@ Item {
     Timer {
         interval: 1000; repeat: true
         running: player.state === StreamPlayer.Streaming || page.streamingPanes > 0
-        onTriggered: if (page.playheadSecs < 86399) page.playheadSecs += 1
+        onTriggered: {
+            if (page.playheadSecs < 86399) {
+                // In 4-camera mode, only advance if at least half the assigned panes are streaming
+                // to prevent the timeline from drifting too far during heavy buffering.
+                var activeAssigned = 0;
+                for (var i = 0; i < 4; i++) if (page.gridRows[i] >= 0) activeAssigned++;
+
+                if (page.paneCount === 1 || page.streamingPanes >= Math.max(1, activeAssigned / 2)) {
+                    page.playheadSecs += 1;
+                }
+            }
+        }
     }
 
     function refresh() {
@@ -327,6 +338,13 @@ Item {
         // Scrub against the sub stream: it is light and always landscape, so the
         // timeline stays responsive. (HD mode below plays the full-res main.)
         player.loop = false;
+        if (Devices.transportAt(page.deviceRow) === "baichuan") {
+            if (player.state === StreamPlayer.Streaming
+                && Devices.seekBaichuanPlayback(page.deviceRow, epochAt(sec)))
+                return;
+            Devices.startBaichuanPlayback(page.deviceRow, epochAt(sec), player, false);
+            return;
+        }
         var url = Devices.playbackUrl(page.deviceRow, epochAt(sec), false);
         if (url.length > 0) {
             player.expectedSize = Devices.declaredSize(page.deviceRow, false); // sub
@@ -625,7 +643,7 @@ Item {
                         id: video
                         anchors.fill: parent
                         fillMode: VideoOutput.PreserveAspectFit
-                        visible: player.state === StreamPlayer.Streaming
+                        visible: player.framesDecoded > 0
                         orientation: page.camRotation
                         transform: [
                             Scale {

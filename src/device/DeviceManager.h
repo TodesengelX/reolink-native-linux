@@ -14,6 +14,7 @@
 #include <QSet>
 #include <QSize>
 #include <QTimer>
+#include <QMutex>
 
 #include <memory>
 
@@ -70,6 +71,7 @@ public:
         ChannelRole,
         ProblemRole,
         RotationRole,
+        TransportRole,
     };
 
     DeviceManager(Database *db, CredentialStore *credentials, QObject *parent = nullptr);
@@ -113,6 +115,10 @@ public:
     // comparing this against the decoded frame size. Invalid if not yet primed.
     Q_INVOKABLE QSize declaredSize(int row, bool mainStream) const;
     Q_INVOKABLE QString nameAt(int row) const;
+    Q_INVOKABLE QString transportAt(int row) const
+    {
+        return row >= 0 && row < m_entries.size() ? m_entries.at(row).rec.transport : QString();
+    }
     Q_INVOKABLE int rowOfHost(qint64 hostId) const { return rowForHostId(hostId); }
     // The exact camera row for a host+channel (an NVR shares a host across cameras).
     Q_INVOKABLE int rowOfHostChannel(qint64 hostId, int channel) const
@@ -137,7 +143,7 @@ public:
     // Host-level summary (an NVR or a standalone camera), keyed by hostId — feeds
     // the sidebar's NVR header and the NVR properties dialog. Keys: name, kind,
     // model, addr, port, https, username, online, channelCount, onlineCount,
-    // isAdmin, firstRow.
+    // isAdmin, firstRow, transport.
     Q_INVOKABLE QVariantMap hostInfo(qint64 hostId) const;
     // Per-camera summary for the camera properties dialog. Keys: name, hostName,
     // hostId, channel, kind, model, codec, mainSize, subSize, uid, online, isAdmin,
@@ -252,9 +258,13 @@ signals:
     void clipExportFailed(int row, const QString &error);
     void settingsLoaded(int row, const QVariantMap &values);
     void settingsFailed(int row, const QString &error);
+    void settingStarted(int row, const QString &command);
     void settingApplied(int row, const QString &command, bool ok, const QString &error);
     void alertsLoaded(int row, const QVariantMap &values);
     void bcConfigLoaded(int row, int cmdId, const QVariantMap &values);
+    void bcSettingsLoaded(int row, int cmdId, bool ok, bool transport, bool protocol,
+                          int status, const QVariantMap &fields,
+                          const QVariantMap &unknownFields);
     void recScheduleLoaded(int row, const QVariantMap &values);
     // Emitted on each detection 0->1 transition (feeds the event inbox).
     void detectionEvent(qint64 hostId, int channel, const QString &type, const QString &camera);
@@ -275,7 +285,7 @@ private:
     // policy: Unreachable is auto-retried with backoff (device off, wrong IP,
     // network down — retrying is free); Auth/Locked are NEVER auto-retried,
     // because each rejected login burns the firmware's lockout counter.
-    enum class Problem { None, Connecting, Unreachable, Auth, Locked };
+    enum class Problem { None, Connecting, Unreachable, Auth, Locked, Protocol };
 
     struct Entry {
         HostRecord rec;    // host connection (shared across an NVR's channels)
@@ -360,6 +370,7 @@ private:
     QHash<QString, bool> m_pollInFlight;                 // avoid overlapping polls
     QHash<int, int> m_pushEnabled;  // row -> push enable (1/0/-1) for notif gating
     QHash<qint64, int> m_hostFails; // consecutive poll transport failures per host
+    QMutex m_bcWriteMutex;
     bool m_pushWarmed = false;      // one-time warm of the push cache after priming
 
     // Auto-retry of Unreachable hosts, driven by the poll tick. Backoff doubles

@@ -104,7 +104,7 @@ Rectangle {
             Layout.fillHeight: true
             model: Devices
             clip: true
-            spacing: 2
+            spacing: 1
 
             // Group channels under their host. The header renders only for NVRs
             // (a standalone camera is its own host — no redundant parent row).
@@ -143,7 +143,7 @@ Rectangle {
                     function onModelReset() { nvrHeader._rev++; }
                 }
                 width: ListView.view.width
-                height: isNvr ? 44 : 0
+                height: isNvr ? 48 : 0
                 visible: isNvr
                 color: nvrHover.hovered ? Theme.surfaceAlt : "transparent"
 
@@ -151,6 +151,8 @@ Rectangle {
                     anchors.fill: parent
                     anchors.leftMargin: Theme.spacing
                     anchors.rightMargin: Theme.spacing
+                    anchors.topMargin: 4
+                    anchors.bottomMargin: 4
                     spacing: 7
                     Text {
                         text: root.collapsed[nvrHeader.section] ? "▸" : "▾"
@@ -164,9 +166,11 @@ Rectangle {
                     }
                     ColumnLayout {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         spacing: 1
                         Text {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             text: nvrHeader.host ? nvrHeader.host.name : ""
                             color: Theme.text; font.pixelSize: 13; font.bold: true
                             elide: Text.ElideRight
@@ -181,6 +185,7 @@ Rectangle {
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
+                                width: nvrHeader.width - 68
                                 text: {
                                     var h = nvrHeader.host;
                                     // Never string-concat a not-yet-populated host
@@ -201,6 +206,14 @@ Rectangle {
                             }
                         }
                     }
+                }
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 1
+                    color: Theme.border
+                    opacity: 0.45
                 }
                 HoverHandler { id: nvrHover }
                 MouseArea {
@@ -260,7 +273,7 @@ Rectangle {
                 readonly property bool hidden: underNvr && root.collapsed[hostId] === true
 
                 width: ListView.view.width
-                height: hidden ? 0 : 48
+                height: hidden ? 0 : 54
                 visible: !hidden
                 clip: true
                 color: delegateArea.containsMouse ? Theme.surfaceAlt : "transparent"
@@ -282,9 +295,9 @@ Rectangle {
                     anchors.fill: parent
                     anchors.leftMargin: camRow.underNvr ? 30 : Theme.spacing
                     anchors.rightMargin: Theme.spacing
-                    anchors.topMargin: 4
-                    anchors.bottomMargin: 4
-                    spacing: Theme.spacing
+                    anchors.topMargin: 6
+                    anchors.bottomMargin: 6
+                    spacing: 8
 
                     DeviceGlyph {
                         kind: "cam"
@@ -293,9 +306,11 @@ Rectangle {
                     }
                     ColumnLayout {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         spacing: 2
                         Text {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             text: name
                             color: Theme.text
                             font.pixelSize: 13
@@ -358,6 +373,14 @@ Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
+                }
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 1
+                    color: Theme.border
+                    opacity: 0.3
                 }
 
                 // Dragged into a Live View cell to put this camera there. Lives in

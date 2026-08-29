@@ -4,6 +4,8 @@
 #include <QString>
 #include <QVariantMap>
 
+#include "BaichuanSettings.h"
+
 #include <cstdint>
 #include <memory>
 
@@ -27,6 +29,8 @@ namespace rl {
 class BaichuanControl
 {
 public:
+    enum class FailureKind { None, Transport, Auth, Locked, Protocol };
+
     struct Params {
         QString host;
         int port = 9000;
@@ -60,18 +64,32 @@ public:
     // detection selects an ai_type in an AiDetectCfg body).
     QVariantMap getConfigFlat(quint32 cmdId, int channel, const QByteArray &reqBody = {});
 
+    // Typed settings read. Firmware-specific leaves remain in unknownFields.
+    bcsettings::Result getConfig(const bcsettings::Schema &schema, int channel);
+
     // Read-modify-write several leaf tags in one config: GET, replace each
     // <tag>…</tag> (first occurrence) with its new value, SET. Returns true on a
     // success status. getBody is the optional GET request body (see above).
     bool writeFields(quint32 getCmdId, quint32 setCmdId, int channel,
                      const QVariantMap &changes, const QByteArray &getBody = {});
+    bcsettings::WriteResult writeConfig(const bcsettings::Schema &schema, int channel,
+                                        const QVariantMap &changes,
+                                        const QByteArray &getBody = {});
 
     // Low-level: send a raw (plaintext) XML body to cmdId and return the decrypted
     // reply. bodyXml empty => header-only GET. Used by the helpers above.
     QByteArray transact(quint32 cmdId, int channel, const QByteArray &bodyXml,
                         quint16 *statusOut = nullptr);
+    // Send requestCmd and wait for the protocol's responseCmd. Recording search
+    // uses request 14 followed by a file-list response 15 on some firmware.
+    QByteArray transactReply(quint32 requestCmd, quint32 responseCmd, int channel,
+                             const QByteArray &bodyXml, quint16 *statusOut = nullptr);
+    QByteArray transactReplyAny(quint32 requestCmd, const QList<quint32> &responseCmds,
+                                int channel, const QByteArray &bodyXml,
+                                quint16 *statusOut = nullptr, quint32 *matchedCmd = nullptr);
 
     bool isOpen() const;
+    FailureKind lastFailure() const { return m_lastFailure; }
 
 private:
     Params m_p;
@@ -79,6 +97,7 @@ private:
     QByteArray m_aesKey;
     QByteArray m_netBuf;      // socket bytes buffered past the last parsed reply
     quint32 m_messId = 0;     // per-connection RPC counter
+    FailureKind m_lastFailure = FailureKind::None;
 };
 
 } // namespace rl
