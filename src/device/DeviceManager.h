@@ -61,7 +61,10 @@ public:
         HasZoomRole,
         HasAudioRole,
         HasSirenRole,
-        HasFloodlightRole,
+        HasLightRole,
+        LightOnRole,
+        LightTypeRole,
+        HasLightBrightnessRole,
         HasBatteryRole,
         HasTalkRole,
         IsAdminRole,
@@ -141,7 +144,9 @@ public:
     Q_INVOKABLE QVariantMap hostInfo(qint64 hostId) const;
     // Per-camera summary for the camera properties dialog. Keys: name, hostName,
     // hostId, channel, kind, model, codec, mainSize, subSize, uid, online, isAdmin,
-    // and cap* booleans (ptz/zoom/audio/siren/floodlight/battery/talk).
+    // and cap* booleans (ptz/zoom/audio/siren/light/lightBrightness/battery/talk),
+    // plus lightOn, effective lightType, and raw reportedLightType. capLight is
+    // true only for positively established physical visible illumination.
     Q_INVOKABLE QVariantMap cameraInfo(int row) const;
     // Distinct host ids in list order (NVRs and standalone cameras), for grouping.
     Q_INVOKABLE QVariantList hostIds() const;
@@ -191,10 +196,15 @@ public:
     // of cmd -> value) and apply one Set* command (emits settingApplied).
     Q_INVOKABLE void fetchSettings(int row, const QStringList &getCommands);
     Q_INVOKABLE void applySetting(int row, const QString &setCommand, const QVariantMap &param);
-    // Toggle the camera's white-LED / floodlight on<->off. Reads GetWhiteLed first
-    // so only the on/off state flips, leaving brightness and the auto/schedule mode
-    // untouched. Emits settingApplied("SetWhiteLed", ...) for UI feedback.
-    Q_INVOKABLE void toggleFloodlight(int row);
+    // Toggle a positively-capable camera's controllable visible light on<->off.
+    // Reads GetWhiteLed first, then writes ONLY {channel,state}, leaving
+    // brightness/mode/schedule/AI behavior untouched. Generic GetWhiteLed support
+    // alone never authorizes this write.
+    Q_INVOKABLE void toggleLight(int row);
+    // Change illumination intensity without rewriting on/off state, mode,
+    // schedules, or AI-trigger configuration. Native Baichuan task RMW first,
+    // HTTP WhiteLed partial write as compatibility fallback.
+    Q_INVOKABLE void setLightBrightness(int row, int brightness);
     Q_INVOKABLE void reboot(int row);
 
     // Alert-action config (push / email / ftp enable) over the native Baichuan
@@ -292,6 +302,7 @@ private:
         QString password;                           // in-memory only (keyring at rest)
         bool primed = false;                        // password loaded?
         api::ChannelCaps caps;                      // this channel's capabilities
+        int lightState = -1;                        // -1 unknown, 0 off, 1 on
         bool talk = false;                          // channel supports two-way audio
         bool isAdmin = false;                       // logged-in user may edit settings
         api::BatteryInfo battery;                   // battery/solar state (if any)
@@ -317,6 +328,7 @@ private:
         QSize subSize;
         QString uid;
         api::ChannelCaps caps;
+        int lightState = -1; // -1 unknown, 0 off, 1 on
     };
 
     // Outcome of a worker-thread validation, applied back on the GUI thread.

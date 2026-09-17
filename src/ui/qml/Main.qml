@@ -255,7 +255,9 @@ ApplicationWindow {
         if (c.capAudio) caps.push(qsTr("Audio"));
         if (c.capTalk) caps.push(qsTr("Two-way talk"));
         if (c.capSiren) caps.push(qsTr("Siren"));
-        if (c.capFloodlight) caps.push(qsTr("Floodlight"));
+        if (c.capLight)
+            caps.push(c.lightType === "floodlight" ? qsTr("Floodlight")
+                     : c.lightType === "spotlight" ? qsTr("Spotlight") : qsTr("Light"));
         if (c.capBattery) caps.push(qsTr("Battery"));
         propsDialog.heading = c.name;
         propsDialog.subheading = c.kind === "nvr" ? qsTr("Camera on %1").arg(c.hostName)
@@ -304,7 +306,7 @@ ApplicationWindow {
     }
 
     // Transient status toast for one-shot camera actions (snapshot, siren,
-    // floodlight). These fire on the device but gave no on-screen confirmation,
+    // controllable light). These fire on the device but gave no on-screen confirmation,
     // so they felt like dead buttons; this surfaces success/failure.
     Rectangle {
         id: toast
@@ -345,8 +347,13 @@ ApplicationWindow {
         function onSettingApplied(row, command, ok, error) {
             if (command === "AudioAlarmPlay")
                 toast.show(ok ? qsTr("Siren triggered") : qsTr("Siren failed: %1").arg(error), !ok);
-            else if (command === "SetWhiteLed")
-                toast.show(ok ? qsTr("Floodlight toggled") : qsTr("Floodlight failed: %1").arg(error), !ok);
+            else if (command === "SetWhiteLed") {
+                var c = Devices.cameraInfo(row);
+                var lightName = c && c.lightType === "floodlight" ? qsTr("Floodlight")
+                              : c && c.lightType === "spotlight" ? qsTr("Spotlight") : qsTr("Light");
+                toast.show(ok ? qsTr("%1 toggled").arg(lightName)
+                              : qsTr("%1 failed: %2").arg(lightName).arg(error), !ok);
+            }
             else if (!ok)
                 toast.show(qsTr("%1 failed: %2").arg(command).arg(error), true);
         }

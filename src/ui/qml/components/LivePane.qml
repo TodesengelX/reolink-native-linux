@@ -30,10 +30,11 @@ Rectangle {
     property bool capZoom: false
     property bool capAudio: false
     property bool capSiren: false
-    property bool capFloodlight: false
+    property bool capLight: false
+    property string lightType: "unknown"
     property bool capTalk: false
     property bool talkActive: false
-    property bool floodOn: false // white-LED/floodlight on state (optimistic)
+    property bool lightOn: false // actual WhiteLed state from the device model
 
     // User stream-quality preference: false = Fluent (sub), true = Clear (main).
     // This alone decides which stream plays — so the SD/HD toolbar toggle works in
@@ -506,12 +507,13 @@ Rectangle {
                     { "alarm_mode": "times", "times": 1, "channel": Devices.channelOf(root.deviceRow) })
             }
             ToolButton {
-                glyph: "💡"; active: root.floodOn; enabledTool: root.capFloodlight
-                tip: qsTr("Toggle floodlight")
-                onActivated: {
-                    root.floodOn = !root.floodOn;       // optimistic; toast confirms
-                    Devices.toggleFloodlight(root.deviceRow);
-                }
+                glyph: "💡"; active: root.lightOn; enabledTool: root.capLight
+                tip: root.lightType === "floodlight"
+                     ? (root.lightOn ? qsTr("Turn floodlight off") : qsTr("Turn floodlight on"))
+                     : root.lightType === "spotlight"
+                       ? (root.lightOn ? qsTr("Turn spotlight off") : qsTr("Turn spotlight on"))
+                       : (root.lightOn ? qsTr("Turn light off") : qsTr("Turn light on"))
+                onActivated: Devices.toggleLight(root.deviceRow)
             }
             // Pop out into a detached window (drag to another monitor).
             ToolButton {

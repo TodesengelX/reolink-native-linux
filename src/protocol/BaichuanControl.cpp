@@ -2,6 +2,7 @@
 
 #include "protocol/BcCrypto.h"
 
+#include <QElapsedTimer>
 #include <QTcpSocket>
 #include <QXmlStreamReader>
 #include <QtEndian>
@@ -140,13 +141,19 @@ void BaichuanControl::close()
 
 // Read messages until one with the wanted cmd_id arrives (skipping unsolicited
 // pushes like cmd 580). False on timeout/abort.
-static bool recvMatch(QTcpSocket *sock, QByteArray &netBuf, quint32 wantCmd, Msg &out)
+static bool recvMatch(QTcpSocket *sock, QByteArray &netBuf, quint32 wantCmd, Msg &out,
+                      int timeoutMs)
 {
-    for (int i = 0; i < 40; ++i) {
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < timeoutMs) {
         while (parseMessage(netBuf, out))
             if (out.cmdId == wantCmd)
                 return true;
-        if (!sock->waitForReadyRead(300))
+        const int remaining = timeoutMs - static_cast<int>(timer.elapsed());
+        if (remaining <= 0)
+            break;
+        if (!sock->waitForReadyRead(qMin(300, remaining)))
             continue;
         netBuf.append(sock->readAll());
     }
@@ -157,7 +164,7 @@ bool BaichuanControl::open()
 {
     m_sock = std::make_unique<QTcpSocket>();
     m_sock->connectToHost(m_p.host, static_cast<quint16>(m_p.port));
-    if (!m_sock->waitForConnected(5000)) {
+    if (!m_sock->waitForConnected(m_p.connectTimeoutMs)) {
         m_sock.reset();
         return false;
     }
@@ -166,7 +173,7 @@ bool BaichuanControl::open()
     m_sock->write(helloMessage());
     m_sock->flush();
     Msg nonceMsg;
-    if (!recvMatch(m_sock.get(), m_netBuf, 1, nonceMsg)) {
+    if (!recvMatch(m_sock.get(), m_netBuf, 1, nonceMsg, m_p.replyTimeoutMs)) {
         close();
         return false;
     }
@@ -193,7 +200,7 @@ bool BaichuanControl::open()
     m_sock->write(modernMessage(1, 0, 0, QByteArray(), bc::xorCrypt(login, 0)));
     m_sock->flush();
     Msg loginReply;
-    if (!recvMatch(m_sock.get(), m_netBuf, 1, loginReply)) {
+    if (!recvMatch(m_sock.get(), m_netBuf, 1, loginReply, m_p.replyTimeoutMs)) {
         close();
         return false;
     }
@@ -239,7 +246,7 @@ QByteArray BaichuanControl::transact(quint32 cmdId, int channel, const QByteArra
     m_sock->flush();
 
     Msg reply;
-    if (!recvMatch(m_sock.get(), m_netBuf, cmdId, reply))
+    if (!recvMatch(m_sock.get(), m_netBuf, cmdId, reply, m_p.replyTimeoutMs))
         return {};
     if (statusOut)
         *statusOut = reply.status;
@@ -263,6 +270,84 @@ int BaichuanControl::readEnable(quint32 getCmdId, int channel)
     if (b < 0)
         return -1;
     return xml.mid(a + 8, b - a - 8).trimmed().toInt();
+}
+
+QHash<int, BaichuanControl::LightAbility>
+BaichuanControl::parseLightAbilities(const QByteArray &xml)
+{
+    QHash<int, LightAbility> out;
+    if (xml.isEmpty())
+        return out;
+
+    struct Context {
+        QString element;
+        int channel = -1;
+        int ledCtrl = -1;
+        api::LightType type = api::LightType::Unknown;
+        bool typeExplicit = false;
+    };
+    QVector<Context> stack;
+    QXmlStreamReader r(xml);
+    while (!r.atEnd()) {
+        const auto token = r.readNext();
+        if (token == QXmlStreamReader::StartElement) {
+            const QString name = r.name().toString();
+            if (name == QLatin1String("item") || name == QLatin1String("subItem")) {
+                Context ctx{name};
+                if (!stack.isEmpty())
+                    ctx.channel = stack.last().channel;
+                stack.push_back(std::move(ctx));
+                continue;
+            }
+            if (stack.isEmpty())
+                continue;
+            if (name == QLatin1String("chnID")) {
+                bool ok = false;
+                const int value = r.readElementText().trimmed().toInt(&ok);
+                if (ok)
+                    stack.last().channel = value;
+            } else if (name == QLatin1String("ledCtrl")) {
+                bool ok = false;
+                const int value = r.readElementText().trimmed().toInt(&ok);
+                if (ok)
+                    stack.last().ledCtrl = value;
+            } else if (name == QLatin1String("lightType")) {
+                bool ok = false;
+                const int value = r.readElementText().trimmed().toInt(&ok);
+                if (ok) {
+                    stack.last().type = api::lightTypeFromInt(value);
+                    stack.last().typeExplicit = true;
+                }
+            }
+        } else if (token == QXmlStreamReader::EndElement && !stack.isEmpty()) {
+            const QString name = r.name().toString();
+            if (name != stack.last().element)
+                continue;
+            const Context ctx = stack.takeLast();
+            if (ctx.channel < 0)
+                continue;
+            LightAbility &ability = out[ctx.channel];
+            // reolink_aio's clean-room cmd-199 analysis: ledCtrl bit 1 AND bit 2
+            // are the white-light capability. Preserve a positive sibling record;
+            // otherwise an explicit ledCtrl value is a trustworthy negative.
+            if (ctx.ledCtrl >= 0) {
+                const bool supported = ((ctx.ledCtrl >> 1) & 1) && ((ctx.ledCtrl >> 2) & 1);
+                if (supported)
+                    ability.support = api::LightSupport::Supported;
+                else if (ability.support == api::LightSupport::Unknown)
+                    ability.support = api::LightSupport::Unsupported;
+            }
+            if (ctx.typeExplicit && ctx.type != api::LightType::Unknown)
+                ability.type = ctx.type;
+        }
+    }
+    return out;
+}
+
+QHash<int, BaichuanControl::LightAbility> BaichuanControl::lightAbilities()
+{
+    // cmd 199 is host-level and returns per-channel <item> capability records.
+    return parseLightAbilities(get(199, -1));
 }
 
 QVariantMap BaichuanControl::getConfigFlat(quint32 cmdId, int channel, const QByteArray &reqBody)
@@ -298,11 +383,13 @@ QVariantMap BaichuanControl::getConfigFlat(quint32 cmdId, int channel, const QBy
 }
 
 bool BaichuanControl::writeFields(quint32 getCmdId, quint32 setCmdId, int channel,
-                                  const QVariantMap &changes, const QByteArray &getBody)
+                                  const QVariantMap &changes, const QByteArray &getBody,
+                                  bool requireMatch)
 {
     QByteArray xml = transact(getCmdId, channel, getBody);
     if (xml.isEmpty())
         return false;
+    bool matched = false;
     for (auto it = changes.constBegin(); it != changes.constEnd(); ++it) {
         const QByteArray key = it.key().toUtf8();
         const QByteArray val = it.value().toString().toUtf8();
@@ -327,6 +414,7 @@ bool BaichuanControl::writeFields(quint32 getCmdId, quint32 setCmdId, int channe
             const QByteArray cc = "</" + child + ">";
             QByteArray rebuilt;
             int pos = 0;
+            bool localMatched = false;
             while (true) {
                 const int o = inner.indexOf(co, pos);
                 if (o < 0) {
@@ -340,8 +428,10 @@ bool BaichuanControl::writeFields(quint32 getCmdId, quint32 setCmdId, int channe
                 }
                 rebuilt += inner.mid(pos, o + co.size() - pos) + val;
                 pos = c;
+                localMatched = true;
             }
             xml = xml.left(pStart) + rebuilt + xml.mid(pEnd);
+            matched = matched || localMatched;
             continue;
         }
 
@@ -369,7 +459,10 @@ bool BaichuanControl::writeFields(quint32 getCmdId, quint32 setCmdId, int channe
         if (b < 0)
             continue;
         xml = xml.left(a + open.size()) + val + xml.mid(b);
+        matched = true;
     }
+    if (requireMatch && !matched)
+        return false;
     quint16 status = 0;
     transact(setCmdId, channel, xml, &status);
     return status == 200 || status == 201 || status == 300;

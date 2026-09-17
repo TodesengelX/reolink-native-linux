@@ -16,6 +16,8 @@ Item {
     property var settings: ({})      // cmd -> value map from the last fetch
     property bool isAdmin: false
     property string status: ""
+    property var camera: ({})        // typed camera capability summary
+    property var lightBc: ({})       // native cmd-289 FloodlightTask (flat)
 
     // Called from the sidebar's Settings action: focus this device row.
     function showDevice(row) {
@@ -23,8 +25,13 @@ Item {
             deviceCombo.currentIndex = row;
     }
 
+    function refreshCamera() {
+        page.camera = page.deviceRow >= 0 ? Devices.cameraInfo(page.deviceRow) : ({});
+    }
+
     readonly property var categories: [
         { key: "image",     label: qsTr("Image"),           cmds: [] },
+        { key: "light",     label: qsTr("Light"),           cmds: ["GetWhiteLed"] },
         { key: "display",   label: qsTr("Display / OSD"),    cmds: ["GetOsd"] },
         { key: "encoding",  label: qsTr("Encoding"),        cmds: ["GetEnc"] },
         { key: "recording", label: qsTr("Recording"),       cmds: [] },
@@ -70,6 +77,7 @@ Item {
     function fetch() {
         page.settings = ({});
         page.fetched = false;
+        page.refreshCamera();
         if (page.deviceRow >= 0) {
             // Baichuan-only categories (Image, Recording) have no HTTP Get*
             // commands — don't fire an empty fetchSettings (it reports "device not
@@ -92,6 +100,13 @@ Item {
                 page.img = ({});
                 page.imgReady = false;
                 Devices.fetchBcConfig(page.deviceRow, 26);
+            }
+            if (page.category === "light") {
+                // Mirror Reolink Client's native task path as well as the HTTP
+                // WhiteLed representation. Different generations expose one or
+                // both; cmd 289 is the classic BCSDK FloodlightTask getter.
+                page.lightBc = ({});
+                Devices.fetchBcConfig(page.deviceRow, 289);
             }
             if (page.category === "recording") {
                 page.rec = ({});
@@ -119,6 +134,7 @@ Item {
         function onSettingsLoaded(row, values) {
             if (row === page.deviceRow) {
                 page.settings = values;
+                page.refreshCamera();
                 page.fetched = true;
                 var f = values["_failed"] || [];
                 page.status = f.length > 0 ? qsTr("%1 unavailable on this device").arg(f.join(", ")) : "";
@@ -131,6 +147,11 @@ Item {
             if (row !== page.deviceRow)
                 return;
             page.status = ok ? qsTr("%1 saved").arg(command) : (command + ": " + error);
+            if (command === "SetWhiteLed" || command === "SetLightBrightness") {
+                page.refreshCamera();
+                if (page.category === "light")
+                    page.fetch();
+            }
             // Reflect user add/remove/password changes immediately.
             if (ok && (command === "AddUser" || command === "DelUser" || command === "ModifyUser"))
                 page.fetch();
@@ -173,6 +194,8 @@ Item {
                 page.recReady = true;
             } else if (cmdId === 46) {
                 page.md = values;
+            } else if (cmdId === 289) {
+                page.lightBc = values;
             }
         }
     }
@@ -202,6 +225,9 @@ Item {
                     onCurrentIndexChanged: {
                         page.deviceRow = currentIndex;
                         page.isAdmin = currentIndex >= 0 ? Devices.isAdminAt(currentIndex) : false;
+                        page.refreshCamera();
+                        if (page.category === "light" && page.camera.capLight !== true)
+                            page.category = "system";
                         page.fetch();
                     }
                 }
@@ -213,7 +239,8 @@ Item {
                     Rectangle {
                         required property var modelData
                         Layout.fillWidth: true
-                        height: 34
+                        visible: modelData.key !== "light" || page.camera.capLight === true
+                        height: visible ? 34 : 0
                         radius: 4
                         color: page.category === modelData.key ? Theme.accentDim
                              : catHover.hovered ? Theme.surfaceAlt : "transparent"
@@ -278,6 +305,7 @@ Item {
                     sourceComponent: {
                         switch (page.category) {
                         case "image": return imagePanel;
+                        case "light": return lightPanel;
                         case "encoding": return encodingPanel;
                         case "display": return displayPanel;
                         case "detection": return detectionPanel;
@@ -375,8 +403,91 @@ Item {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Text { text: parent.label; color: Theme.textMuted; font.pixelSize: 12; Layout.preferredWidth: 150 }
-        Switch { checked: parent.checked; enabled: parent.enabledCtl; onToggled: parent.commit(checked) }
+        // Device refreshes rebind `checked`; only a user click should write back.
+        Switch { checked: parent.checked; enabled: parent.enabledCtl; onClicked: parent.commit(checked) }
         Item { Layout.fillWidth: true }
+    }
+
+    // ---- Controllable illumination (Spotlight / Floodlight) ----------------
+    // Reolink's own clients expose this under the neutral "Light" section. The
+    // transport and many capability names say "floodlight" even for spotlights;
+    // `camera.lightType` is the separately resolved semantic/UI type.
+    Component {
+        id: lightPanel
+        Item {
+            id: lightRoot
+            readonly property var http: page.val("GetWhiteLed", "WhiteLed") || ({})
+            readonly property var httpRange: page.val("GetWhiteLed", "_range", "WhiteLed", "bright") || ({})
+            readonly property string lightName: page.camera.lightType === "floodlight"
+                                                    ? qsTr("Floodlight")
+                                                  : page.camera.lightType === "spotlight"
+                                                    ? qsTr("Spotlight") : qsTr("Light")
+            readonly property bool lightChecked: http.state !== undefined
+                                                       ? parseInt(http.state) !== 0
+                                                       : page.camera.lightOn === true
+            readonly property bool brightnessAvailable:
+                page.camera.capLightBrightness === true
+                || page.lightBc.brightness_cur !== undefined
+                || http.bright !== undefined
+            readonly property int brightnessMin:
+                httpRange.min !== undefined ? parseInt(httpRange.min)
+                : page.lightBc.brightness_min !== undefined ? parseInt(page.lightBc.brightness_min)
+                : page.lightBc.brightnessMin !== undefined ? parseInt(page.lightBc.brightnessMin)
+                : 0
+            readonly property int brightnessMax:
+                httpRange.max !== undefined ? parseInt(httpRange.max)
+                : page.lightBc.brightness_max !== undefined ? parseInt(page.lightBc.brightness_max)
+                : page.lightBc.brightnessMax !== undefined ? parseInt(page.lightBc.brightnessMax)
+                : 100
+            readonly property int brightnessValue:
+                page.lightBc.brightness_cur !== undefined ? parseInt(page.lightBc.brightness_cur)
+                : http.bright !== undefined ? parseInt(http.bright)
+                : brightnessMax
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: Theme.spacing
+
+                Text {
+                    text: lightRoot.lightName
+                    color: Theme.text
+                    font.pixelSize: 13
+                    font.bold: true
+                }
+                SwitchRow {
+                    label: qsTr("Manual light")
+                    enabledCtl: page.isAdmin
+                    checked: lightRoot.lightChecked
+                    onCommit: (v) => Devices.toggleLight(page.deviceRow)
+                }
+                SliderRow {
+                    visible: lightRoot.brightnessAvailable
+                    label: qsTr("Brightness")
+                    from: lightRoot.brightnessMin
+                    to: lightRoot.brightnessMax
+                    value: Math.max(lightRoot.brightnessMin,
+                                    Math.min(lightRoot.brightnessMax, lightRoot.brightnessValue))
+                    enabledCtl: page.isAdmin
+                    onCommit: (v) => Devices.setLightBrightness(page.deviceRow, v)
+                }
+                Text {
+                    visible: !lightRoot.brightnessAvailable
+                    text: qsTr("Brightness adjustment is not reported by this camera.")
+                    color: Theme.textMuted
+                    font.pixelSize: 11
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                }
+                Item { Layout.fillHeight: true }
+                Text {
+                    text: qsTr("Light type and optional controls are capability-driven. Brightness uses the native Reolink light task when available, with WhiteLed compatibility fallback.")
+                    color: Theme.textMuted
+                    font.pixelSize: 11
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                }
+            }
+        }
     }
 
     // ---- Image panel (over native Baichuan — no HTTP 502) ----------------
