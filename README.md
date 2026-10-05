@@ -63,6 +63,8 @@ Requires Qt 6.5+ (base / declarative / multimedia / shadertools / tools), FFmpeg
 - **Settings** — Image (brightness/contrast/saturation/sharpness, mirror/flip, day/night), Detection (motion + per-AI-type sensitivity, alerts, and a paint-on-image detection-zone editor), Recording (including a weekly 7×24 schedule grid per recording type), Encoding, Display/OSD, Network, Storage, Users, Time, System. Camera settings run over the native Baichuan protocol, so they don't hit the NVR web server's under-load 502s.
 - **Extras** — battery/solar status, doorbell answer surface, multi-monitor pop-out, fisheye dewarp shader, manual MP4 recording (stream-copy), and a built-in update checker with one-click self-update for the AppImage.
 
+To silence desktop popups, enable **Silence desktop notifications** on the Events page or in the system tray menu. This local preference persists across restarts and suppresses detection and online/offline desktop notifications. Event history, unread counts, and monitoring continue; camera and NVR settings are unchanged. Uncheck it to resume notifications for new events.
+
 ## How it talks to your devices
 
 | Transport | Used for |
