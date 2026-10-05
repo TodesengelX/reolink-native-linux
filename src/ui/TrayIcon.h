@@ -13,6 +13,7 @@ namespace rl {
 class TrayIcon : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(bool notificationsSilenced READ notificationsSilenced WRITE setNotificationsSilenced NOTIFY notificationsSilencedChanged)
     Q_PROPERTY(bool available READ available CONSTANT)
     Q_PROPERTY(bool closeToTray READ closeToTray WRITE setCloseToTray NOTIFY closeToTrayChanged)
 
@@ -23,12 +24,16 @@ public:
     bool closeToTray() const { return m_closeToTray; }
     void setCloseToTray(bool on);
 
+    bool notificationsSilenced() const { return m_notificationsSilenced; }
+    void setNotificationsSilenced(bool on);
+
     bool startOnLogin() const;
     void setStartOnLogin(bool on);
 
     void setUnread(int unread); // tooltip badge
 
 signals:
+    void notificationsSilencedChanged();
     void closeToTrayChanged();
     void openRequested();
     void quitRequested();
@@ -39,6 +44,7 @@ private:
 
     QSystemTrayIcon *m_tray = nullptr;
     QMenu *m_menu = nullptr;
+    bool m_notificationsSilenced = false;
     bool m_available = false;
     bool m_closeToTray = true;
 };

@@ -17,6 +17,7 @@ TrayIcon::TrayIcon(QObject *parent) : QObject(parent)
     m_available = QSystemTrayIcon::isSystemTrayAvailable();
     QSettings settings;
     m_closeToTray = settings.value(QStringLiteral("tray/closeToTray"), true).toBool();
+    m_notificationsSilenced = settings.value(QStringLiteral("notifications/silenced"), false).toBool();
     if (!m_available)
         return;
 
@@ -33,6 +34,14 @@ TrayIcon::TrayIcon(QObject *parent) : QObject(parent)
     closeTray->setCheckable(true);
     closeTray->setChecked(m_closeToTray);
     connect(closeTray, &QAction::toggled, this, &TrayIcon::setCloseToTray);
+
+    QAction *silence = m_menu->addAction(tr("Silence desktop notifications"));
+    silence->setCheckable(true);
+    silence->setChecked(m_notificationsSilenced);
+    connect(silence, &QAction::toggled, this, &TrayIcon::setNotificationsSilenced);
+    connect(this, &TrayIcon::notificationsSilencedChanged, silence, [this, silence] {
+        silence->setChecked(m_notificationsSilenced);
+    });
 
     QAction *autostart = m_menu->addAction(tr("Start on login"));
     autostart->setCheckable(true);
@@ -68,6 +77,15 @@ void TrayIcon::setCloseToTray(bool on)
     m_closeToTray = on;
     QSettings().setValue(QStringLiteral("tray/closeToTray"), on);
     emit closeToTrayChanged();
+}
+
+void TrayIcon::setNotificationsSilenced(bool on)
+{
+    if (m_notificationsSilenced == on)
+        return;
+    m_notificationsSilenced = on;
+    QSettings().setValue(QStringLiteral("notifications/silenced"), on);
+    emit notificationsSilencedChanged();
 }
 
 void TrayIcon::setUnread(int unread)

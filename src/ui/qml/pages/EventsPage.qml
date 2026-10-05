@@ -94,6 +94,45 @@ Item {
             }
         }
 
+        CheckBox {
+            id: silenceNotifications
+            text: qsTr("Silence desktop notifications")
+            indicator: Rectangle {
+                implicitWidth: 20
+                implicitHeight: 20
+                anchors.verticalCenter: parent.verticalCenter
+                radius: 4
+                color: silenceNotifications.checked ? Theme.accent : Theme.surfaceAlt
+                border.color: silenceNotifications.checked || silenceNotifications.activeFocus
+                              ? Theme.accent : Theme.textMuted
+                border.width: silenceNotifications.activeFocus ? 2 : 1
+                Text {
+                    anchors.centerIn: parent
+                    text: "\u2713"
+                    visible: silenceNotifications.checked
+                    color: Theme.window
+                    font.pixelSize: 15
+                    font.bold: true
+                }
+            }
+            contentItem: Text {
+                text: silenceNotifications.text
+                color: Theme.text
+                font.pixelSize: 13
+                leftPadding: silenceNotifications.indicator.width + 8
+                verticalAlignment: Text.AlignVCenter
+            }
+            checked: Tray.notificationsSilenced
+            onToggled: Tray.notificationsSilenced = checked
+        }
+        Text {
+            Layout.fillWidth: true
+            text: qsTr("Applies to this desktop only. Events are still collected; camera and NVR settings stay unchanged.")
+            color: Theme.textMuted
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+        }
+
         // ---- Filter chips ----
         Flow {
             Layout.fillWidth: true

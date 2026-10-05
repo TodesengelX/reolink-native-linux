@@ -5,6 +5,7 @@
 #include <QDBusPendingCall>
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
+#include <QSettings>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -34,6 +35,10 @@ Notifier::Notifier(QObject *parent) : QObject(parent)
 void Notifier::notify(const QString &title, const QString &body, const QString &iconName,
                       qint64 hostId, int channel, qint64 timestamp)
 {
+    // Local desktop preference only: event collection and device settings are unaffected.
+    if (QSettings().value(QStringLiteral("notifications/silenced"), false).toBool())
+        return;
+
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected())
         return;
