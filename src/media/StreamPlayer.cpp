@@ -734,13 +734,16 @@ bool runSession(const std::shared_ptr<Session> &s)
         // A live socket can keep producing packets that the decoder cannot turn
         // into frames (e.g. damaged/stale H.264 references). The read-stall
         // interrupt won't fire in that case, so use decoded-frame progress as a
-        // second watchdog and rebuild the whole demux/decode session.
-        if (live && av_gettime_relative() - lastGoodFrameUs >= kDecodedFrameStallTimeoutUs) {
+        // second watchdog and rebuild the whole demux/decode session. Custom
+        // packet sources are one-shot and may resume after a long wait (e.g. a
+        // Baichuan playback seek); let their returned packets reach the decoder.
+        if (!packetSource && live
+            && av_gettime_relative() - lastGoodFrameUs >= kDecodedFrameStallTimeoutUs) {
             qCWarning(lcMedia) << redacted(source)
                                << "no decodable frame for 15s — reconnecting";
             postState(s, State::Error, QStringLiteral("no decoded frames / stalled"));
             finalizeRecording();
-            return !packetSource;
+            return true;
         }
         if (packet->stream_index != videoIndex) {
             av_packet_unref(packet);
