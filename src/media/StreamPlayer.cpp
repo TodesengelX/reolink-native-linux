@@ -30,6 +30,7 @@ namespace {
 
 constexpr int kOpenTimeoutMs = 10000;
 constexpr int kReadStallTimeoutMs = 10000; // §5.8 watchdog: no packet in 10s → reconnect
+constexpr qint64 kDecodedFrameStallTimeoutUs = 15000000; // packets but no usable frames → reconnect
 constexpr int kBackoffStartMs = 1000;
 constexpr int kBackoffCapMs = 30000;
 
@@ -420,7 +421,7 @@ int avioReadThunk(void *opaque, uint8_t *buf, int size)
 }
 
 // One open→decode session. Returns true when the caller should retry (reconnect).
-bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
+bool runSession(const std::shared_ptr<Session> &s)
 {
     const QString source = s->source;
     const QByteArray url = source.toUtf8();
@@ -580,7 +581,10 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         }
     } loopGuard{packet, frame, hwTransfer, converted, &sws};
 
-    bool streaming = *streamingOut;
+    // Each reconnect is a new decoder/session. It must report Streaming again
+    // after its first frame so clients can restore the video surface.
+    bool streaming = false;
+    qint64 lastGoodFrameUs = av_gettime_relative();
     qint64 playbackStartUs = 0;
     qint64 firstPtsUs = AV_NOPTS_VALUE;
 
@@ -649,10 +653,10 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
             }
 
             if (emitFrame(s, out, outFormat, rotation)) {
+                lastGoodFrameUs = av_gettime_relative();
                 const qint64 n = s->framesDecoded.fetch_add(1) + 1;
                 if (!streaming) {
                     streaming = true;
-                    *streamingOut = true;
                     postState(s, State::Streaming, QString());
                     qCInfo(lcMedia) << redacted(source) << "first frame delivered";
                 }
@@ -727,6 +731,20 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
             finalizeRecording();
             return !packetSource && (live || s->retryOnError.load());
         }
+        // A live socket can keep producing packets that the decoder cannot turn
+        // into frames (e.g. damaged/stale H.264 references). The read-stall
+        // interrupt won't fire in that case, so use decoded-frame progress as a
+        // second watchdog and rebuild the whole demux/decode session. Custom
+        // packet sources are one-shot and may resume after a long wait (e.g. a
+        // Baichuan playback seek); let their returned packets reach the decoder.
+        if (!packetSource && live
+            && av_gettime_relative() - lastGoodFrameUs >= kDecodedFrameStallTimeoutUs) {
+            qCWarning(lcMedia) << redacted(source)
+                               << "no decodable frame for 15s — reconnecting";
+            postState(s, State::Error, QStringLiteral("no decoded frames / stalled"));
+            finalizeRecording();
+            return true;
+        }
         if (packet->stream_index != videoIndex) {
             av_packet_unref(packet);
             continue;
@@ -747,14 +765,13 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
 void runWorker(std::shared_ptr<Session> s)
 {
     int backoffMs = kBackoffStartMs;
-    bool streaming = false;
     // Live sources reconnect indefinitely; a non-live retry (playback FLV on a
     // busy NVR) is capped so it can't loop forever.
     const bool live = isLiveUrl(s->source);
     int retriesLeft = 6;
     while (!s->abort.load()) {
         const qint64 framesBefore = s->framesDecoded.load();
-        const bool retry = runSession(s, &streaming);
+        const bool retry = runSession(s);
         if (s->abort.load() || !retry)
             break;
         if (s->framesDecoded.load() - framesBefore > 100) {
