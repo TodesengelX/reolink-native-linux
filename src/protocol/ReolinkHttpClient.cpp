@@ -23,6 +23,23 @@ constexpr long kTotalTimeoutSec = 15;
 constexpr long kLogoutTimeoutSec = 2; // best-effort; must not pin a pool thread
 constexpr qsizetype kMaxResponseBytes = 8 * 1024 * 1024;
 
+} // namespace
+
+void configureDeviceTls(void *curl)
+{
+    // Reolink devices ship self-signed certificates; the official client accepts
+    // them. TODO(security, DESIGN §10): trust-on-first-use certificate pinning.
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    // Ubuntu/Debian build OpenSSL at SECLEVEL=2, which refuses the 1024-bit DH
+    // params of older firmware ("dh key too small" -> CURLE_SSL_CONNECT_ERROR),
+    // making such cameras unreachable over HTTPS. Level 1 accepts them; the
+    // negotiation still picks the strongest suite both ends support.
+    curl_easy_setopt(curl, CURLOPT_SSL_CIPHER_LIST, "DEFAULT:@SECLEVEL=1");
+}
+
+namespace {
+
 void ensureCurlGlobalInit()
 {
     static std::once_flag flag;
@@ -85,10 +102,7 @@ ReolinkHttpClient::HttpResponse ReolinkHttpClient::post(const QString &url, cons
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, kConnectTimeoutSec);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, totalTimeoutSec > 0 ? totalTimeoutSec : kTotalTimeoutSec);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    // Reolink devices ship self-signed certificates; the official client accepts
-    // them. TODO(security, DESIGN §10): trust-on-first-use certificate pinning.
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    configureDeviceTls(curl);
 
     const CURLcode rc = curl_easy_perform(curl);
     if (rc != CURLE_OK) {
@@ -120,8 +134,7 @@ ReolinkHttpClient::HttpResponse ReolinkHttpClient::get(const QString &url, long 
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, kConnectTimeoutSec);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, totalTimeoutSec > 0 ? totalTimeoutSec : kTotalTimeoutSec);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    configureDeviceTls(curl);
 
     const CURLcode rc = curl_easy_perform(curl);
     if (rc != CURLE_OK) {
@@ -164,8 +177,7 @@ bool ReolinkHttpClient::downloadToFile(const QString &url, const QString &destPa
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, kConnectTimeoutSec);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSec > 0 ? timeoutSec : kTotalTimeoutSec);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    configureDeviceTls(curl);
 
     const CURLcode rc = curl_easy_perform(curl);
     long status = 0;
