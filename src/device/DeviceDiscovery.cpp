@@ -1,6 +1,7 @@
 #include "DeviceDiscovery.h"
 
 #include "core/Log.h"
+#include "protocol/ReolinkHttpClient.h"
 
 #include <QNetworkInterface>
 #include <QTcpSocket>
@@ -42,8 +43,7 @@ bool confirmReolink(const QString &ip)
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 3L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 4L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    configureDeviceTls(curl);
     const CURLcode rc = curl_easy_perform(curl);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
