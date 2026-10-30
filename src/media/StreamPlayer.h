@@ -12,7 +12,13 @@
 #include <memory>
 #include <thread>
 
+class QAudioSink;
+class QIODevice;
+
 namespace rl {
+
+class AudioRing; // PCM hand-off from the decode worker to the audio output
+class SideAudio; // decodes audio delivered outside the demuxer (Baichuan)
 
 // One live/playback stream: FFmpeg demux + decode on a dedicated worker thread,
 // frames delivered to a QML VideoOutput's QVideoSink (NV12/YUV420P upload path —
@@ -41,6 +47,11 @@ class StreamPlayer : public QObject
     Q_PROPERTY(bool loop READ loop WRITE setLoop NOTIFY loopChanged)
     Q_PROPERTY(bool retryOnError READ retryOnError WRITE setRetryOnError NOTIFY retryOnErrorChanged)
     Q_PROPERTY(bool recording READ recording NOTIFY recordingChanged)
+    // Play the stream's audio track (if it has one). Off by default; the
+    // track is still demuxed but not decoded while off.
+    Q_PROPERTY(bool audioEnabled READ audioEnabled WRITE setAudioEnabled NOTIFY audioEnabledChanged)
+    // True once the running stream is known to carry a decodable audio track.
+    Q_PROPERTY(bool hasAudio READ hasAudio NOTIFY hasAudioChanged)
 
 public:
     enum class State { Idle, Connecting, Streaming, Error, Stopped };
@@ -79,6 +90,11 @@ public:
         // The sink is owned by QML; delivery hops to the GUI thread where it lives.
         QMutex sinkMutex;
         QPointer<QVideoSink> sink;
+
+        // Audio: decoded + resampled PCM goes into audioRing (read by the
+        // GUI-thread QAudioSink) only while audioEnabled.
+        std::atomic<bool> audioEnabled{false};
+        std::shared_ptr<AudioRing> audioRing;
     };
 
     explicit StreamPlayer(QObject *parent = nullptr);
@@ -97,6 +113,10 @@ public:
     // cleared by setSource(). Not a QML API.
     void setPacketSource(std::function<int(unsigned char *, int)> reader, const QString &format,
                          std::function<void()> onStop);
+    // Feed for a packet source's audio, which arrives apart from the video
+    // elementary stream: takes AAC (ADTS) frames from any thread and plays them
+    // through this player's audio output while audioEnabled. Not a QML API.
+    std::function<void(const QByteArray &adts)> sideAudioSink();
 
     QVideoSink *videoSink() const;
     void setVideoSink(QVideoSink *sink);
@@ -111,6 +131,10 @@ public:
     bool retryOnError() const { return m_retryOnError; }
     void setRetryOnError(bool v);
 
+    bool audioEnabled() const { return m_audioEnabled; }
+    void setAudioEnabled(bool on);
+    bool hasAudio() const { return m_hasAudio; }
+
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
 
@@ -124,6 +148,7 @@ public:
     // Public so the worker helpers can reach it; not part of the QML API.
     void applyStateFromWorker(State state, const QString &error);
     void applyRecordingState(bool recording, const QString &path, const QString &error);
+    void applyHasAudio(bool hasAudio);
 
 signals:
     void sourceChanged();
@@ -135,11 +160,14 @@ signals:
     void loopChanged();
     void retryOnErrorChanged();
     void recordingChanged();
+    void audioEnabledChanged();
+    void hasAudioChanged();
     void recordingSaved(const QString &path);
     void recordingFailed(const QString &error);
 
 private:
     void applyState(State state, const QString &error);
+    void updateAudioOutput(); // open/close the sink to match enabled && hasAudio
 
     QString m_source;
     QSize m_expectedSize;
@@ -153,6 +181,12 @@ private:
     QString m_errorString;
     bool m_recording = false;
     bool m_retryOnError = false;
+    bool m_audioEnabled = false;
+    bool m_hasAudio = false;
+    std::shared_ptr<AudioRing> m_audioRing; // created on first start()
+    QAudioSink *m_audioSink = nullptr;      // only while audio is playing
+    QIODevice *m_audioDevice = nullptr;     // pull-mode reader over m_audioRing
+    std::shared_ptr<SideAudio> m_sideAudio; // created by sideAudioSink()
 
     // Set via QML before start(); copied into each new Session. Survives stop().
     QPointer<QVideoSink> m_pendingSink;

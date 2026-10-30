@@ -33,6 +33,10 @@ Rectangle {
     property bool capFloodlight: false
     property bool capTalk: false
     property bool talkActive: false
+    // This pane's camera is the one being listened to (the page keeps it to
+    // one at a time). HD then plays over RTSP main, which carries the audio
+    // track; the native Baichuan path is video-only.
+    property bool audioOn: false
     property bool floodOn: false // white-LED/floodlight on state (optimistic)
 
     // User stream-quality preference: false = Fluent (sub), true = Clear (main).
@@ -59,6 +63,8 @@ Rectangle {
     signal popOut(int deviceRow, string label)
     // A camera was dropped onto this pane — from the sidebar or another pane.
     signal cameraDropped(int pane, int row)
+    // Speaker button pressed: the page decides who is audible.
+    signal audioToggled(int row)
 
     // True while a drag hovers this pane, so it can show where it would land.
     property bool dropTarget: false
@@ -105,7 +111,7 @@ Rectangle {
         var want = deviceRow >= 0 && visible && pageActive;
         var key = "";
         if (want) {
-            if (effectiveMain && !bcFallback)
+            if (effectiveMain && !bcFallback && !audioOn)
                 key = "bc:" + deviceRow;
             else
                 key = Devices.liveUrl(deviceRow, effectiveMain);
@@ -136,6 +142,7 @@ Rectangle {
     onVisibleChanged: updateSource()
     onPageActiveChanged: updateSource()
     onEffectiveMainChanged: { bcFallback = false; updateSource(); }
+    onAudioOnChanged: updateSource()
     Component.onCompleted: updateSource()
 
     // The NVR grants only ~1 Baichuan session. If HD live can't get the slot,
@@ -164,6 +171,7 @@ Rectangle {
     StreamPlayer {
         id: player
         videoSink: video.videoSink
+        audioEnabled: root.audioOn
     }
 
     Component.onDestruction: player.stop()
@@ -476,6 +484,16 @@ Rectangle {
                 glyph: "⏺"; active: player.recording
                 tip: player.recording ? qsTr("Stop recording") : qsTr("Record video")
                 onActivated: player.recording ? player.stopRecording() : player.startRecording()
+            }
+            // Listen: one camera at a time. Shown on every pane — the camera's
+            // ability report doesn't say whether it has a mic, the stream does.
+            ToolButton {
+                glyph: root.audioOn ? "🔊" : "🔈"; active: root.audioOn
+                tip: !root.audioOn ? qsTr("Listen")
+                     : (player.state === StreamPlayer.Streaming && !player.hasAudio)
+                       ? qsTr("No audio on this camera's stream — enable Audio in its Encoding settings")
+                       : qsTr("Mute")
+                onActivated: root.audioToggled(root.deviceRow)
             }
             ToolButton {
                 glyph: "⊕"; active: root.zoom > 1.01

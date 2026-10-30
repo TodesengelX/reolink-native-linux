@@ -8,6 +8,7 @@
 #include <QWaitCondition>
 
 #include <atomic>
+#include <functional>
 #include <thread>
 
 class QTcpSocket;
@@ -44,6 +45,10 @@ public:
     explicit BaichuanClient(Params params);
     ~BaichuanClient();
 
+    // Receive the stream's AAC audio (ADTS frames), on the worker thread. Set
+    // before start(). Without one, audio is dropped as before.
+    void setAudioSink(std::function<void(const QByteArray &adts)> sink) { m_audioSink = std::move(sink); }
+
     // Spawn the worker (connect + login + start the stream). Non-blocking.
     void start();
     // Signal the worker to stop and unblock any pending read(). Never joins on the
@@ -73,6 +78,7 @@ private:
     Params m_p;
     std::thread m_thread;
     std::atomic<bool> m_abort{false};
+    std::function<void(const QByteArray &)> m_audioSink;
 
     QMutex m_mutex;
     QWaitCondition m_cond;

@@ -37,6 +37,10 @@ Item {
     // HD mode streams the full-resolution main stream over native Baichuan; off =
     // light sub-stream (FLV) scrubbing.
     property bool hdMode: false
+    // Play the recording's sound. In the 4-pane grid only one camera is heard:
+    // the maximized one, else the top-left pane.
+    property bool audioOn: false
+    readonly property int audioRow: page.maximizedRow >= 0 ? page.maximizedRow : page.gridRows[0]
 
     // ---- Synced multi-camera playback ---------------------------------------
     // Like the official client: up to 4 panes, one calendar and one timeline
@@ -685,7 +689,8 @@ Item {
 
                 // Retry on connection error: NVRs are connection-limited and may
                 // momentarily refuse the playback stream.
-                StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true }
+                StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true
+                               audioEnabled: page.audioOn && page.paneCount === 1 }
 
                 Column {
                     anchors.centerIn: parent
@@ -766,6 +771,7 @@ Item {
                         // HD only while maximized; restoring forces SD (the pane
                         // handles the switch-back itself when this goes false).
                         showHdToggle: isMax
+                        audioOn: page.audioOn && page.paneCount === 4 && page.audioRow === index
                         dayEpoch: new Date(page.selYear, page.selMonth - 1,
                                            page.selDay, 0, 0, 0).getTime() / 1000
                         onStreamingChanged: page.countStreaming()
@@ -852,6 +858,16 @@ Item {
                 Ctl { glyph: "⏹"; tip: qsTr("Stop")
                       onActivated: { page._suppressResume = true;
                                      player.stop(); page.stopAllPanes(); } }
+                Ctl {
+                    glyph: page.audioOn ? "🔊" : "🔈"
+                    tip: !page.audioOn
+                         ? (page.paneCount === 4 ? qsTr("Sound (from the maximized camera, else the top-left one)")
+                                                 : qsTr("Sound"))
+                         : (page.paneCount === 1 && player.state === StreamPlayer.Streaming && !player.hasAudio)
+                           ? qsTr("This recording has no audio")
+                           : qsTr("Mute")
+                    onActivated: page.audioOn = !page.audioOn
+                }
                 // Export: save a main-stream MP4 of the moment at the playhead.
                 // Single-pane only — it targets THE camera, and grid mode has four.
                 Rectangle {
