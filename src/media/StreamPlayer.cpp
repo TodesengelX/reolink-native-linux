@@ -32,6 +32,11 @@ constexpr int kOpenTimeoutMs = 10000;
 constexpr int kReadStallTimeoutMs = 10000; // §5.8 watchdog: no packet in 10s → reconnect
 constexpr int kBackoffStartMs = 1000;
 constexpr int kBackoffCapMs = 30000;
+// Time a stopping session gets to close politely (RTSP TEARDOWN).
+constexpr int kCloseTimeoutMs = 1000;
+
+// Workers still running (they are detached); see StreamPlayer::waitForWorkers.
+std::atomic<int> g_liveWorkers{0};
 
 using Session = StreamPlayer::Session;
 using State = StreamPlayer::State;
@@ -299,11 +304,15 @@ struct Recorder {
 struct InterruptContext {
     Session *session = nullptr;
     QDeadlineTimer deadline;
+    // Set while closing: abort no longer interrupts, so the close can still send
+    // RTSP TEARDOWN (bounded by `deadline`). FFmpeg checks this callback before
+    // every write, so an aborted session used to skip TEARDOWN entirely.
+    bool closing = false;
 
     static int callback(void *opaque)
     {
         auto *ctx = static_cast<InterruptContext *>(opaque);
-        if (ctx->session->abort.load(std::memory_order_relaxed))
+        if (!ctx->closing && ctx->session->abort.load(std::memory_order_relaxed))
             return 1;
         return ctx->deadline.hasExpired() ? 1 : 0;
     }
@@ -495,10 +504,21 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         return !packetSource && (live || s->retryOnError.load());
     }
 
+    // Closing sends RTSP TEARDOWN. Without it the camera only learns the session
+    // is gone when the TCP connection drops, and some firmware (seen on an
+    // RLC-410S) never does: it keeps streaming every abandoned session's RTP
+    // into later connections, where the interleaved packets decode as green
+    // garbage. So give the close a short window even when stopping on abort.
     struct FmtGuard {
         AVFormatContext *ctx;
-        ~FmtGuard() { avformat_close_input(&ctx); }
-    } fmtGuard{fmt};
+        InterruptContext *interrupt;
+        ~FmtGuard()
+        {
+            interrupt->closing = true;
+            interrupt->deadline = QDeadlineTimer(kCloseTimeoutMs);
+            avformat_close_input(&ctx);
+        }
+    } fmtGuard{fmt, &interrupt};
 
     interrupt.deadline = QDeadlineTimer(kOpenTimeoutMs);
     if (avformat_find_stream_info(fmt, nullptr) < 0) {
@@ -746,6 +766,9 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
 
 void runWorker(std::shared_ptr<Session> s)
 {
+    struct LiveGuard { // counted up in start(), before the thread exists
+        ~LiveGuard() { --g_liveWorkers; }
+    } liveGuard;
     int backoffMs = kBackoffStartMs;
     bool streaming = false;
     // Live sources reconnect indefinitely; a non-live retry (playback FLV on a
@@ -898,6 +921,14 @@ qint64 StreamPlayer::framesDecoded() const
     return m_session ? m_session->framesDecoded.load() : 0;
 }
 
+bool StreamPlayer::waitForWorkers(int timeoutMs)
+{
+    const QDeadlineTimer deadline(timeoutMs);
+    while (g_liveWorkers.load() > 0 && !deadline.hasExpired())
+        QThread::msleep(20);
+    return g_liveWorkers.load() == 0;
+}
+
 void StreamPlayer::setLoop(bool loop)
 {
     if (m_loop == loop)
@@ -942,6 +973,7 @@ void StreamPlayer::start()
     m_activeStop = std::move(m_pendingStop);
     m_pendingStop = nullptr;
     applyState(State::Connecting, QString());
+    ++g_liveWorkers;
     std::thread(runWorker, s).detach();
 }
 
