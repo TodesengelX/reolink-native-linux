@@ -18,6 +18,9 @@ class EventManager : public QAbstractListModel
     Q_PROPERTY(int unread READ unread NOTIFY unreadChanged)
     Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
     Q_PROPERTY(QString cameraFilter READ cameraFilter WRITE setCameraFilter NOTIFY cameraFilterChanged)
+    // Desktop pop-ups for new events. Off still records every event in the
+    // inbox; it only silences the notification. Persisted across runs.
+    Q_PROPERTY(bool popupsEnabled READ popupsEnabled WRITE setPopupsEnabled NOTIFY popupsEnabledChanged)
 
 public:
     enum Role {
@@ -41,6 +44,8 @@ public:
     void setFilter(const QString &filter);
     QString cameraFilter() const { return m_cameraFilter; }
     void setCameraFilter(const QString &camera);
+    bool popupsEnabled() const { return m_popupsEnabled; }
+    void setPopupsEnabled(bool on);
 
     Q_INVOKABLE void markAllRead();
     // Seconds-into-day of each detection event for this camera on the given day
@@ -53,6 +58,7 @@ signals:
     void unreadChanged();
     void filterChanged();
     void cameraFilterChanged();
+    void popupsEnabledChanged();
     // The user clicked a desktop notification — jump to this event's playback.
     void eventActivated(qint64 hostId, int channel, qint64 timestamp);
 
@@ -73,6 +79,7 @@ private:
     QString m_filter;                // "" = all, else a type
     QString m_cameraFilter;          // "" = all cameras, else a camera name
     int m_unread = 0;
+    bool m_popupsEnabled = true;
 };
 
 } // namespace rl
