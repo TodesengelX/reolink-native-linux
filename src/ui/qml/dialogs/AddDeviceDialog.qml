@@ -253,7 +253,11 @@ Dialog {
                 // ---- Discovered devices ----
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: discoveredModel.count > 0 ? 90 : 0
+                    // Grow with the results (up to 5 rows) instead of a fixed
+                    // 3-row box that silently hid the 4th+ device; past that,
+                    // scroll with a visible bar.
+                    Layout.preferredHeight: discoveredModel.count > 0
+                                            ? Math.min(discoveredModel.count, 5) * 28 + 4 : 0
                     visible: discoveredModel.count > 0
                     color: Theme.paneBackground
                     border.color: Theme.border
@@ -262,6 +266,10 @@ Dialog {
                         anchors.fill: parent
                         anchors.margins: 2
                         clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.vertical: ScrollBar {
+                            policy: discoveredModel.count > 5 ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+                        }
                         model: discoveredModel
                         delegate: Rectangle {
                             required property string ip
