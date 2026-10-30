@@ -3,30 +3,116 @@
 #include "core/Log.h"
 #include "core/Paths.h"
 
+#include <QAudioDevice>
+#include <QAudioFormat>
+#include <QAudioSink>
 #include <QDateTime>
 #include <QDeadlineTimer>
 #include <QThread>
 #include <QUrl>
+#include <QMediaDevices>
 #include <QUrlQuery>
 #include <QVideoFrame>
 #include <QVideoFrameFormat>
 
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/channel_layout.h>
 #include <libavutil/display.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/time.h>
+#include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
 
 namespace rl {
 
+// Decoded PCM handed from the decode worker to the GUI-thread audio output.
+// Capped so a sound card clock running slower than the camera's can't build up
+// latency: past the cap the oldest audio is dropped.
+class AudioRing
+{
+public:
+    explicit AudioRing(const QAudioFormat &f) : format(f) {}
+    const QAudioFormat format;
+
+    void push(const char *data, qsizetype n)
+    {
+        QMutexLocker lock(&m_mutex);
+        m_buf.append(data, n);
+        const qsizetype cap = format.bytesForDuration(400000);
+        if (m_buf.size() > cap) {
+            const qsizetype frame = qMax(1, format.bytesPerFrame());
+            m_buf.remove(0, (m_buf.size() - cap) / frame * frame);
+        }
+    }
+    // Always fills `n` bytes: buffered audio first, then silence, so the output
+    // never starves into an idle/stopped state between network bursts.
+    qint64 pop(char *out, qint64 n)
+    {
+        QMutexLocker lock(&m_mutex);
+        const qint64 take = qMin<qint64>(n, m_buf.size());
+        std::memcpy(out, m_buf.constData(), static_cast<size_t>(take));
+        m_buf.remove(0, take);
+        std::memset(out + take, 0, static_cast<size_t>(n - take));
+        return n;
+    }
+    void clear()
+    {
+        QMutexLocker lock(&m_mutex);
+        m_buf.clear();
+    }
+
+private:
+    QMutex m_mutex;
+    QByteArray m_buf;
+};
+
 namespace {
+
+// Pull-mode source for QAudioSink over an AudioRing.
+class AudioPullDevice : public QIODevice
+{
+public:
+    AudioPullDevice(std::shared_ptr<AudioRing> ring, QObject *parent)
+        : QIODevice(parent), m_ring(std::move(ring)) {}
+    bool isSequential() const override { return true; }
+    qint64 bytesAvailable() const override
+    {
+        return m_ring->format.bytesForDuration(100000) + QIODevice::bytesAvailable();
+    }
+
+protected:
+    qint64 readData(char *data, qint64 maxlen) override { return m_ring->pop(data, maxlen); }
+    qint64 writeData(const char *, qint64) override { return -1; }
+
+private:
+    std::shared_ptr<AudioRing> m_ring;
+};
+
+// 48 kHz stereo 16-bit where the default output takes it (PulseAudio/PipeWire
+// do), else the device's own preferred format.
+QAudioFormat chooseAudioFormat()
+{
+    QAudioFormat f;
+    f.setSampleRate(48000);
+    f.setChannelCount(2);
+    f.setSampleFormat(QAudioFormat::Int16);
+    const QAudioDevice dev = QMediaDevices::defaultAudioOutput();
+    if (!dev.isNull() && !dev.isFormatSupported(f)) {
+        f = dev.preferredFormat();
+        if (f.sampleFormat() != QAudioFormat::Float)
+            f.setSampleFormat(QAudioFormat::Int16);
+    }
+    return f;
+}
 
 constexpr int kOpenTimeoutMs = 10000;
 constexpr int kReadStallTimeoutMs = 10000; // §5.8 watchdog: no packet in 10s → reconnect
@@ -209,6 +295,97 @@ void postRecording(const std::shared_ptr<Session> &s, bool recording, const QStr
         p, [p, recording, path, error] { p->applyRecordingState(recording, path, error); },
         Qt::QueuedConnection);
 }
+
+void postHasAudio(const std::shared_ptr<Session> &s, bool hasAudio)
+{
+    QMutexLocker lock(&s->backMutex);
+    if (!s->player)
+        return;
+    StreamPlayer *p = s->player;
+    QMetaObject::invokeMethod(p, [p, hasAudio] { p->applyHasAudio(hasAudio); },
+                              Qt::QueuedConnection);
+}
+
+// Decodes the stream's audio track and resamples it to the output format. The
+// resampler is set up from the first decoded frame, since RTSP/FLV codec
+// parameters can leave the channel layout unspecified until then.
+struct AudioDecoder {
+    AVCodecContext *dec = nullptr;
+    SwrContext *swr = nullptr;
+    AVFrame *frame = nullptr;
+    int outRate = 0;
+    int outChannels = 0;
+    AVSampleFormat outFmt = AV_SAMPLE_FMT_S16;
+    int bytesPerSample = 2;
+    bool swrFailed = false;
+    std::vector<uint8_t> out;
+
+    ~AudioDecoder()
+    {
+        swr_free(&swr);
+        av_frame_free(&frame);
+        avcodec_free_context(&dec);
+    }
+
+    bool open(const AVStream *st, const QAudioFormat &f)
+    {
+        const AVCodec *codec = avcodec_find_decoder(st->codecpar->codec_id);
+        if (!codec)
+            return false;
+        dec = avcodec_alloc_context3(codec);
+        if (!dec || avcodec_parameters_to_context(dec, st->codecpar) < 0)
+            return false;
+        dec->pkt_timebase = st->time_base;
+        if (avcodec_open2(dec, codec, nullptr) < 0)
+            return false;
+        frame = av_frame_alloc();
+        outRate = f.sampleRate();
+        outChannels = f.channelCount();
+        outFmt = f.sampleFormat() == QAudioFormat::Float ? AV_SAMPLE_FMT_FLT : AV_SAMPLE_FMT_S16;
+        bytesPerSample = av_get_bytes_per_sample(outFmt);
+        return frame != nullptr;
+    }
+
+    void decode(const AVPacket *pkt, AudioRing &ring)
+    {
+        if (avcodec_send_packet(dec, pkt) < 0)
+            return;
+        while (avcodec_receive_frame(dec, frame) == 0) {
+            if (!swr && !swrFailed) {
+                AVChannelLayout inLayout{}, outLayout{};
+                if (frame->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC)
+                    av_channel_layout_default(&inLayout, qMax(1, frame->ch_layout.nb_channels));
+                else
+                    av_channel_layout_copy(&inLayout, &frame->ch_layout);
+                av_channel_layout_default(&outLayout, outChannels);
+                if (swr_alloc_set_opts2(&swr, &outLayout, outFmt, outRate, &inLayout,
+                                        static_cast<AVSampleFormat>(frame->format),
+                                        frame->sample_rate, 0, nullptr) < 0
+                    || swr_init(swr) < 0) {
+                    swr_free(&swr);
+                    swrFailed = true; // unconvertible; stay silent rather than retry per frame
+                    qCWarning(lcMedia) << "audio: can't resample"
+                                       << av_get_sample_fmt_name(static_cast<AVSampleFormat>(frame->format))
+                                       << frame->sample_rate << "Hz";
+                }
+                av_channel_layout_uninit(&inLayout);
+                av_channel_layout_uninit(&outLayout);
+            }
+            if (swr) {
+                const int maxOut = swr_get_out_samples(swr, frame->nb_samples);
+                out.resize(static_cast<size_t>(qMax(0, maxOut)) * outChannels * bytesPerSample);
+                uint8_t *o = out.data();
+                const int n = swr_convert(swr, &o, maxOut,
+                                          const_cast<const uint8_t **>(frame->extended_data),
+                                          frame->nb_samples);
+                if (n > 0)
+                    ring.push(reinterpret_cast<const char *>(out.data()),
+                              static_cast<qsizetype>(n) * outChannels * bytesPerSample);
+            }
+            av_frame_unref(frame);
+        }
+    }
+};
 
 // Stream-copy recorder: taps the live demux, muxing video packets into an MP4
 // without re-encoding (DESIGN §5.5). Starts on the next keyframe and rebases
@@ -561,6 +738,20 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
                     << "x" << stream->codecpar->height
                     << (hwPixFmt != AV_PIX_FMT_NONE ? "[hw]" : "[sw]");
 
+    // Audio track (Reolink RTSP/FLV carry AAC when the camera's audio is on).
+    // Opened up front so the UI knows a speaker toggle has something to play;
+    // decoded only while audio is enabled.
+    const int audioIndex = s->audioRing
+        ? av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, videoIndex, nullptr, 0) : -1;
+    AudioDecoder audio;
+    const bool hasAudio = audioIndex >= 0 && audio.open(fmt->streams[audioIndex], s->audioRing->format);
+    if (audioIndex >= 0) {
+        const AVCodecParameters *ap = fmt->streams[audioIndex]->codecpar;
+        qCInfo(lcMedia) << redacted(source) << "audio:" << avcodec_get_name(ap->codec_id)
+                        << ap->sample_rate << "Hz" << (hasAudio ? "" : "(no decoder)");
+    }
+    postHasAudio(s, hasAudio);
+
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
     AVFrame *hwTransfer = av_frame_alloc();
@@ -726,6 +917,12 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
             postState(s, State::Error, QStringLiteral("read error / stalled"));
             finalizeRecording();
             return !packetSource && (live || s->retryOnError.load());
+        }
+        if (hasAudio && packet->stream_index == audioIndex) {
+            if (s->audioEnabled.load(std::memory_order_relaxed))
+                audio.decode(packet, *s->audioRing);
+            av_packet_unref(packet);
+            continue;
         }
         if (packet->stream_index != videoIndex) {
             av_packet_unref(packet);
@@ -932,6 +1129,10 @@ void StreamPlayer::start()
     s->expectedSize = m_expectedSize;
     s->loop.store(m_loop);
     s->retryOnError.store(m_retryOnError);
+    if (!m_audioRing)
+        m_audioRing = std::make_shared<AudioRing>(chooseAudioFormat());
+    s->audioRing = m_audioRing;
+    s->audioEnabled.store(m_audioEnabled);
     {
         QMutexLocker lock(&s->sinkMutex);
         s->sink = m_pendingSink;
@@ -954,6 +1155,7 @@ void StreamPlayer::stop()
         m_activeStop();
         m_activeStop = nullptr;
     }
+    applyHasAudio(false); // the next session reports its own track
     if (!m_session)
         return;
     {
@@ -968,6 +1170,49 @@ void StreamPlayer::stop()
     }
     if (m_state != State::Idle)
         applyState(State::Stopped, QString());
+}
+
+void StreamPlayer::setAudioEnabled(bool on)
+{
+    if (m_audioEnabled == on)
+        return;
+    m_audioEnabled = on;
+    if (m_session)
+        m_session->audioEnabled.store(on);
+    updateAudioOutput();
+    emit audioEnabledChanged();
+}
+
+void StreamPlayer::applyHasAudio(bool hasAudio)
+{
+    if (m_hasAudio == hasAudio)
+        return;
+    m_hasAudio = hasAudio;
+    updateAudioOutput();
+    emit hasAudioChanged();
+}
+
+void StreamPlayer::updateAudioOutput()
+{
+    const bool want = m_audioEnabled && m_hasAudio && m_audioRing;
+    if (want && !m_audioSink) {
+        m_audioRing->clear(); // start from live audio, not whatever queued earlier
+        m_audioSink = new QAudioSink(QMediaDevices::defaultAudioOutput(), m_audioRing->format, this);
+        m_audioSink->setBufferSize(m_audioRing->format.bytesForDuration(150000));
+        m_audioDevice = new AudioPullDevice(m_audioRing, this);
+        m_audioDevice->open(QIODevice::ReadOnly);
+        m_audioSink->start(m_audioDevice);
+        qCInfo(lcMedia) << "audio output on:" << m_audioRing->format.sampleRate() << "Hz"
+                        << m_audioRing->format.channelCount() << "ch, state" << m_audioSink->state()
+                        << m_audioSink->error();
+    } else if (!want && m_audioSink) {
+        m_audioSink->stop();
+        delete m_audioSink;
+        m_audioSink = nullptr;
+        delete m_audioDevice;
+        m_audioDevice = nullptr;
+        qCInfo(lcMedia) << "audio output off";
+    }
 }
 
 void StreamPlayer::applyState(State state, const QString &error)
