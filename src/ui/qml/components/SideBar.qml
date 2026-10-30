@@ -144,10 +144,17 @@ Rectangle {
                 }
                 width: ListView.view.width
                 height: isNvr ? 44 : 0
+                // ListView drives section-item visibility itself and forces it
+                // back on, so `visible: isNvr` alone doesn't hide a standalone
+                // camera's header — it stayed shown at height 0 and its content
+                // overflowed onto the camera row below. Clip, and gate the
+                // content and input on isNvr directly.
                 visible: isNvr
+                clip: true
                 color: nvrHover.hovered ? Theme.surfaceAlt : "transparent"
 
                 RowLayout {
+                    visible: nvrHeader.isNvr
                     anchors.fill: parent
                     anchors.leftMargin: Theme.spacing
                     anchors.rightMargin: Theme.spacing
@@ -202,8 +209,9 @@ Rectangle {
                         }
                     }
                 }
-                HoverHandler { id: nvrHover }
+                HoverHandler { id: nvrHover; enabled: nvrHeader.isNvr }
                 MouseArea {
+                    enabled: nvrHeader.isNvr
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
