@@ -164,14 +164,18 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 currentIndex: nav.currentIndex
 
+                // Pages stream only while the window is actually shown: closed to
+                // the tray, the app keeps monitoring (events, notifications) but
+                // stops pulling and decoding video nobody can see, and frees the
+                // cameras' stream sessions. Reopening resumes Live View.
                 LiveViewPage {
                     id: liveViewPage
-                    active: nav.currentIndex === 0
+                    active: nav.currentIndex === 0 && window.visible
                     fullscreen: window.videoFullscreen
                     onFullscreenToggled: window.videoFullscreen = !window.videoFullscreen
                     onPopOut: (row, lbl) => window.openPopout(row, lbl)
                 }
-                PlaybackPage { id: playbackPage; active: nav.currentIndex === 1 }
+                PlaybackPage { id: playbackPage; active: nav.currentIndex === 1 && window.visible }
                 EventsPage {
                     onJumpToPlayback: (hostId, channel, timestamp) => {
                         nav.currentIndex = 1;
