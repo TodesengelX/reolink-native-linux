@@ -149,6 +149,27 @@ Rectangle {
                 root.bcFallback = true;
                 root.updateSource();
             }
+            // A Baichuan session is one-shot: when the device drops it, the
+            // player just stops. Reconnect after a beat unless we stopped it
+            // ourselves (releaseStream/updateSource clear or change streamKey
+            // before stopping, and a restart leaves Stopped right away).
+            if (player.state === StreamPlayer.Stopped
+                && root.streamKey.substring(0, 3) === "bc:")
+                bcReconnect.restart();
+            else
+                bcReconnect.stop();
+        }
+    }
+
+    Timer {
+        id: bcReconnect
+        interval: 3000
+        onTriggered: {
+            if (player.state !== StreamPlayer.Stopped
+                || root.streamKey.substring(0, 3) !== "bc:")
+                return;
+            root.streamKey = ""; // force updateSource() to open a fresh session
+            root.updateSource();
         }
     }
 
