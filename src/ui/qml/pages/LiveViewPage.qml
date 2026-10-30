@@ -18,6 +18,7 @@ Item {
     property int preset: 4
     property int maximizedIndex: -1
     property int selectedIndex: -1
+    property int audioIndex: -1  // device row being listened to (-1 = all muted)
 
     // A maximized pane is effectively the single ("1") view, so light that button
     // up in the layout toolbar rather than the underlying grid preset.
@@ -342,12 +343,14 @@ Item {
                     capSiren: hasSiren
                     capFloodlight: hasFloodlight
                     capTalk: hasTalk
+                    audioOn: page.audioIndex === index
                     // idx is the device row: maximizedIndex/selectedIndex track
                     // cameras, not cells, so they survive a rearrange.
                     onToggleMaximize: (idx) => {
                         page.maximizedIndex = page.maximizedIndex === idx ? -1 : idx;
                     }
                     onClicked: (idx) => page.selectedIndex = idx
+                    onAudioToggled: (idx) => page.audioIndex = page.audioIndex === idx ? -1 : idx
                     onPopOut: (row, lbl) => page.popOut(row, lbl)
                     onCameraDropped: (targetPane, row) => page.assignPane(targetPane, row)
 
