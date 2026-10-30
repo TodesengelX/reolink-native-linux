@@ -356,6 +356,12 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
         }
         pushAnnexB(f.annexB);
     };
+    if (m_audioSink) {
+        parser.onAudio = [&](const QByteArray &adts) {
+            if (started) // not before the first I-frame (or a seek's old-position audio)
+                m_audioSink(adts);
+        };
+    }
 
     QByteArray netBuf = m_streamTail;
     Msg m;

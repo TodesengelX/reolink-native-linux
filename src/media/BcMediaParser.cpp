@@ -94,7 +94,9 @@ int BcMediaParser::append(const QByteArray &mediaBytes)
             const int total = 8 + static_cast<int>(size) + padFor(size);
             if (m_buf.size() < total)
                 break;
-            m_buf.remove(0, total); // audio skipped in the video path
+            if (onAudio && b[1] == '5') // "05wb" = AAC; ADPCM ("01wb") unsupported
+                onAudio(m_buf.mid(8, static_cast<int>(size)));
+            m_buf.remove(0, total);
             continue;
         }
 

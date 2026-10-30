@@ -329,13 +329,19 @@ struct AudioDecoder {
 
     bool open(const AVStream *st, const QAudioFormat &f)
     {
-        const AVCodec *codec = avcodec_find_decoder(st->codecpar->codec_id);
+        return open(st->codecpar->codec_id, st->codecpar, st->time_base, f);
+    }
+
+    // `par` may be null when the codec configures itself in-band (ADTS AAC).
+    bool open(AVCodecID id, const AVCodecParameters *par, AVRational timeBase, const QAudioFormat &f)
+    {
+        const AVCodec *codec = avcodec_find_decoder(id);
         if (!codec)
             return false;
         dec = avcodec_alloc_context3(codec);
-        if (!dec || avcodec_parameters_to_context(dec, st->codecpar) < 0)
+        if (!dec || (par && avcodec_parameters_to_context(dec, par) < 0))
             return false;
-        dec->pkt_timebase = st->time_base;
+        dec->pkt_timebase = timeBase;
         if (avcodec_open2(dec, codec, nullptr) < 0)
             return false;
         frame = av_frame_alloc();
@@ -750,7 +756,10 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
         qCInfo(lcMedia) << redacted(source) << "audio:" << avcodec_get_name(ap->codec_id)
                         << ap->sample_rate << "Hz" << (hasAudio ? "" : "(no decoder)");
     }
-    postHasAudio(s, hasAudio);
+    // A packet source's audio comes in apart from the demuxer (SideAudio), which
+    // reports it itself; the raw video stream never has a track to report.
+    if (!packetSource)
+        postHasAudio(s, hasAudio);
 
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
@@ -1022,7 +1031,85 @@ void StreamPlayer::stopRecording()
         m_session->recordRequested.store(false);
 }
 
+// Audio that arrives beside a packet source rather than through the demuxer:
+// Baichuan carries AAC (ADTS) frames interleaved with the video, and the
+// client hands them over on its own thread. Split with FFmpeg's AAC parser,
+// decoded and resampled with the same AudioDecoder as demuxed audio, and played
+// through the player's ring while the current session has audio enabled.
+class SideAudio
+{
+public:
+    ~SideAudio() { av_parser_close(m_parser); }
+
+    // Called from start(): later audio belongs to this session.
+    void attach(const std::shared_ptr<Session> &s)
+    {
+        QMutexLocker lock(&m_mutex);
+        m_session = s;
+        m_announced = false;
+    }
+
+    void feed(const QByteArray &adts)
+    {
+        QMutexLocker lock(&m_mutex);
+        const std::shared_ptr<Session> s = m_session.lock();
+        if (!s || !s->audioRing || s->abort.load())
+            return;
+        if (!m_announced) { // the speaker toggle now has something to play
+            m_announced = true;
+            postHasAudio(s, true);
+        }
+        if (!s->audioEnabled.load(std::memory_order_relaxed))
+            return;
+        if (!m_opened && !m_failed) {
+            m_parser = av_parser_init(AV_CODEC_ID_AAC);
+            m_opened = m_parser && m_dec.open(AV_CODEC_ID_AAC, nullptr, AVRational{1, 1000},
+                                              s->audioRing->format);
+            m_failed = !m_opened;
+            if (m_failed)
+                qCWarning(lcMedia) << "audio: can't open the AAC decoder for this stream";
+        }
+        if (!m_opened)
+            return;
+        const auto *data = reinterpret_cast<const uint8_t *>(adts.constData());
+        int left = static_cast<int>(adts.size());
+        AVPacket *pkt = av_packet_alloc();
+        while (left > 0 && pkt) {
+            uint8_t *out = nullptr;
+            int outSize = 0;
+            const int used = av_parser_parse2(m_parser, m_dec.dec, &out, &outSize, data, left,
+                                              AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
+            if (used < 0)
+                break;
+            data += used;
+            left -= used;
+            if (outSize > 0) {
+                pkt->data = out;
+                pkt->size = outSize;
+                m_dec.decode(pkt, *s->audioRing);
+            }
+        }
+        av_packet_free(&pkt);
+    }
+
+private:
+    QMutex m_mutex;
+    std::weak_ptr<Session> m_session;
+    AudioDecoder m_dec;
+    AVCodecParserContext *m_parser = nullptr;
+    bool m_opened = false;
+    bool m_failed = false;
+    bool m_announced = false;
+};
+
 StreamPlayer::StreamPlayer(QObject *parent) : QObject(parent) {}
+
+std::function<void(const QByteArray &)> StreamPlayer::sideAudioSink()
+{
+    if (!m_sideAudio)
+        m_sideAudio = std::make_shared<SideAudio>();
+    return [side = m_sideAudio](const QByteArray &adts) { side->feed(adts); };
+}
 
 StreamPlayer::~StreamPlayer()
 {
@@ -1133,6 +1220,8 @@ void StreamPlayer::start()
         m_audioRing = std::make_shared<AudioRing>(chooseAudioFormat());
     s->audioRing = m_audioRing;
     s->audioEnabled.store(m_audioEnabled);
+    if (m_sideAudio)
+        m_sideAudio->attach(s);
     {
         QMutexLocker lock(&s->sinkMutex);
         s->sink = m_pendingSink;

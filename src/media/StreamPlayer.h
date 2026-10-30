@@ -18,6 +18,7 @@ class QIODevice;
 namespace rl {
 
 class AudioRing; // PCM hand-off from the decode worker to the audio output
+class SideAudio; // decodes audio delivered outside the demuxer (Baichuan)
 
 // One live/playback stream: FFmpeg demux + decode on a dedicated worker thread,
 // frames delivered to a QML VideoOutput's QVideoSink (NV12/YUV420P upload path —
@@ -112,6 +113,10 @@ public:
     // cleared by setSource(). Not a QML API.
     void setPacketSource(std::function<int(unsigned char *, int)> reader, const QString &format,
                          std::function<void()> onStop);
+    // Feed for a packet source's audio, which arrives apart from the video
+    // elementary stream: takes AAC (ADTS) frames from any thread and plays them
+    // through this player's audio output while audioEnabled. Not a QML API.
+    std::function<void(const QByteArray &adts)> sideAudioSink();
 
     QVideoSink *videoSink() const;
     void setVideoSink(QVideoSink *sink);
@@ -181,6 +186,7 @@ private:
     std::shared_ptr<AudioRing> m_audioRing; // created on first start()
     QAudioSink *m_audioSink = nullptr;      // only while audio is playing
     QIODevice *m_audioDevice = nullptr;     // pull-mode reader over m_audioRing
+    std::shared_ptr<SideAudio> m_sideAudio; // created by sideAudioSink()
 
     // Set via QML before start(); copied into each new Session. Survives stop().
     QPointer<QVideoSink> m_pendingSink;

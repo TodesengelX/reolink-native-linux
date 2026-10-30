@@ -1236,6 +1236,9 @@ void DeviceManager::startBaichuan(int row, qint64 startEpoch, StreamPlayer *play
     p.startEpoch = startEpoch; // <= 0 = live (cmd 3 Preview), else by-time playback
 
     auto client = std::make_shared<BaichuanClient>(p);
+    // The packet source carries video only; route the stream's audio to the
+    // player separately so HD live/playback can be heard too.
+    client->setAudioSink(player->sideAudioSink());
     client->start();
     if (startEpoch > 0) {
         m_playbackClient = client; // weak — for in-place seek; StreamPlayer owns lifetime
