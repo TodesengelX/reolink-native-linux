@@ -165,11 +165,22 @@ Rectangle {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 1
-                        Text {
+                        RowLayout {
                             Layout.fillWidth: true
-                            text: nvrHeader.host ? nvrHeader.host.name : ""
-                            color: Theme.text; font.pixelSize: 13; font.bold: true
-                            elide: Text.ElideRight
+                            spacing: 6
+                            Text {
+                                Layout.maximumWidth: implicitWidth
+                                Layout.fillWidth: true
+                                text: nvrHeader.host ? nvrHeader.host.name : ""
+                                color: Theme.text; font.pixelSize: 13; font.bold: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: nvrHeader.host ? nvrHeader.host.addr : ""
+                                color: Theme.textMuted; font.pixelSize: 11
+                                Layout.alignment: Qt.AlignBaseline
+                            }
+                            Item { Layout.fillWidth: true }
                         }
                         Row {
                             spacing: 5
@@ -241,6 +252,7 @@ Rectangle {
                 id: camRow
                 required property int index
                 required property string name
+                required property string addr
                 required property string status
                 required property string model
                 required property string kind
@@ -294,12 +306,29 @@ Rectangle {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 2
-                        Text {
+                        RowLayout {
                             Layout.fillWidth: true
-                            text: name
-                            color: Theme.text
-                            font.pixelSize: 13
-                            elide: Text.ElideRight
+                            spacing: 6
+                            Text {
+                                Layout.maximumWidth: implicitWidth
+                                Layout.fillWidth: true
+                                text: name
+                                color: Theme.text
+                                font.pixelSize: 13
+                                elide: Text.ElideRight
+                            }
+                            // The device's address, so cameras with similar names
+                            // can be told apart. Not for stream rows (a full URL
+                            // may embed credentials) or NVR channels (the header
+                            // shows the NVR's address).
+                            Text {
+                                visible: camRow.kind === "camera"
+                                text: camRow.addr
+                                color: Theme.textMuted
+                                font.pixelSize: 11
+                                Layout.alignment: Qt.AlignBaseline
+                            }
+                            Item { Layout.fillWidth: true }
                         }
                         Row {
                             spacing: 5
