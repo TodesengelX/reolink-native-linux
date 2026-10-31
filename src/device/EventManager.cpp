@@ -287,6 +287,37 @@ void EventManager::markAllRead()
     emit unreadChanged();
 }
 
+QVariantMap EventManager::eventAt(qint64 hostId, int channel, qint64 timestamp) const
+{
+    for (const EventRecord &e : m_all) {
+        if (e.hostId == hostId && e.channel == channel && e.timestamp == timestamp) {
+            QVariantMap m;
+            m["type"] = e.type;
+            m["camera"] = e.camera;
+            m["thumbnail"] = QFile::exists(e.thumbnail) ? e.thumbnail : QString();
+            return m;
+        }
+    }
+    return {};
+}
+
+QString EventManager::saveEventSnapshot(const QString &thumbnail, const QString &camera,
+                                       qint64 timestamp) const
+{
+    if (thumbnail.isEmpty() || !QFile::exists(thumbnail))
+        return {};
+    // Same place and naming as the toolbar snapshot button, with the event's time.
+    QString safe = camera.isEmpty() ? QStringLiteral("camera") : camera;
+    for (QChar &c : safe) // file-name safe: keep letters, digits, '-' and '_'
+        if (!c.isLetterOrNumber() && c != u'-' && c != u'_')
+            c = u'_';
+    const QString stamp = QDateTime::fromSecsSinceEpoch(timestamp).toString(QStringLiteral("yyyyMMdd_hhmmss"));
+    QString path = Paths::recordingsDir() + u'/' + safe + u'_' + stamp + QStringLiteral("_event.jpg");
+    for (int n = 2; QFile::exists(path); ++n) // never overwrite an earlier save
+        path = Paths::recordingsDir() + u'/' + safe + u'_' + stamp + QStringLiteral("_event-%1.jpg").arg(n);
+    return QFile::copy(thumbnail, path) ? path : QString();
+}
+
 void EventManager::clear()
 {
     // Drop the cached snapshot files along with the rows.
