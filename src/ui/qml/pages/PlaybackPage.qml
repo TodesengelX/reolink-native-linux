@@ -427,6 +427,15 @@ Item {
                 if (page._pendingPlayEpoch > 0) {
                     var ep = page._pendingPlayEpoch;
                     page._pendingPlayEpoch = 0;
+                    // The pre-roll can land just before the recording begins
+                    // (detection fires as the camera starts recording): start
+                    // at that recording instead of the previous file or a gap.
+                    var dayStartEp = new Date(page.selYear, page.selMonth - 1, page.selDay).getTime() / 1000;
+                    var target = timeline.segmentNear(ep - dayStartEp, 120);
+                    if (target && ep - dayStartEp < target.start) {
+                        ep = dayStartEp + target.start;
+                        page.playheadSecs = target.start;
+                    }
                     page._pendingPlaySecs = -1;
                     page._suppressResume = false; // event playback crosses file boundaries too
                     var url = Devices.playbackUrl(page.deviceRow, ep, false); // sub stream
