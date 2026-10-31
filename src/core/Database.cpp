@@ -218,6 +218,24 @@ bool Database::trimEvents(int keep)
     return true;
 }
 
+QStringList Database::deleteEventsBefore(qint64 cutoff)
+{
+    QStringList thumbnails;
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("SELECT thumbnail FROM events WHERE ts < :cut AND thumbnail != ''"));
+    q.bindValue(QStringLiteral(":cut"), cutoff);
+    if (q.exec())
+        while (q.next())
+            thumbnails << q.value(0).toString();
+    q.prepare(QStringLiteral("DELETE FROM events WHERE ts < :cut"));
+    q.bindValue(QStringLiteral(":cut"), cutoff);
+    if (!q.exec()) {
+        m_lastError = q.lastError().text();
+        return {};
+    }
+    return thumbnails;
+}
+
 qint64 Database::addHost(const HostRecord &rec)
 {
     QSqlQuery q(db());

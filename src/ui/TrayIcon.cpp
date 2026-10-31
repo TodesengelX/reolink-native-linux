@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QIcon>
 #include <QMenu>
+#include <QSignalBlocker>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTimer>
@@ -39,6 +40,11 @@ TrayIcon::TrayIcon(QObject *parent) : QObject(parent)
     autostart->setChecked(startOnLogin());
     connect(autostart, &QAction::toggled, this, &TrayIcon::setStartOnLogin);
 
+    m_popups = m_menu->addAction(tr("Show event pop-ups"));
+    m_popups->setCheckable(true);
+    m_popups->setChecked(true);
+    connect(m_popups, &QAction::toggled, this, &TrayIcon::popupsToggled);
+
     m_menu->addSeparator();
     QAction *quit = m_menu->addAction(tr("Quit"));
     connect(quit, &QAction::triggered, this, [this] {
@@ -68,6 +74,14 @@ void TrayIcon::setCloseToTray(bool on)
     m_closeToTray = on;
     QSettings().setValue(QStringLiteral("tray/closeToTray"), on);
     emit closeToTrayChanged();
+}
+
+void TrayIcon::setPopupsChecked(bool on)
+{
+    if (m_popups && m_popups->isChecked() != on) {
+        const QSignalBlocker block(m_popups);
+        m_popups->setChecked(on);
+    }
 }
 
 void TrayIcon::setUnread(int unread)

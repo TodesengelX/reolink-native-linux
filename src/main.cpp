@@ -208,6 +208,13 @@ int main(int argc, char *argv[])
     QObject::connect(&instance, &rl::SingleInstance::activationRequested, &app, raiseWindow);
     QObject::connect(&events, &rl::EventManager::unreadChanged, &tray,
                      [&tray, &events] { tray.setUnread(events.unread()); });
+    // Event pop-ups on/off: one setting (EventManager), toggled from the tray
+    // menu or the Events page, each mirroring the other.
+    tray.setPopupsChecked(events.popupsEnabled());
+    QObject::connect(&tray, &rl::TrayIcon::popupsToggled, &events,
+                     &rl::EventManager::setPopupsEnabled);
+    QObject::connect(&events, &rl::EventManager::popupsEnabledChanged, &tray,
+                     [&tray, &events] { tray.setPopupsChecked(events.popupsEnabled()); });
     // With the window closed the app lives in the tray; don't exit.
     app.setQuitOnLastWindowClosed(!tray.available());
 
