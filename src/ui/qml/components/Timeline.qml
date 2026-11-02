@@ -16,7 +16,9 @@ Rectangle {
     readonly property real laneHeight: 7
     readonly property real lanesHeight:
         lanes.length > 0 ? lanes.length * (laneHeight + 3) + 5 : 0
-    height: trackHeight + lanesHeight
+    // implicitHeight, not height: the page places this in a ColumnLayout,
+    // which ignores `height` and would keep the lanes clipped off.
+    implicitHeight: trackHeight + lanesHeight
     color: Theme.surface
     border.color: Theme.border
     radius: Theme.radius

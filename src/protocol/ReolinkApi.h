@@ -167,8 +167,9 @@ BatteryInfo parseBatteryInfo(const Json &value);
 
 // ---- Playback search ------------------------------------------------------
 // Search recorded files for a channel in [start,end]. streamType is "main"/"sub".
+// onlyStatus=true asks only for the per-month day bitmap (calendar dots).
 Json searchBody(int channel, const QDateTime &start, const QDateTime &end,
-                const QString &streamType = QStringLiteral("sub"));
+                const QString &streamType = QStringLiteral("sub"), bool onlyStatus = false);
 
 struct RecordingFile {
     QString name;      // file handle (empty on NVR firmware — identify by start)
@@ -206,6 +207,17 @@ SearchResult parseSearch(const Json &value);
 QString playbackFlvUrl(const QString &host, int port, bool https, int channel,
                        bool mainStream, const QDateTime &start, const QString &username,
                        const QString &password, const QString &token = {}, int seekSecs = 0);
+
+// Standalone cameras never answer the HTTP-FLV playback endpoint (the request
+// just hangs — verified on a Duo 2 PoE and an RLC-811A). They serve the
+// recording itself as an MP4 instead, addressed by the Search result's file
+// name, with HTTP Range support:
+//   <scheme>://host/cgi-bin/api.cgi?cmd=Playback&source=<name>&output=<name>&token=T
+// A non-zero seekSecs is appended as a W3C media fragment (#t=N), which
+// StreamPlayer strips and turns into a seek. Credentials as for playbackFlvUrl.
+QString playbackFileUrl(const QString &host, bool https, const QString &fileName,
+                        const QString &username, const QString &password,
+                        const QString &token = {}, int seekSecs = 0);
 
 // ---- Full-resolution clip download (NvrDownload + Download) ----------------
 // HTTP-FLV can't carry the HEVC main stream, so full-res playback goes through

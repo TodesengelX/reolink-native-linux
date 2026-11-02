@@ -171,6 +171,8 @@ int main(int argc, char *argv[])
         QStringLiteral("playbackAutoplay"), qEnvironmentVariableIsSet("RL_PLAYBACK_AUTOPLAY"));
     engine.rootContext()->setContextProperty(
         QStringLiteral("playbackGrid"), qEnvironmentVariableIsSet("RL_PLAYBACK_GRID"));
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("playbackDate"), qEnvironmentVariable("RL_PLAYBACK_DATE"));
     engine.rootContext()->setContextProperty(QStringLiteral("startHidden"),
                                              parser.isSet(hiddenOption) && tray.available());
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,

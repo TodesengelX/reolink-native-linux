@@ -348,10 +348,10 @@ static QDateTime parseTimeObj(const Json &o)
 }
 
 Json searchBody(int channel, const QDateTime &start, const QDateTime &end,
-                const QString &streamType)
+                const QString &streamType, bool onlyStatus)
 {
     Json search = {{"channel", channel},
-                   {"onlyStatus", 0},
+                   {"onlyStatus", onlyStatus ? 1 : 0},
                    {"streamType", streamType.toStdString()},
                    {"StartTime", timeObj(start)},
                    {"EndTime", timeObj(end)}};
@@ -410,6 +410,25 @@ QString playbackFlvUrl(const QString &host, int port, bool https, int channel, b
     return base + QStringLiteral("&user=%1&password=%2")
                       .arg(QString::fromUtf8(QUrl::toPercentEncoding(username)),
                            QString::fromUtf8(QUrl::toPercentEncoding(password)));
+}
+
+QString playbackFileUrl(const QString &host, bool https, const QString &fileName,
+                        const QString &username, const QString &password,
+                        const QString &token, int seekSecs)
+{
+    const QString scheme = https ? QStringLiteral("https") : QStringLiteral("http");
+    const QString name = QString::fromUtf8(QUrl::toPercentEncoding(fileName));
+    QString url = QStringLiteral("%1://%2/cgi-bin/api.cgi?cmd=Playback&source=%3&output=%3")
+                      .arg(scheme, hostForUrl(host), name);
+    if (!token.isEmpty())
+        url += QStringLiteral("&token=") + QString::fromUtf8(QUrl::toPercentEncoding(token));
+    else
+        url += QStringLiteral("&user=%1&password=%2")
+                   .arg(QString::fromUtf8(QUrl::toPercentEncoding(username)),
+                        QString::fromUtf8(QUrl::toPercentEncoding(password)));
+    if (seekSecs > 0)
+        url += QStringLiteral("#t=%1").arg(seekSecs);
+    return url;
 }
 
 Json nvrDownloadBody(int channel, const QDateTime &start, const QDateTime &end,

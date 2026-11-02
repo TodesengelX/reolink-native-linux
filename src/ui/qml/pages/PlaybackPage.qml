@@ -16,13 +16,32 @@ Item {
     property int selYear: 2026
     property int selMonth: 7
     property int selDay: 9
+    // Month shown in the calendar — follows the selected date, but the arrows
+    // can browse other months without changing the selection.
+    property int calYear: selYear
+    property int calMonth: selMonth
+    onSelYearChanged: calYear = selYear
+    onSelMonthChanged: calMonth = selMonth
+    // In grid mode the calendar follows the first pane's camera.
+    function calendarRow() { return page.paneCount === 4 ? page.gridRows[0] : page.deviceRow; }
+    function showMonth(y, m) {
+        page.calYear = y;
+        page.calMonth = m;
+        page.recordingDays = [];
+        var row = page.calendarRow();
+        if (row !== undefined && row >= 0)
+            Devices.searchRecordingDays(row, y, m);
+    }
 
-    // Default the date to today.
+    // Default the date to today (test hook: RL_PLAYBACK_DATE=YYYY-MM-DD).
     Component.onCompleted: {
-        var now = new Date();
+        var now = (typeof playbackDate !== "undefined" && playbackDate)
+                ? new Date(playbackDate + "T00:00:00") : new Date();
         selYear = now.getFullYear();
         selMonth = now.getMonth() + 1;
         selDay = now.getDate();
+        // The camera combo may already have searched with the placeholder date.
+        page.refresh();
     }
 
     property var recordingDays: []
@@ -452,8 +471,7 @@ Item {
         }
         function onRecordingDaysFound(row, year, month, days) {
             // In grid mode the calendar follows the first pane's camera.
-            var calRow = page.paneCount === 4 ? page.gridRows[0] : page.deviceRow;
-            if (row === calRow && year === page.selYear && month === page.selMonth)
+            if (row === page.calendarRow() && year === page.calYear && month === page.calMonth)
                 page.recordingDays = days;
         }
         function onRecordingsFailed(row, error) {
@@ -499,8 +517,12 @@ Item {
         function onRowsRemoved() {
             if (page.paneCount === 4) { page.gridSegs = ({}); page.initGridRows(); page.refresh(); }
         }
+        // A device's rows are also re-inserted once it finishes signing in, so
+        // the single-pane camera needs this too: its first search ran before
+        // that and failed with "device not ready", leaving the day blank.
         function onRowsInserted() {
             if (page.paneCount === 4) { page.gridSegs = ({}); page.initGridRows(); page.refresh(); }
+            else if (page.deviceRow >= 0 && timeline.segments.length === 0) page.refresh();
         }
     }
 
@@ -938,11 +960,17 @@ Item {
                 anchors.top: parent.top
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.topMargin: Theme.spacing
-                year: page.selYear
-                month: page.selMonth
+                year: page.calYear
+                month: page.calMonth
+                selYear: page.selYear
+                selMonth: page.selMonth
                 selDay: page.selDay
                 markedDays: page.recordingDays
+                onMonthNavigated: (y, m) => page.showMonth(y, m)
                 onDateSelected: (y, m, d) => {
+                    // Dots belong to the old month until the new search answers.
+                    if (y !== page.selYear || m !== page.selMonth)
+                        page.recordingDays = [];
                     page.selYear = y; page.selMonth = m; page.selDay = d;
                     // Cached per-camera days are for the OLD date; a stale entry
                     // would make assignGridPane skip the search for a camera

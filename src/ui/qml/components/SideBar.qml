@@ -144,7 +144,11 @@ Rectangle {
                 }
                 width: ListView.view.width
                 height: isNvr ? 44 : 0
+                // ListView force-shows reused section items (setVisible(true)),
+                // which defeats `visible: isNvr` below; clipping keeps a
+                // zero-height header from painting over the camera row.
                 visible: isNvr
+                clip: true
                 color: nvrHover.hovered ? Theme.surfaceAlt : "transparent"
 
                 RowLayout {

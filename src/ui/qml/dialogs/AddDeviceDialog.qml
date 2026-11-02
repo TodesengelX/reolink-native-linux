@@ -163,6 +163,8 @@ Dialog {
 
     component ThemedField: TextField {
         Layout.fillWidth: true
+        // Never let the layout squeeze a field under its neighbours.
+        Layout.minimumHeight: implicitHeight
         color: Theme.text
         placeholderTextColor: Theme.textMuted
         background: Rectangle {
@@ -254,6 +256,7 @@ Dialog {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: discoveredModel.count > 0 ? 90 : 0
+                    Layout.minimumHeight: Layout.preferredHeight
                     visible: discoveredModel.count > 0
                     color: Theme.paneBackground
                     border.color: Theme.border

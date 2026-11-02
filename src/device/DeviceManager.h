@@ -161,6 +161,8 @@ public:
     // {start,end,type,name} where start/end are seconds into the day), and build
     // a playable URL for a recording file handle.
     Q_INVOKABLE void searchRecordings(int row, int year, int month, int day);
+    // Calendar dots for a whole month (emits recordingDaysFound only).
+    Q_INVOKABLE void searchRecordingDays(int row, int year, int month);
     // Playable HTTP-FLV URL for a recording starting at startEpoch (Unix seconds).
     Q_INVOKABLE QString playbackUrl(int row, qint64 startEpoch, bool mainStream = false);
     // Full-resolution (main-stream) playback: download the clip covering
@@ -302,7 +304,13 @@ private:
         // Recording file boundaries (wall-clock start,end epochs) from the last
         // search. FLV playback must start on a boundary and use `seek` for the
         // offset into the file, so a scrub is snapped to the containing file.
-        QVector<std::pair<qint64, qint64>> recordingFiles;
+        // Standalone cameras play a file by name instead (playbackFileUrl).
+        struct RecFile {
+            qint64 start = 0;
+            qint64 end = 0;
+            QString name; // empty on NVR firmware
+        };
+        QVector<RecFile> recordingFiles;
         // Persistent authenticated client for the host, shared by its channels.
         std::shared_ptr<ReolinkHttpClient> client;
     };

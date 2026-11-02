@@ -422,7 +422,14 @@ int avioReadThunk(void *opaque, uint8_t *buf, int size)
 // One open→decode session. Returns true when the caller should retry (reconnect).
 bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
 {
-    const QString source = s->source;
+    // A W3C media fragment (#t=N) asks for a start offset into a file source
+    // (playbackFileUrl). It is ours, not the server's: strip it before opening.
+    QString source = s->source;
+    double startOffsetSecs = 0;
+    if (const int hash = source.lastIndexOf(QLatin1String("#t=")); hash >= 0) {
+        startOffsetSecs = qMax(0.0, source.mid(hash + 3).toDouble());
+        source.truncate(hash);
+    }
     const QByteArray url = source.toUtf8();
     // A custom packet source (native Baichuan) is treated as live: real-time paced
     // by the device, no URL to open.
@@ -504,6 +511,12 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
     if (avformat_find_stream_info(fmt, nullptr) < 0) {
         postState(s, State::Error, QStringLiteral("could not read stream info"));
         return !packetSource && (live || s->retryOnError.load());
+    }
+
+    if (startOffsetSecs > 0 && !live) {
+        const int64_t ts = static_cast<int64_t>(startOffsetSecs * AV_TIME_BASE);
+        if (avformat_seek_file(fmt, -1, INT64_MIN, ts, ts, 0) < 0)
+            qCWarning(lcMedia) << redacted(source) << "seek to" << startOffsetSecs << "s failed";
     }
 
     const int videoIndex = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);

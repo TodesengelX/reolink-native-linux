@@ -982,7 +982,7 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
         QString error;
         qint64 playbackOffsetSecs = 0;
         bool haveOffset = false;
-        QVector<std::pair<qint64, qint64>> files; // (start,end) wall-clock epochs
+        QVector<Entry::RecFile> files; // wall-clock epochs + file name
         if (batch.transportOk && !batch.results.isEmpty() && batch.results.first().ok) {
             const api::SearchResult sr = api::parseSearch(batch.results.first().value);
             for (const api::RecordingFile &f : sr.files) {
@@ -1000,7 +1000,8 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
                 segments.append(seg);
                 files.append({f.start.toSecsSinceEpoch(),
                               f.end.isValid() ? f.end.toSecsSinceEpoch()
-                                              : f.start.toSecsSinceEpoch() + 3600});
+                                              : f.start.toSecsSinceEpoch() + 3600,
+                              f.name});
                 // Learn the NVR's playback-clock offset from the first valid file:
                 // the FLV endpoint seeks by PlaybackTime, not wall-clock StartTime.
                 if (!haveOffset && f.playbackTime.isValid()) {
@@ -1034,6 +1035,29 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
     }));
 }
 
+void DeviceManager::searchRecordingDays(int row, int year, int month)
+{
+    auto client = clientFor(row);
+    const QDate first(year, month, 1);
+    if (!client || !first.isValid())
+        return;
+    const int ch = m_entries.at(row).channel;
+    const QDateTime start(first, QTime(0, 0, 0));
+    const QDateTime end(first.addDays(first.daysInMonth() - 1), QTime(23, 59, 59));
+    m_pending.addFuture(QtConcurrent::run([this, client, ch, row, start, end, year, month] {
+        const api::BatchResult batch = client->call(
+            Json::array({api::searchBody(ch, start, end, QStringLiteral("sub"), true)}));
+        if (!batch.transportOk || batch.results.isEmpty() || !batch.results.first().ok)
+            return; // dots are a hint; the day search reports real errors
+        QVariantList days;
+        for (int d : api::parseSearch(batch.results.first().value).recordingDays)
+            days.append(d);
+        QMetaObject::invokeMethod(
+            this, [this, row, year, month, days] { emit recordingDaysFound(row, year, month, days); },
+            Qt::QueuedConnection);
+    }));
+}
+
 QSize DeviceManager::declaredSize(int row, bool mainStream) const
 {
     if (row < 0 || row >= m_entries.size())
@@ -1054,15 +1078,18 @@ QString DeviceManager::playbackUrl(int row, qint64 startEpoch, bool mainStream)
     // to the file containing startEpoch (or the nearest earlier one for a gap).
     qint64 fileStart = -1;
     qint64 fileEnd = 0;
+    QString fileName;
     for (const auto &f : e.recordingFiles) {
-        if (startEpoch >= f.first && startEpoch <= f.second) {
-            fileStart = f.first;
-            fileEnd = f.second;
+        if (startEpoch >= f.start && startEpoch <= f.end) {
+            fileStart = f.start;
+            fileEnd = f.end;
+            fileName = f.name;
             break;
         }
-        if (f.first <= startEpoch && f.first > fileStart) { // nearest earlier start
-            fileStart = f.first;
-            fileEnd = f.second;
+        if (f.start <= startEpoch && f.start > fileStart) { // nearest earlier start
+            fileStart = f.start;
+            fileEnd = f.end;
+            fileName = f.name;
         }
     }
     if (fileStart < 0)
@@ -1075,6 +1102,9 @@ QString DeviceManager::playbackUrl(int row, qint64 startEpoch, bool mainStream)
     // Reuse the app's existing session token so the NVR doesn't reject a second
     // login for the playback stream. Falls back to user/password if no token yet.
     const QString token = e.client ? e.client->token() : QString();
+    if (e.rec.kind != QLatin1String("nvr") && !fileName.isEmpty())
+        return api::playbackFileUrl(e.rec.addr, e.rec.https, fileName, e.rec.username,
+                                    e.password, token, seekSecs);
     return api::playbackFlvUrl(e.rec.addr, e.rec.port, e.rec.https, e.channel, mainStream, start,
                                e.rec.username, e.password, token, seekSecs);
 }
