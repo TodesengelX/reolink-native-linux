@@ -1102,7 +1102,7 @@ QString DeviceManager::playbackUrl(int row, qint64 startEpoch, bool mainStream)
     // Reuse the app's existing session token so the NVR doesn't reject a second
     // login for the playback stream. Falls back to user/password if no token yet.
     const QString token = e.client ? e.client->token() : QString();
-    if (e.rec.kind != QLatin1String("nvr") && !fileName.isEmpty())
+    if (api::playsByFileName(e.rec.kind, fileName))
         return api::playbackFileUrl(e.rec.addr, e.rec.https, fileName, e.rec.username,
                                     e.password, token, seekSecs);
     return api::playbackFlvUrl(e.rec.addr, e.rec.port, e.rec.https, e.channel, mainStream, start,

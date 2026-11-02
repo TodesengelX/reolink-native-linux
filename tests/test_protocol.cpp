@@ -344,6 +344,67 @@ private slots:
         QVERIFY(url.contains(QStringLiteral("user=admin")));
     }
 
+    void searchBodyOnlyStatus()
+    {
+        const QDateTime start(QDate(2026, 10, 1), QTime(0, 0, 0));
+        const QDateTime end(QDate(2026, 10, 31), QTime(23, 59, 59));
+        QCOMPARE(api::searchBody(0, start, end)["param"]["Search"].value("onlyStatus", -1), 0);
+        QCOMPARE(api::searchBody(0, start, end, QStringLiteral("sub"), true)["param"]["Search"]
+                     .value("onlyStatus", -1), 1);
+    }
+
+    void parseSearchStandaloneCamera()
+    {
+        // Real Duo 2 PoE / RLC-811A reply: file name present, no PlaybackTime,
+        // size as a string, a 30-char table for November.
+        const QByteArray resp = R"({"SearchResult":{"channel":0,"File":[
+            {"EndTime":{"day":1,"hour":9,"min":13,"mon":11,"sec":1,"year":2026},
+             "StartTime":{"day":1,"hour":9,"min":11,"mon":11,"sec":48,"year":2026},
+             "frameRate":0,"height":0,
+             "name":"Mp4Record/2026-11-01/RecS02_20261101_091148_091301_8B28C00_A34561.mp4",
+             "size":"10700129","type":"sub","width":0}],
+            "Status":[{"mon":11,"table":"110000000000000000000000000000","year":2026}]}})";
+        const Json value = Json::parse(resp.constData(), resp.constData() + resp.size(),
+                                       nullptr, false);
+        const api::SearchResult sr = api::parseSearch(value);
+        QVERIFY(sr.ok);
+        QCOMPARE(sr.files.size(), 1);
+        QCOMPARE(sr.files[0].name,
+                 QStringLiteral("Mp4Record/2026-11-01/RecS02_20261101_091148_091301_8B28C00_A34561.mp4"));
+        QVERIFY(!sr.files[0].playbackTime.isValid());
+        QCOMPARE(sr.files[0].size, qint64(10700129));
+        QCOMPARE(sr.recordingDays, QVector<int>({1, 2}));
+    }
+
+    void playbackTransportChoice()
+    {
+        const QString name = QStringLiteral("Mp4Record/2026-11-01/RecS02_x.mp4");
+        // NVRs always stay on HTTP-FLV, even if a firmware ever returns names.
+        QVERIFY(!api::playsByFileName(QStringLiteral("nvr"), name));
+        QVERIFY(!api::playsByFileName(QStringLiteral("nvr"), QString()));
+        // Standalone cameras play the file, but only when they named it.
+        QVERIFY(api::playsByFileName(QStringLiteral("camera"), name));
+        QVERIFY(!api::playsByFileName(QStringLiteral("camera"), QString()));
+    }
+
+    void playbackFileUrlFormat()
+    {
+        const QString name = QStringLiteral("Mp4Record/2026-11-01/RecS02_x.mp4");
+        const QString enc = QStringLiteral("Mp4Record%2F2026-11-01%2FRecS02_x.mp4");
+        const QString url = api::playbackFileUrl(QStringLiteral("10.0.0.6"), true, name,
+                                                 QStringLiteral("admin"), QStringLiteral("p#t=1&x"),
+                                                 QStringLiteral("tok"), 42);
+        QCOMPARE(url, QStringLiteral("https://10.0.0.6/cgi-bin/api.cgi?cmd=Playback&source=%1"
+                                     "&output=%1&token=tok#t=42").arg(enc));
+        // No token: credentials are percent-encoded, so a password can never
+        // forge the #t= fragment StreamPlayer looks for.
+        const QString noTok = api::playbackFileUrl(QStringLiteral("10.0.0.6"), false, name,
+                                                   QStringLiteral("admin"), QStringLiteral("p#t=1&x"));
+        QVERIFY(noTok.startsWith(QStringLiteral("http://10.0.0.6/cgi-bin/api.cgi?cmd=Playback")));
+        QVERIFY(noTok.endsWith(QStringLiteral("&user=admin&password=p%23t%3D1%26x")));
+        QVERIFY(!noTok.contains(QLatin1Char('#')));
+    }
+
     void nvrDownloadRoundTrip()
     {
         const QDateTime start(QDate(2026, 7, 9), QTime(1, 59, 58));

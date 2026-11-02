@@ -424,9 +424,12 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
 {
     // A W3C media fragment (#t=N) asks for a start offset into a file source
     // (playbackFileUrl). It is ours, not the server's: strip it before opening.
+    // Only on http(s): a user-entered stream URL or local path is left intact.
     QString source = s->source;
     double startOffsetSecs = 0;
-    if (const int hash = source.lastIndexOf(QLatin1String("#t=")); hash >= 0) {
+    const int hash = source.startsWith(QLatin1String("http"))
+                         ? source.lastIndexOf(QLatin1String("#t=")) : -1;
+    if (hash >= 0) {
         startOffsetSecs = qMax(0.0, source.mid(hash + 3).toDouble());
         source.truncate(hash);
     }

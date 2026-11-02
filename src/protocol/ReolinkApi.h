@@ -218,6 +218,9 @@ QString playbackFlvUrl(const QString &host, int port, bool https, int channel,
 QString playbackFileUrl(const QString &host, bool https, const QString &fileName,
                         const QString &username, const QString &password,
                         const QString &token = {}, int seekSecs = 0);
+// Which of the two playback URLs a recording uses: NVRs (and anything whose
+// Search returned no file name) keep HTTP-FLV; standalone cameras use the file.
+bool playsByFileName(const QString &hostKind, const QString &fileName);
 
 // ---- Full-resolution clip download (NvrDownload + Download) ----------------
 // HTTP-FLV can't carry the HEVC main stream, so full-res playback goes through

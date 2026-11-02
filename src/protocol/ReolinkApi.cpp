@@ -431,6 +431,11 @@ QString playbackFileUrl(const QString &host, bool https, const QString &fileName
     return url;
 }
 
+bool playsByFileName(const QString &hostKind, const QString &fileName)
+{
+    return hostKind != QLatin1String("nvr") && !fileName.isEmpty();
+}
+
 Json nvrDownloadBody(int channel, const QDateTime &start, const QDateTime &end,
                      const QString &streamType)
 {
