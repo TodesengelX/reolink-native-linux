@@ -223,6 +223,9 @@ Item {
                         Image {
                             anchors.fill: parent
                             source: thumbnail.length > 0 ? "file://" + thumbnail : ""
+                            // Event snapshots are full resolution: decode at row size.
+                            sourceSize.width: 192
+                            asynchronous: true
                             fillMode: Image.PreserveAspectCrop
                             visible: thumbnail.length > 0
                         }

@@ -58,6 +58,8 @@ Item {
         id: pbStore
         category: "playback"
         property string gridArrangement: ""
+        // Remember SD/HD across restarts: event jumps and Play use it.
+        property alias hdMode: page.hdMode
     }
 
     // Panes are per-CAMERA (model: Devices), so these iterate device rows —
@@ -240,6 +242,7 @@ Item {
     }
 
     function refresh() {
+        page.missedEvent = null; // a different camera or day: the event still no longer applies
         if (page.paneCount === 4) {
             // One Search per distinct grid camera. These queue behind the
             // per-device request lock in ReolinkHttpClient rather than racing —
@@ -302,9 +305,24 @@ Item {
         }
     }
 
+    function showMissedEvent() {
+        var ev = page._jumpEvent || ({});
+        var kinds = { person: qsTr("Person"), vehicle: qsTr("Vehicle"), pet: qsTr("Animal"),
+                      dog_cat: qsTr("Animal"), visitor: qsTr("Visitor"), motion: qsTr("Motion"),
+                      offline: qsTr("Went offline"), online: qsTr("Back online") };
+        var parts = [];
+        if (ev.type) parts.push(kinds[ev.type] || ev.type);
+        if (ev.camera) parts.push(ev.camera);
+        parts.push(new Date(page._jumpTimestamp * 1000).toLocaleTimeString(Qt.locale(), Locale.ShortFormat));
+        page.missedEvent = { thumbnail: ev.thumbnail || "", detail: parts.join(" \u00B7 "),
+                             camera: ev.camera || "", timestamp: page._jumpTimestamp };
+        statusText.text = qsTr("No recording available");
+    }
+
     // Move the playhead and, if a recording covers that moment, play from it.
     function playAt(sec) {
         page._suppressResume = false;
+        page.missedEvent = null;
         page.playheadSecs = sec;
         if (page.paneCount === 4) {
             // One commit fans out to every placed pane at the same wall-clock
@@ -328,11 +346,17 @@ Item {
         // timeline stays responsive. (HD mode below plays the full-res main.)
         player.loop = false;
         var url = Devices.playbackUrl(page.deviceRow, epochAt(sec), false);
-        if (url.length > 0) {
-            player.expectedSize = Devices.declaredSize(page.deviceRow, false); // sub
-            player.source = url;
-            player.start();
+        if (url.length === 0) {
+            // No SD file for this moment: play it in HD rather than nothing,
+            // and show HD on the button so it matches what's playing.
+            console.info("playback: no SD recording at", sec, "- switching to HD");
+            page.hdMode = true;
+            page.playHd(sec);
+            return;
         }
+        player.expectedSize = Devices.declaredSize(page.deviceRow, false); // sub
+        player.source = url;
+        player.start();
     }
 
     // HD: stream the full-resolution main stream over native Baichuan (TCP 9000)
@@ -351,6 +375,11 @@ Item {
         Devices.startBaichuanPlayback(page.deviceRow, epochAt(sec), player, true);
     }
 
+    // An event jump that found no recording: {thumbnail, title, detail}, shown
+    // over the video area so you still see what triggered it. Null otherwise.
+    property var missedEvent: null
+    property var _jumpEvent: ({})       // the inbox event behind the current jump
+    property real _jumpTimestamp: 0
     property real _pendingPlayEpoch: 0  // play this once the day's search returns
     property real _pendingPlaySecs: -1  // resume here after a camera switch
 
@@ -370,6 +399,9 @@ Item {
     function openAt(hostId, channel, timestamp) {
         // Event jump targets one specific camera and moment — single-pane flow.
         setPaneCount(1);
+        page.missedEvent = null;
+        page._jumpEvent = Events.eventAt(hostId, channel, timestamp);
+        page._jumpTimestamp = timestamp;
         // Start a few seconds BEFORE the event: detection timestamps mark when
         // the alarm fired, so the moment of interest is at (or just before) the
         // timestamp — starting exactly on it plays only the aftermath.
@@ -427,14 +459,25 @@ Item {
                 if (page._pendingPlayEpoch > 0) {
                     var ep = page._pendingPlayEpoch;
                     page._pendingPlayEpoch = 0;
+                    // The pre-roll can land just before the recording begins
+                    // (detection fires as the camera starts recording): start
+                    // at that recording instead of the previous file or a gap.
+                    var dayStartEp = new Date(page.selYear, page.selMonth - 1, page.selDay).getTime() / 1000;
+                    var jumpSec = ep - dayStartEp;
+                    var target = timeline.segmentNear(jumpSec, 120);
+                    if (target && jumpSec < target.start)
+                        jumpSec = target.start;
                     page._pendingPlaySecs = -1;
-                    page._suppressResume = false; // event playback crosses file boundaries too
-                    var url = Devices.playbackUrl(page.deviceRow, ep, false); // sub stream
-                    if (url.length > 0) {
-                        player.expectedSize = Devices.declaredSize(page.deviceRow, false);
-                        player.source = url;
-                        player.start();
-                    }
+                    // Same path as the Play button, so the jump auto-plays in the
+                    // selected quality (SD or HD) instead of a separate SD-only
+                    // route that could fail silently.
+                    console.info("event jump: row", page.deviceRow, "at",
+                                 new Date((dayStartEp + jumpSec) * 1000).toLocaleString(),
+                                 page.inRecording(jumpSec) ? "(recording found)" : "(no recording covers it)",
+                                 page.hdMode ? "HD" : "SD");
+                    page.playAt(jumpSec);
+                    if (!page.inRecording(jumpSec))
+                        page.showMissedEvent();
                 } else if (page._pendingPlaySecs >= 0) {
                     // Camera switch: resume at the same playhead moment (playAt
                     // respects SD/HD mode and stops if no recording covers it).
@@ -687,10 +730,99 @@ Item {
                 // momentarily refuse the playback stream.
                 StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true }
 
+                // Event jump with no footage: show the event's snapshot instead,
+                // so you still see what triggered it.
+                Rectangle {
+                    id: missedView
+                    anchors.fill: parent
+                    visible: page.missedEvent !== null && player.state !== StreamPlayer.Streaming
+                    color: Theme.paneBackground
+                    z: 5
+                    property string savedPath: ""
+                    Connections {
+                        target: page
+                        function onMissedEventChanged() { missedView.savedPath = ""; }
+                    }
+                    Image {
+                        anchors.fill: parent
+                        source: page.missedEvent && page.missedEvent.thumbnail
+                                ? "file://" + page.missedEvent.thumbnail : ""
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        opacity: 0.7
+                    }
+                    // Caption along the bottom, so the picture itself stays clear.
+                    Rectangle {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 16
+                        radius: Theme.radius
+                        color: "#cc0d141b"
+                        border.color: Theme.border
+                        width: missedCol.implicitWidth + 32
+                        height: missedCol.implicitHeight + 20
+                        Column {
+                            id: missedCol
+                            anchors.centerIn: parent
+                            spacing: 4
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: qsTr("No recording available")
+                                color: Theme.text; font.pixelSize: 15; font.bold: true
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: page.missedEvent ? page.missedEvent.detail : ""
+                                color: Theme.textMuted; font.pixelSize: 12
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                visible: !!(page.missedEvent && page.missedEvent.thumbnail)
+                                text: qsTr("Showing the snapshot taken at the event")
+                                color: Theme.textMuted; font.pixelSize: 10
+                            }
+                            // Keep the event picture alongside the other snapshots.
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                visible: !!(page.missedEvent && page.missedEvent.thumbnail)
+                                width: saveLbl.implicitWidth + 24; height: 28
+                                radius: Theme.radius
+                                color: missedView.savedPath.length > 0 ? Theme.accentDim
+                                     : saveHover.hovered ? Theme.surfaceAlt : Theme.surface
+                                border.color: missedView.savedPath.length > 0 ? Theme.accent : Theme.border
+                                Text {
+                                    id: saveLbl
+                                    anchors.centerIn: parent
+                                    text: missedView.savedPath.length > 0 ? qsTr("\u2713 Saved")
+                                                                          : qsTr("\u25C9 Save snapshot")
+                                    color: Theme.text; font.pixelSize: 12
+                                }
+                                HoverHandler { id: saveHover }
+                                TapHandler {
+                                    onTapped: {
+                                        if (missedView.savedPath.length > 0) return; // already kept
+                                        var ev = page.missedEvent;
+                                        var saved = Events.saveEventSnapshot(ev.thumbnail, ev.camera, ev.timestamp);
+                                        missedView.savedPath = saved;
+                                        statusText.text = saved.length > 0 ? qsTr("Snapshot saved: %1").arg(saved)
+                                                                           : qsTr("Couldn't save the snapshot");
+                                    }
+                                }
+                            }
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                visible: missedView.savedPath.length > 0
+                                text: missedView.savedPath
+                                color: Theme.textMuted; font.pixelSize: 10
+                            }
+                        }
+                    }
+                }
+
                 Column {
                     anchors.centerIn: parent
                     spacing: Theme.spacing
-                    visible: player.state !== StreamPlayer.Streaming
+                    visible: player.state !== StreamPlayer.Streaming && page.missedEvent === null
                     BusyIndicator {
                         anchors.horizontalCenter: parent.horizontalCenter
                         running: player.state === StreamPlayer.Connecting

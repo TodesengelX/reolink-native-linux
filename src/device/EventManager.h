@@ -46,6 +46,14 @@ public:
     // Seconds-into-day of each detection event for this camera on the given day
     // (dayStart = local midnight epoch). Feeds the playback timeline's markers.
     Q_INVOKABLE QVariantList eventTimesFor(qint64 hostId, int channel, qint64 dayStart) const;
+    // The inbox event at exactly this camera and time: {type, camera, thumbnail},
+    // or an empty map. Lets Playback show an event's snapshot when no recording
+    // covers it.
+    Q_INVOKABLE QVariantMap eventAt(qint64 hostId, int channel, qint64 timestamp) const;
+    // Keep an event's snapshot: copies it next to the app's other snapshots,
+    // named after the camera and event time. Returns the new path, or "" on failure.
+    Q_INVOKABLE QString saveEventSnapshot(const QString &thumbnail, const QString &camera,
+                                          qint64 timestamp) const;
     Q_INVOKABLE void clear();
 
 signals:
