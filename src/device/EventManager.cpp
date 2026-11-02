@@ -28,6 +28,10 @@ EventManager::EventManager(Database *db, DeviceManager *devices, QObject *parent
     purgeExpired();                 // and the age limit
     auto *hourly = new QTimer(this);
     connect(hourly, &QTimer::timeout, this, &EventManager::purgeExpired);
+    connect(hourly, &QTimer::timeout, this, [this] { // "Today"/"Yesterday" after midnight
+        if (!m_view.isEmpty())
+            emit dataChanged(index(0), index(m_view.size() - 1), {TimeTextRole});
+    });
     hourly->start(60 * 60 * 1000);
     reload();
     connect(m_devices, &DeviceManager::detectionEvent, this, &EventManager::onDetection);
@@ -105,15 +109,27 @@ QVariant EventManager::data(const QModelIndex &index, int role) const
     case TimestampRole:
         return e.timestamp;
     case TimeTextRole: {
+        // The actual time, not "just now"/"N min ago": a relative label is
+        // computed once when the row is drawn and the view never re-asks, so it
+        // went stale (everything that arrived while the app ran stayed "just now").
+        // Seconds included, since events often bunch within a minute; 12/24-hour
+        // follows the system locale. Today/Yesterday turn over via the hourly
+        // refresh in the constructor.
         const QDateTime dt = QDateTime::fromSecsSinceEpoch(e.timestamp);
-        const qint64 ago = QDateTime::currentSecsSinceEpoch() - e.timestamp;
-        if (ago < 60)
-            return tr("just now");
-        if (ago < 3600)
-            return tr("%1 min ago").arg(ago / 60);
-        if (dt.date() == QDate::currentDate())
-            return dt.toString(QStringLiteral("hh:mm"));
-        return dt.toString(QStringLiteral("MMM d, hh:mm"));
+        const QLocale locale;
+        const bool twelveHour =
+            locale.timeFormat(QLocale::ShortFormat).contains(QLatin1String("ap"), Qt::CaseInsensitive);
+        const QString time = dt.toString(twelveHour ? QStringLiteral("h:mm:ss AP")
+                                                    : QStringLiteral("HH:mm:ss"));
+        const QDate day = dt.date(), today = QDate::currentDate();
+        if (day == today)
+            return tr("Today %1").arg(time);
+        if (day == today.addDays(-1))
+            return tr("Yesterday %1").arg(time);
+        const QString date = locale.toString(day, day.year() == today.year()
+                                                      ? QStringLiteral("ddd MMM d")
+                                                      : QStringLiteral("MMM d yyyy"));
+        return QStringLiteral("%1, %2").arg(date, time);
     }
     case ThumbnailRole:
         return e.thumbnail;
