@@ -37,6 +37,9 @@ Item {
     // HD mode streams the full-resolution main stream over native Baichuan; off =
     // light sub-stream (FLV) scrubbing.
     property bool hdMode: false
+    // Some camera firmware closes /flv when HTTPS is enabled. After the first
+    // FLV failure the page uses the native Baichuan sub stream for playback.
+    property bool useBaichuan: false
 
     // ---- Synced multi-camera playback ---------------------------------------
     // Like the official client: up to 4 panes, one calendar and one timeline
@@ -239,6 +242,18 @@ Item {
         onTriggered: if (page.playheadSecs < 86399) page.playheadSecs += 1
     }
 
+    // Single-pane counterpart to the grid pane's FLV timeout.
+    Timer {
+        interval: 12000; repeat: false
+        running: page.active && page.paneCount === 1 && page.deviceRow >= 0
+                 && !page.hdMode && !page.useBaichuan
+                 && player.state === StreamPlayer.Connecting
+        onTriggered: {
+            page.useBaichuan = true;
+            page.playBaichuan(page.playheadSecs);
+        }
+    }
+
     function refresh() {
         if (page.paneCount === 4) {
             // One Search per distinct grid camera. These queue behind the
@@ -280,6 +295,13 @@ Item {
     Connections {
         target: player
         function onStateChanged() {
+            // HTTPS /flv is rejected by some firmware; switch to Baichuan once.
+            if (player.state === StreamPlayer.Error && page.paneCount === 1
+                    && !page.hdMode && page.deviceRow >= 0 && !page.useBaichuan) {
+                page.useBaichuan = true;
+                page.playBaichuan(page.playheadSecs);
+                return;
+            }
             if (player.state !== StreamPlayer.Stopped)
                 return;
             // Deferred: stop() fires synchronously inside playAt()'s own
@@ -324,6 +346,10 @@ Item {
             page.playHd(sec);
             return;
         }
+        if (page.useBaichuan) {
+            page.playBaichuan(sec);
+            return;
+        }
         // Scrub against the sub stream: it is light and always landscape, so the
         // timeline stays responsive. (HD mode below plays the full-res main.)
         player.loop = false;
@@ -344,11 +370,19 @@ Item {
         statusText.text = qsTr("HD");
         // Seek the running session in place (no reconnect) when possible; else open
         // a fresh Baichuan session.
-        if (player.state === StreamPlayer.Streaming
+        if (!page.useBaichuan && player.state === StreamPlayer.Streaming
             && Devices.seekBaichuanPlayback(page.deviceRow, epochAt(sec)))
             return;
         player.loop = false;
         Devices.startBaichuanPlayback(page.deviceRow, epochAt(sec), player, true);
+    }
+
+    // Sub-stream fallback for firmware whose HTTPS web server refuses /flv.
+    function playBaichuan(sec) {
+        if (page.deviceRow < 0)
+            return;
+        player.loop = false;
+        Devices.startBaichuanPlayback(page.deviceRow, epochAt(sec), player, false);
     }
 
     property real _pendingPlayEpoch: 0  // play this once the day's search returns
