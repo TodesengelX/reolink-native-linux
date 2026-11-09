@@ -143,9 +143,18 @@ Rectangle {
                     function onModelReset() { nvrHeader._rev++; }
                 }
                 width: ListView.view.width
-                height: isNvr ? 44 : 0
+                // Grow with the host row rather than assuming a fixed 44 px;
+                // the list has to reserve that height before the first channel
+                // is laid out or the header paints over it at large font sizes.
+                height: isNvr ? Math.max(44, headerColumn.implicitHeight + 2 * Theme.spacing) : 0
                 visible: isNvr
+                opacity: isNvr ? 1 : 0
+                // Section delegates are instantiated for every section. A
+                // zero-height, non-NVR header must not paint its children over
+                // the first camera row, so clip it and keep it transparent.
+                clip: true
                 color: nvrHover.hovered ? Theme.surfaceAlt : "transparent"
+                onIsNvrChanged: if (ListView.view) ListView.view.forceLayout()
 
                 RowLayout {
                     anchors.fill: parent
@@ -163,6 +172,7 @@ Rectangle {
                         Layout.alignment: Qt.AlignVCenter
                     }
                     ColumnLayout {
+                        id: headerColumn
                         Layout.fillWidth: true
                         spacing: 1
                         Text {
@@ -260,7 +270,9 @@ Rectangle {
                 readonly property bool hidden: underNvr && root.collapsed[hostId] === true
 
                 width: ListView.view.width
-                height: hidden ? 0 : 48
+                // Let the row grow with the system font instead of clipping the
+                // name and status into each other at high font scales.
+                height: hidden ? 0 : Math.max(48, rowColumn.implicitHeight + 8)
                 visible: !hidden
                 clip: true
                 color: delegateArea.containsMouse ? Theme.surfaceAlt : "transparent"
@@ -292,6 +304,7 @@ Rectangle {
                         Layout.alignment: Qt.AlignVCenter
                     }
                     ColumnLayout {
+                        id: rowColumn
                         Layout.fillWidth: true
                         spacing: 2
                         Text {
