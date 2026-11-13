@@ -27,9 +27,14 @@ chmod +x reolink-native-linux-x86_64.AppImage
 Download the `.flatpak` bundle from [Releases](../../releases) and:
 
 ```sh
+flatpak install --user flathub org.freedesktop.Platform.ffmpeg-full//23.08
 flatpak install --user ./reolink-native-linux.flatpak
 flatpak run io.github.todesengelx.ReolinkLinux
 ```
+
+The `ffmpeg-full` extension provides the H.264/HEVC decoders — the runtime's
+own FFmpeg lacks them, and without it no stream loads (`libopenh264 … Unable to
+create decoder`).
 
 *(A Flathub listing — `flatpak install flathub io.github.todesengelx.ReolinkLinux` — is planned.)*
 

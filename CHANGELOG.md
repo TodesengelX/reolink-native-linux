@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the project is pre-1.0, minor versions may still change behaviour.
 
+## [Unreleased]
+
+### Fixed
+
+- **No streams loaded in the Flatpak** (issue #5). The Flatpak runtime's FFmpeg
+  has no built-in H.264 decoder, only the libopenh264 wrapper, which fails with
+  "Unable to create decoder" unless Cisco's binary happens to be installed. The
+  Flatpak now uses the `org.freedesktop.Platform.ffmpeg-full` extension, and a
+  decoder that fails to open now says which one and why instead of a bare
+  "could not open decoder".
+
 ## [0.1.8] — 2026-08-12
 
 ### Fixed
