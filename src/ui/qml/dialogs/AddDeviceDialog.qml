@@ -16,6 +16,77 @@ Dialog {
     property bool testing: false
     property string errorText: ""
 
+    // ---- Add all discovered devices with one set of credentials ----
+    // Typical home setups use the same account on every camera, so typing it
+    // once and adding the whole scan result saves a round per device. Devices
+    // are probed one at a time (testDeviceResult carries no address, and
+    // parallel sign-ins would count against every device's lockout at once);
+    // the ones that pass are added, the rest are listed with the reason.
+    property var bulkQueue: []
+    property string bulkCurrent: ""
+    property int bulkTotal: 0
+    property int bulkAdded: 0
+    property var bulkFailed: []
+    readonly property bool bulkRunning: bulkCurrent !== ""
+
+    function isKnownAddr(ip) {
+        for (var r = 0; r < Devices.count; ++r) {
+            var c = Devices.cameraInfo(r);
+            if (c && c.addr === ip)
+                return true;
+        }
+        return false;
+    }
+    function newDiscovered() {
+        var out = [];
+        Devices.count; // re-evaluate bindings when devices are added
+        for (var i = 0; i < discoveredModel.count; ++i) {
+            var ip = discoveredModel.get(i).ip;
+            if (!isKnownAddr(ip))
+                out.push(ip);
+        }
+        return out;
+    }
+    function addAllFound() {
+        if (testing)
+            return;
+        errorText = "";
+        if (userField.text.trim().length === 0) {
+            errorText = qsTr("Enter the username.");
+            return;
+        }
+        bulkQueue = newDiscovered();
+        bulkTotal = bulkQueue.length;
+        bulkAdded = 0;
+        bulkFailed = [];
+        bulkNext();
+    }
+    function bulkNext() {
+        if (bulkQueue.length === 0) {
+            bulkCurrent = "";
+            testing = false;
+            if (bulkFailed.length === 0) {
+                dialog.close();
+            } else {
+                errorText = qsTr("%1 of %2 devices added. Not added:").arg(bulkAdded).arg(bulkTotal)
+                          + "\n" + bulkFailed.join("\n");
+            }
+            return;
+        }
+        var q = bulkQueue.slice();
+        bulkCurrent = q.shift();
+        bulkQueue = q;
+        testing = true;
+        Devices.testDevice(bulkCurrent, userField.text, passwordField.text, httpsCheck.checked,
+                           portField.text.length > 0 ? parseInt(portField.text) : 0);
+    }
+    function problemText(problem, message) {
+        if (problem === "transport") return qsTr("not reachable");
+        if (problem === "auth") return qsTr("sign-in rejected");
+        if (problem === "locked") return qsTr("account locked");
+        return message;
+    }
+
     function tryAdd() {
         if (testing)
             return;
@@ -48,6 +119,20 @@ Dialog {
         function onTestDeviceResult(ok, message, name, model, problem) {
             if (!dialog.visible || !dialog.testing)
                 return;
+            if (dialog.bulkRunning) {
+                if (ok) {
+                    Devices.addDevice(dialog.bulkCurrent, userField.text, passwordField.text,
+                                      httpsCheck.checked,
+                                      portField.text.length > 0 ? parseInt(portField.text) : 0);
+                    dialog.bulkAdded++;
+                } else {
+                    var f = dialog.bulkFailed.slice();
+                    f.push(dialog.bulkCurrent + " — " + dialog.problemText(problem, message));
+                    dialog.bulkFailed = f;
+                }
+                dialog.bulkNext();
+                return;
+            }
             dialog.testing = false;
             if (ok) {
                 Devices.addDevice(addrField.text.trim(), userField.text,
@@ -136,7 +221,10 @@ Dialog {
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
-                        text: dialog.testing ? qsTr("Checking…") : qsTr("Add")
+                        text: dialog.bulkRunning
+                              ? qsTr("Adding %1 (%2/%3)…").arg(dialog.bulkCurrent)
+                                    .arg(dialog.bulkTotal - dialog.bulkQueue.length).arg(dialog.bulkTotal)
+                              : dialog.testing ? qsTr("Checking…") : qsTr("Add")
                         color: Theme.text; font.pixelSize: 13
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -282,7 +370,8 @@ Dialog {
                                 }
                                 Item { Layout.fillWidth: true }
                                 Text {
-                                    text: qsTr("Reolink")
+                                    text: (Devices.count, dialog.isKnownAddr(parent.parent.ip))
+                                          ? qsTr("already added") : qsTr("Reolink")
                                     color: Theme.textMuted
                                     font.pixelSize: 10
                                     rightPadding: 8
@@ -291,6 +380,44 @@ Dialog {
                             HoverHandler { id: dHover }
                             TapHandler { onTapped: addrField.text = parent.ip }
                         }
+                    }
+                }
+
+                // ---- Add all with the credentials below ----
+                RowLayout {
+                    Layout.fillWidth: true
+                    readonly property int newCount: (discoveredModel.count, Devices.count,
+                                                     dialog.newDiscovered().length)
+                    visible: newCount > 1 && !Discovery.scanning
+                    Rectangle {
+                        implicitWidth: addAllText.implicitWidth + 24
+                        height: 30
+                        radius: Theme.radius
+                        color: dialog.testing ? Theme.surfaceAlt
+                             : addAllArea.containsMouse ? Theme.accent : Theme.accentDim
+                        border.color: Theme.accent
+                        Text {
+                            id: addAllText
+                            anchors.centerIn: parent
+                            text: qsTr("Add all %1").arg(parent.parent.newCount)
+                            color: Theme.text
+                            font.pixelSize: 12
+                        }
+                        MouseArea {
+                            id: addAllArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: !dialog.testing
+                            onClicked: dialog.addAllFound()
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("with the username and password below")
+                        color: Theme.textMuted
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
                     }
                 }
 
@@ -388,5 +515,7 @@ Dialog {
         discoveredModel.clear();
         testing = false;
         errorText = "";
+        bulkQueue = [];
+        bulkCurrent = "";
     }
 }
