@@ -144,10 +144,18 @@ Rectangle {
                 }
                 width: ListView.view.width
                 height: isNvr ? 44 : 0
+                // ListView owns its section items' `visible` — it sets it back to
+                // true when it reuses a cached section delegate, breaking this
+                // binding. A standalone camera's header then stays visible at
+                // height 0 and its unclipped content ("name · 1/1 cameras") is
+                // drawn over the camera row. Clip, and gate the content on a
+                // child the view doesn't touch, so a 0-height header shows nothing.
                 visible: isNvr
+                clip: true
                 color: nvrHover.hovered ? Theme.surfaceAlt : "transparent"
 
                 RowLayout {
+                    visible: nvrHeader.isNvr
                     anchors.fill: parent
                     anchors.leftMargin: Theme.spacing
                     anchors.rightMargin: Theme.spacing
