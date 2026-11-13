@@ -121,7 +121,7 @@ qt_add_resources(reolink-client "app_icons"
 target_link_libraries(reolink-client PRIVATE reolink_core Qt6::QuickControls2 Qt6::Widgets)
 
 qt_add_translations(reolink-client
-    TS_FILES i18n/reolink-client_en.ts i18n/reolink-client_es.ts
+    TS_FILES i18n/reolink-client_en.ts i18n/reolink-client_es.ts i18n/reolink-client_de.ts
     LUPDATE_OPTIONS -no-obsolete)
 
 install(TARGETS reolink-client RUNTIME DESTINATION bin)
