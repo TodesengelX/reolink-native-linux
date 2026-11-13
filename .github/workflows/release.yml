@@ -143,7 +143,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     container:
-      image: bilelmoussaoui/flatpak-github-actions:kde-6.7
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
       options: --privileged
     steps:
       - uses: actions/checkout@v4
