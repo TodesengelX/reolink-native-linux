@@ -40,9 +40,22 @@ Rectangle {
     // every layout, including a maximized pane. Maximizing/restoring just seeds a
     // sensible default (main when big, sub in the grid) via onForceMainChanged; the
     // user can still override it with the toggle afterwards.
+    //
+    // qualityFor(big) lets the owner supply the user's REMEMBERED choice for this
+    // camera in the grid (big=false) or maximized (big=true); it returns
+    // undefined when nothing is saved, and the size default applies. A toolbar
+    // flip is reported via qualityChosen so the owner can persist it — the
+    // automatic seeding below deliberately isn't, or every maximize would
+    // overwrite the saved choice with the default.
+    property var qualityFor: null
+    signal qualityChosen(bool big, bool main)
+    function seedQuality() {
+        var saved = qualityFor ? qualityFor(forceMain) : undefined;
+        qualityMain = saved !== undefined ? saved : forceMain;
+    }
     property bool qualityMain: false
     readonly property bool effectiveMain: qualityMain
-    onForceMainChanged: qualityMain = forceMain
+    onForceMainChanged: seedQuality()
     readonly property bool hasSource: deviceRow >= 0
     // What this pane is currently streaming: an RTSP URL, or "bc:<row>" for native
     // Baichuan HD live. HD (main) live goes over Baichuan because the NVR's RTSP
@@ -51,6 +64,12 @@ Rectangle {
     // streams stay RTSP (clean, and the NVR only allows ~1 Baichuan session).
     property string streamKey: ""
     property bool bcFallback: false // Baichuan slot busy → RTSP main for this round
+    // SD (sub) live normally goes over RTSP. Cameras with RTSP switched off (it
+    // is a per-device setting, off on some models/firmware) refuse port 554, and
+    // the SD pane stayed dead while HD — over Baichuan — worked. After an RTSP
+    // error the sub stream is taken over Baichuan instead, for this camera,
+    // until the pane is pointed at another one.
+    property bool subViaBc: false
 
     // These carry the DEVICE ROW, not the pane index: the page tracks which
     // camera is maximized/selected, so both survive a rearrange.
@@ -107,6 +126,8 @@ Rectangle {
         if (want) {
             if (effectiveMain && !bcFallback)
                 key = "bc:" + deviceRow;
+            else if (!effectiveMain && subViaBc)
+                key = "bcsub:" + deviceRow;
             else
                 key = Devices.liveUrl(deviceRow, effectiveMain);
         }
@@ -118,6 +139,9 @@ Rectangle {
         } else if (key.substring(0, 3) === "bc:") {
             player.loop = false;
             Devices.startBaichuanLive(root.deviceRow, player, true);
+        } else if (key.substring(0, 6) === "bcsub:") {
+            player.loop = false;
+            Devices.startBaichuanLive(root.deviceRow, player, false);
         } else {
             // Set loop before start() so the worker sees the right value from
             // frame one (the declarative `loop:` binding can lag the handler).
@@ -132,11 +156,11 @@ Rectangle {
     }
     // A pane pointed at a different camera must let the old one go now — its
     // session is wanted elsewhere (a swap hands it straight to another pane).
-    onDeviceRowChanged: { bcFallback = false; releaseStream(); updateSource(); }
+    onDeviceRowChanged: { bcFallback = false; subViaBc = false; seedQuality(); releaseStream(); updateSource(); }
     onVisibleChanged: updateSource()
     onPageActiveChanged: updateSource()
     onEffectiveMainChanged: { bcFallback = false; updateSource(); }
-    Component.onCompleted: updateSource()
+    Component.onCompleted: { seedQuality(); updateSource(); }
 
     // The NVR grants only ~1 Baichuan session. If HD live can't get the slot,
     // fall back to RTSP main once (artifact-prone on 8K duos, but beats a dead
@@ -147,6 +171,10 @@ Rectangle {
             if (player.state === StreamPlayer.Error && !root.bcFallback
                 && root.streamKey.substring(0, 3) === "bc:") {
                 root.bcFallback = true;
+                root.updateSource();
+            } else if (player.state === StreamPlayer.Error && !root.subViaBc
+                       && !root.effectiveMain && root.streamKey.startsWith("rtsp://")) {
+                root.subViaBc = true;
                 root.updateSource();
             }
         }
@@ -464,7 +492,10 @@ Rectangle {
                 glyph: root.qualityMain ? "HD" : "SD"
                 tip: root.qualityMain ? qsTr("Switch to Fluent (SD)") : qsTr("Switch to Clear (HD)")
                 active: root.qualityMain
-                onActivated: root.qualityMain = !root.qualityMain
+                onActivated: {
+                    root.qualityMain = !root.qualityMain;
+                    root.qualityChosen(root.forceMain, root.qualityMain);
+                }
             }
             ToolButton {
                 glyph: "◉"; enabledTool: true

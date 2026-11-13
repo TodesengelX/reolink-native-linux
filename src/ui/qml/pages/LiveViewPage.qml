@@ -99,6 +99,35 @@ Item {
     }
     property bool layoutRestored: false
 
+    // Remembered SD/HD choice per camera, separately for the grid and the
+    // maximized view, so a camera the user watches in HD starts in HD next time.
+    // Keyed by host id + channel like the arrangement (rows shift); read with
+    // value() rather than bound properties so it is valid even for panes created
+    // before this object finished loading.
+    Settings {
+        id: qualityStore
+        category: "streamQuality"
+    }
+    function qualityKey(row, big) {
+        var c = Devices.cameraInfo(row);
+        if (!c || c.hostId === undefined)
+            return "";
+        return "h" + c.hostId + "c" + c.channel + (big ? "max" : "grid");
+    }
+    function savedQuality(row, big) {
+        var k = qualityKey(row, big);
+        if (k === "")
+            return undefined;
+        var v = qualityStore.value(k, "");
+        // INI storage hands booleans back as strings.
+        return v === "" ? undefined : (v === true || v === "true");
+    }
+    function rememberQuality(row, big, main) {
+        var k = qualityKey(row, big);
+        if (k !== "")
+            qualityStore.setValue(k, main);
+    }
+
     function saveLayout() {
         if (!layoutRestored)
             return;
@@ -334,8 +363,11 @@ Item {
                     viewRotation: rotationOverride
                     selected: page.selectedIndex === index
                     pageActive: page.active && page.visible
-                    // Sub-stream in the grid, main stream when maximized (DESIGN §5.7).
+                    // Sub-stream in the grid, main stream when maximized (DESIGN §5.7)
+                    // — unless the user picked otherwise for this camera before.
                     forceMain: isMaximized
+                    qualityFor: (big) => page.savedQuality(index, big)
+                    onQualityChosen: (big, main) => page.rememberQuality(index, big, main)
                     capPtz: hasPtz
                     capZoom: hasZoom
                     capAudio: hasAudio
