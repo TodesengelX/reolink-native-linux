@@ -14,11 +14,14 @@
 #include <QCommandLineParser>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QLibraryInfo>
+#include <QLocale>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTimer>
+#include <QTranslator>
 
 #include <chrono>
 #include <thread>
@@ -47,6 +50,20 @@ int main(int argc, char *argv[])
     }
 
     rl::installLogging();
+
+    // UI language follows the system locale (LANG / LC_MESSAGES). The .qm files
+    // are compiled from i18n/*.ts by qt_add_translations and embedded under
+    // :/i18n; without a match the English source strings are shown. Qt's own
+    // strings (standard dialog buttons etc.) come from the Qt installation.
+    // Both translators must be installed before the QML engine is created.
+    QTranslator appTranslator;
+    if (appTranslator.load(QLocale(), QStringLiteral("reolink-client"), QStringLiteral("_"),
+                           QStringLiteral(":/i18n")))
+        QCoreApplication::installTranslator(&appTranslator);
+    QTranslator qtTranslator;
+    if (qtTranslator.load(QLocale(), QStringLiteral("qtbase"), QStringLiteral("_"),
+                          QLibraryInfo::path(QLibraryInfo::TranslationsPath)))
+        QCoreApplication::installTranslator(&qtTranslator);
 
     // All Controls are custom-drawn against Theme.qml; Basic avoids
     // platform-style repaints fighting the dark palette.
