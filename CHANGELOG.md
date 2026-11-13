@@ -10,12 +10,15 @@ While the project is pre-1.0, minor versions may still change behaviour.
 
 ### Fixed
 
-- **No streams loaded in the Flatpak** (issue #5). The Flatpak runtime's FFmpeg
+- **No streams loaded in the Flatpak** (issue #5). The KDE 6.7 runtime's FFmpeg
   has no built-in H.264 decoder, only the libopenh264 wrapper, which fails with
   "Unable to create decoder" unless Cisco's binary happens to be installed. The
-  Flatpak now uses the `org.freedesktop.Platform.ffmpeg-full` extension, and a
-  decoder that fails to open now says which one and why instead of a bare
-  "could not open decoder".
+  Flatpak now uses the KDE 6.10 runtime, whose FFmpeg (codecs-extra) has the
+  native decoders; a decoder that fails to open now says which one and why
+  instead of a bare "could not open decoder".
+- **Hardware decoding failed in the Flatpak on recent Intel GPUs** (e.g. Arrow
+  Lake) because the old runtime's Intel media driver didn't know them; the
+  newer runtime fixes that too.
 
 ## [0.1.8] — 2026-08-12
 

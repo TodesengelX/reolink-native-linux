@@ -4,16 +4,16 @@
 # The KDE runtime provides Qt 6 (LGPL, dynamically linked). libsecret talks to
 # the host keyring via the portal.
 #
-# FFmpeg: the runtime's own FFmpeg is a stripped build WITHOUT the native H.264 /
-# HEVC decoders — it only has libopenh264, which depends on the separately
-# downloaded Cisco binary and fails with "Unable to create decoder" when that is
-# missing, so no stream ever opens (issue #5). The ffmpeg-full extension (same
-# freedesktop base as KDE 6.7 → 23.08) is mounted over it and provides the full
-# decoder set, including VAAPI hw decode. Installing from a repo pulls it in
-# automatically; for the .flatpak bundle the README lists the extra command.
+# FFmpeg + VAAPI: KDE 6.10 is built on freedesktop 25.08, whose runtime pulls
+# in the codecs-extra extension automatically — a full FFmpeg build with the
+# native H.264/HEVC decoders. The 23.08-based KDE 6.7 runtime only had the
+# libopenh264 wrapper, which fails with "Unable to create decoder" unless Cisco's
+# binary is installed, so no stream ever opened (issue #5). The newer GL
+# extension also brings an Intel media driver that knows current GPUs (Arrow
+# Lake), so hardware decode works there instead of falling back to the CPU.
 app-id: io.github.todesengelx.ReolinkLinux
 runtime: org.kde.Platform
-runtime-version: '6.7'
+runtime-version: '6.10'
 sdk: org.kde.Sdk
 command: reolink-client
 finish-args:
@@ -25,14 +25,6 @@ finish-args:
   - --device=dri                     # GPU for hardware decode
   - --talk-name=org.freedesktop.secrets  # keyring for credentials
   - --filesystem=xdg-videos          # snapshots / recordings
-add-extensions:
-  org.freedesktop.Platform.ffmpeg-full:
-    directory: lib/ffmpeg
-    version: '23.08'
-    add-ld-path: .
-    autodelete: false
-cleanup-commands:
-  - mkdir -p /app/lib/ffmpeg         # mount point for the ffmpeg-full extension
 modules:
   # The KDE SDK doesn't ship libsecret dev; build it (crypto disabled so it
   # doesn't pull in libgcrypt — the Secret portal handles storage encryption).
