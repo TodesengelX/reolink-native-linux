@@ -377,6 +377,21 @@ AVPixelFormat getHwFormat(AVCodecContext *ctx, const AVPixelFormat *fmts)
     return fmts[0];
 }
 
+// Error text for a decoder that won't open. Names the decoder, and for the
+// libopenh264 wrapper says what is actually wrong: FFmpeg builds without the
+// native H.264 decoder (Fedora's ffmpeg-free, the Flatpak runtime's LGPL build)
+// fall back to it, and it fails whenever the Cisco binary isn't installed —
+// a bare "could not open decoder" there sent people hunting in the wrong place.
+QString decoderOpenError(const AVCodec *codec)
+{
+    const QString name = QString::fromUtf8(codec->name);
+    qCWarning(lcMedia) << "could not open decoder" << name;
+    if (name == QLatin1String("libopenh264"))
+        return QStringLiteral("could not open decoder (libopenh264) — this FFmpeg lacks the "
+                              "native H.264 decoder; install a full FFmpeg build");
+    return QStringLiteral("could not open decoder (%1)").arg(name);
+}
+
 // Configures dec for hardware decode; returns the hw pixel format (or NONE).
 AVPixelFormat setupHwDecode(AVCodecContext *dec, const AVCodec *codec, AVBufferRef **hwCtx)
 {
@@ -548,11 +563,11 @@ bool runSession(const std::shared_ptr<Session> &s, bool *streamingOut)
             dec->opaque = nullptr;
             hwPixFmt = AV_PIX_FMT_NONE;
             if (avcodec_open2(dec, codec, nullptr) < 0) {
-                postState(s, State::Error, QStringLiteral("could not open decoder"));
+                postState(s, State::Error, decoderOpenError(codec));
                 return false;
             }
         } else {
-            postState(s, State::Error, QStringLiteral("could not open decoder"));
+            postState(s, State::Error, decoderOpenError(codec));
             return false;
         }
     }
