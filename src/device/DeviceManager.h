@@ -367,6 +367,8 @@ private:
     void applyConnectivity(qint64 hostId, bool transportOk, const QHash<int, bool> &chanOnline);
     // Shared body of startBaichuanPlayback/startBaichuanLive (startEpoch<=0 = live).
     void startBaichuan(int row, qint64 startEpoch, rl::StreamPlayer *player, bool mainStream);
+    // A wall-clock epoch as Baichuan by-time playback (cmd 143) wants it for this row.
+    qint64 baichuanPlaybackEpoch(int row, qint64 epoch) const;
     void applyValidation(qint64 hostId, const Validation &v);
     void postValidation(qint64 hostId, const Validation &v); // marshals to GUI thread
     std::shared_ptr<ReolinkHttpClient> clientFor(int row);

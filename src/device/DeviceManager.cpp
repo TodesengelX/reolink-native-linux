@@ -1604,7 +1604,7 @@ void DeviceManager::startBaichuan(int row, qint64 startEpoch, StreamPlayer *play
     p.channel = e.channel;
     p.uid = e.uid;
     p.mainStream = mainStream;
-    p.startEpoch = startEpoch > 0 ? startEpoch + e.playbackOffsetSecs : 0; // <= 0 = live (cmd 3 Preview), else by-time playback
+    p.startEpoch = startEpoch > 0 ? baichuanPlaybackEpoch(row, startEpoch) : 0; // <= 0 = live (cmd 3 Preview), else by-time playback
 
     auto client = std::make_shared<BaichuanClient>(p);
     // The packet source carries video only; route the stream's audio to the
@@ -1651,7 +1651,20 @@ bool DeviceManager::seekBaichuanPlayback(int row, qint64 startEpoch)
     if (row != m_playbackRow)
         return false;
     auto client = m_playbackClient.lock();
-    return client && client->seek(startEpoch);
+    return client && client->seek(baichuanPlaybackEpoch(row, startEpoch));
+}
+
+qint64 DeviceManager::baichuanPlaybackEpoch(int row, qint64 epoch) const
+{
+    if (row < 0 || row >= m_entries.size())
+        return epoch;
+    // A Baichuan-only host learns its playback-clock offset from its own
+    // Baichuan recording search, and cmd 143 needs it. An HTTP host's offset
+    // is the FLV endpoint's (the NVR's PlaybackTime is UTC) and doesn't apply:
+    // cmd 143 takes local time there, and a request shifted by the UTC offset
+    // asks for footage hours in the future, which the NVR refuses with 400.
+    const Entry &e = m_entries.at(row);
+    return e.rec.transport == QLatin1String("baichuan") ? epoch + e.playbackOffsetSecs : epoch;
 }
 
 void DeviceManager::fetchSettings(int row, const QStringList &getCommands)
