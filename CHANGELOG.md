@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the project is pre-1.0, minor versions may still change behaviour.
 
+## [Unreleased]
+
+### Fixed
+
+- The sidebar keeps its intended width when the window is maximized or the
+  layout is tight. Camera rows now grow with the system font instead of
+  overlapping, and a section header that is not an NVR can no longer paint over
+  the first camera row.
+- Playback falls back to the native Baichuan sub stream when the device's HTTPS
+  `/flv` endpoint is unavailable, instead of retrying FLV forever on
+  “Connecting…”. This covers cameras whose firmware closes the TLS connection
+  on `/flv` and redirects plain HTTP back to HTTPS.
+
 ## [0.1.8] — 2026-08-12
 
 ### Fixed

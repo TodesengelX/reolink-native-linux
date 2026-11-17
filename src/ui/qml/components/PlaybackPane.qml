@@ -55,16 +55,28 @@ Rectangle {
     property bool showHdToggle: false
     property bool audioOn: false // this pane is the one being listened to
     property bool hdActive: false
+    // HTTP-FLV is unavailable over HTTPS on some camera firmware (the server
+    // closes the TLS connection on /flv). Once it fails, use Baichuan for the
+    // sub stream instead of retrying FLV forever.
+    property bool useBaichuan: false
     // Epoch at 00:00 of the selected day, so the pane can turn playhead
     // seconds into wall-clock time without reaching into the page.
     property real dayEpoch: 0
 
     function epochOf(sec) { return Math.floor(dayEpoch + sec); }
 
+    function playBaichuan(sec) {
+        if (!hasSource)
+            return;
+        player.loop = false;
+        Devices.startBaichuanPlayback(deviceRow, epochOf(sec), player, false);
+    }
+
     function playHd(sec) {
         // Seek the running Baichuan session in place when possible (no
         // reconnect); otherwise open one at this moment.
-        if (streaming && Devices.seekBaichuanPlayback(deviceRow, epochOf(sec)))
+        if (!useBaichuan && streaming
+                && Devices.seekBaichuanPlayback(deviceRow, epochOf(sec)))
             return;
         player.loop = false;
         Devices.startBaichuanPlayback(deviceRow, epochOf(sec), player, true);
@@ -98,6 +110,14 @@ Rectangle {
     Connections {
         target: player
         function onStateChanged() {
+            // FLV over HTTPS can fail before any packet arrives (firmware closes
+            // /flv). Switch this pane to the native Baichuan sub stream once.
+            if (player.state === StreamPlayer.Error
+                    && !root.hdActive && root.hasSource && !root.useBaichuan) {
+                root.useBaichuan = true;
+                root.playBaichuan(root.playheadSecs);
+                return;
+            }
             if (player.state !== StreamPlayer.Stopped)
                 return;
             // Deferred: stop() fires synchronously inside playAtSecs()'s own
@@ -130,6 +150,10 @@ Rectangle {
             playHd(sec);
             return;
         }
+        if (useBaichuan) {
+            playBaichuan(sec);
+            return;
+        }
         var url = Devices.playbackUrl(deviceRow, epoch, false); // sub stream
         if (url.length === 0)
             return;
@@ -152,6 +176,18 @@ Rectangle {
     // momentarily refuse a playback stream while others are opening.
     StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true
                    audioEnabled: root.audioOn }
+    // If FLV never gets past Connecting (some firmware accepts TLS and then
+    // stalls), do not leave the pane spinning forever: fall back to Baichuan.
+    Timer {
+        interval: 12000
+        repeat: false
+        running: root.visible && root.hasSource && !root.hdActive
+                 && !root.useBaichuan && player.state === StreamPlayer.Connecting
+        onTriggered: {
+            root.useBaichuan = true;
+            root.playBaichuan(root.playheadSecs);
+        }
+    }
     Component.onDestruction: player.stop()
 
     // ---- Video with digital zoom (same interaction as a live pane) --------

@@ -137,6 +137,9 @@ ApplicationWindow {
 
             SideBar {
                 Layout.fillHeight: true
+                Layout.preferredWidth: Theme.sidebarWidth
+                Layout.minimumWidth: Theme.sidebarWidth
+                Layout.maximumWidth: Theme.sidebarWidth
                 visible: !window.videoFullscreen
                 onAddRequested: addDeviceDialog.open()
                 // Clicking a camera jumps to Live View with it full-size.
