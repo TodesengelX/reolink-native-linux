@@ -15,7 +15,7 @@ Item {
     signal fullscreenToggled()
     signal popOut(int deviceRow, string label)
 
-    property int preset: 4
+    property int preset: layoutStore.preset
     property int maximizedIndex: -1
     property int selectedIndex: -1
 
@@ -95,6 +95,7 @@ Item {
     Settings {
         id: layoutStore
         category: "liveGrid"
+        property int preset: 4
         property string arrangement: ""
     }
     property bool layoutRestored: false
@@ -217,7 +218,7 @@ Item {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            page.preset = parent.modelData;
+                            layoutStore.preset = parent.modelData;
                             page.maximizedIndex = -1;
                         }
                     }
