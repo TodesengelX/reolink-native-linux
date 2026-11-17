@@ -18,11 +18,25 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QSocketNotifier>
 #include <QTimer>
 
 #include <chrono>
+#include <csignal>
 #include <thread>
+#include <sys/socket.h>
 #include <unistd.h>
+
+// SIGTERM/SIGINT (logout, shutdown, `kill`) quit through the event loop like
+// tray Quit does, instead of killing the process mid-stream. The handler only
+// writes a byte to a socketpair; a QSocketNotifier picks it up on the GUI thread.
+static int g_signalFds[2] = {-1, -1};
+
+static void onQuitSignal(int)
+{
+    const char c = 1;
+    [[maybe_unused]] const ssize_t n = ::write(g_signalFds[0], &c, 1);
+}
 
 int main(int argc, char *argv[])
 {
@@ -178,7 +192,7 @@ int main(int argc, char *argv[])
     engine.loadFromModule("ReolinkApp", "Main");
 
     // Tray -> window plumbing (QML handles close-to-tray via the Tray singleton).
-    QObject::connect(&tray, &rl::TrayIcon::quitRequested, &app, [&app] {
+    auto quitApp = [&app] {
         // Quit must be final: a worker blocked on an NVR socket can stall
         // teardown (the destructors join them), leaving a process with no tray
         // icon and no window. Arm an independent watchdog so "Quit" always
@@ -190,7 +204,24 @@ int main(int argc, char *argv[])
             ::_exit(0);
         }).detach();
         app.quit();
-    });
+    };
+    QObject::connect(&tray, &rl::TrayIcon::quitRequested, &app, quitApp);
+    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, g_signalFds) == 0) {
+        auto *notifier = new QSocketNotifier(g_signalFds[1], QSocketNotifier::Read, &app);
+        QObject::connect(notifier, &QSocketNotifier::activated, &app, [notifier, quitApp] {
+            char c;
+            [[maybe_unused]] const ssize_t n = ::read(g_signalFds[1], &c, 1);
+            notifier->setEnabled(false); // a second signal changes nothing
+            qCInfo(lcUi) << "quit signal received; shutting down";
+            quitApp();
+        });
+        struct sigaction sa {};
+        sa.sa_handler = onQuitSignal;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+        ::sigaction(SIGTERM, &sa, nullptr);
+        ::sigaction(SIGINT, &sa, nullptr);
+    }
     auto raiseWindow = [&engine] {
         const QList<QObject *> roots = engine.rootObjects();
         if (roots.isEmpty())
@@ -251,5 +282,13 @@ int main(int argc, char *argv[])
         });
     }
 
-    return app.exec();
+    const int rc = app.exec();
+    // Tear the UI down while the app still exists so every StreamPlayer stops
+    // its session, then give the detached workers a moment to close cleanly
+    // (RTSP TEARDOWN) rather than vanishing with the process. Bounded well
+    // inside the quit watchdog.
+    qDeleteAll(engine.rootObjects());
+    if (!rl::StreamPlayer::waitForWorkers(1500))
+        qCInfo(lcUi) << "exiting with stream workers still closing";
+    return rc;
 }

@@ -114,6 +114,11 @@ public:
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
 
+    // Block until every (detached) stream worker has finished, or the timeout
+    // passes. For app exit: stopped sessions need a moment to close cleanly
+    // (RTSP TEARDOWN) before the process takes their threads down.
+    static bool waitForWorkers(int timeoutMs);
+
     bool recording() const;
     // Begin/stop stream-copy recording of the live session to an MP4. An empty
     // path auto-names a file in the recordings dir. Returns false if not streaming.
