@@ -620,8 +620,11 @@ void DeviceManager::applyValidation(qint64 hostId, const Validation &v)
     if (!v.hostName.isEmpty())
         rec.name = v.hostName;
     rec.model = v.model;
-    if (v.channelNum > 1)
-        rec.kind = QStringLiteral("nvr");
+    // Re-evaluate the kind on every successful probe.  Older or temporarily
+    // incorrect device-info responses can leave a standalone camera persisted
+    // as an NVR; only setting the NVR case made that bad classification stick
+    // forever and rendered a redundant one-camera parent in the sidebar.
+    rec.kind = v.channelNum > 1 ? QStringLiteral("nvr") : QStringLiteral("camera");
     m_db->updateHost(rec);
 
     // Build the new per-channel entries.
