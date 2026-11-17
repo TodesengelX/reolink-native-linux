@@ -2270,13 +2270,17 @@ void DeviceManager::fetchBcConfig(int row, int cmdId, const QString &reqBody)
             if (schema && body.isEmpty()) {
                 structured = bc.getConfig(*schema, ch);
                 m = structured.fields;
+            } else if (!schema) {
+                // Commands without a schema (FloodlightTask 289, say) keep the
+                // flat read: there is nothing to parse into `structured`, and
+                // leaving m empty blanked their settings section.
+                m = bc.getConfigFlat(static_cast<quint32>(cmdId), ch, body);
             } else {
                 // AI detection GETs carry a type-specific request body and use
                 // the same schema with a caller-supplied request body.
                 quint16 status = 0;
                 const QByteArray xml = bc.transact(static_cast<quint32>(cmdId), ch, body, &status);
-                if (schema)
-                    structured = bcsettings::parse(xml, status, *schema);
+                structured = bcsettings::parse(xml, status, *schema);
                 m = structured.fields;
             }
             bc.close();
@@ -2298,8 +2302,10 @@ void DeviceManager::fetchBcConfig(int row, int cmdId, const QString &reqBody)
             }
         }
         QMetaObject::invokeMethod(
-            this, [this, row, cmdId, m, structured] {
-                if (cmdId == 80 && m.contains(QStringLiteral("name"))) {
+            this, [this, row, cmdId, m, structured, isBaichuan] {
+                // A Baichuan-only host learns its name from device info. HTTP
+                // hosts already have one from GetDevInfo; never rename those.
+                if (isBaichuan && cmdId == 80 && m.contains(QStringLiteral("name"))) {
                     const QString name = m.value(QStringLiteral("name")).toString().trimmed();
                     if (!name.isEmpty() && row >= 0 && row < m_entries.size()) {
                         const qint64 hostId = m_entries.at(row).rec.id;
