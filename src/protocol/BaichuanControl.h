@@ -1,6 +1,9 @@
 #pragma once
 
+#include "protocol/ReolinkApi.h"
+
 #include <QByteArray>
+#include <QHash>
 #include <QString>
 #include <QVariantMap>
 
@@ -32,6 +35,8 @@ public:
         int port = 9000;
         QString username;
         QString password;
+        int connectTimeoutMs = 5000;
+        int replyTimeoutMs = 12000;
     };
 
     explicit BaichuanControl(Params params);
@@ -54,6 +59,20 @@ public:
     // Returns true on a success status (200/201/300).
     bool writeEnable(quint32 getCmdId, quint32 setCmdId, int channel, bool enable);
 
+    struct LightAbility {
+        api::LightSupport support = api::LightSupport::Unknown;
+        api::LightType type = api::LightType::Unknown;
+    };
+
+    // Parse the native Baichuan cmd-199 capability document. Reolink's official
+    // BCSDK exposes light support and BC_LIGHT_TYPE_* independently; cmd 199 is
+    // the open wire-level capability source also used by reolink_aio. `ledCtrl`
+    // bits 1+2 identify the controllable light subsystem. A present ledCtrl with
+    // those bits clear is an explicit Unsupported result, not Unknown. `lightType`
+    // is classification metadata only and does not imply that a lamp exists.
+    static QHash<int, LightAbility> parseLightAbilities(const QByteArray &xml);
+    QHash<int, LightAbility> lightAbilities();
+
     // Parse a command's config XML into a flat { leafTag: value } map (first
     // occurrence of each tag wins — fine because a device config's scalar tags
     // are unique). reqBody is an optional request XML some GETs need (e.g. AI
@@ -63,8 +82,11 @@ public:
     // Read-modify-write several leaf tags in one config: GET, replace each
     // <tag>…</tag> (first occurrence) with its new value, SET. Returns true on a
     // success status. getBody is the optional GET request body (see above).
+    // requireMatch prevents an unchanged config from being SET successfully when
+    // none of the requested fields exist (useful for capability/fallback probes).
     bool writeFields(quint32 getCmdId, quint32 setCmdId, int channel,
-                     const QVariantMap &changes, const QByteArray &getBody = {});
+                     const QVariantMap &changes, const QByteArray &getBody = {},
+                     bool requireMatch = false);
 
     // Low-level: send a raw (plaintext) XML body to cmdId and return the decrypted
     // reply. bodyXml empty => header-only GET. Used by the helpers above.

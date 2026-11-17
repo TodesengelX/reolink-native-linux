@@ -1,5 +1,6 @@
 #include "media/BcMediaParser.h"
 #include "protocol/BcCrypto.h"
+#include "protocol/BaichuanControl.h"
 #include "protocol/ReolinkApi.h"
 
 #include <QtTest>
@@ -101,6 +102,17 @@ private slots:
         QVERIFY(r.needsRelogin());
     }
 
+    void parseBatchPreservesRanges()
+    {
+        const api::BatchResult r = api::parseBatch(
+            R"([{"cmd":"GetWhiteLed","code":0,"value":{"WhiteLed":{"bright":55}},"range":{"WhiteLed":{"bright":{"min":1,"max":100}}}}])");
+        QVERIFY(r.transportOk);
+        QCOMPARE(r.results.size(), 1);
+        QVERIFY(r.results[0].ok);
+        QCOMPARE(r.results[0].range["WhiteLed"]["bright"].value("min", -1), 1);
+        QCOMPARE(r.results[0].range["WhiteLed"]["bright"].value("max", -1), 100);
+    }
+
     void parseBatchMalformed()
     {
         QVERIFY(!api::parseBatch("not json at all").transportOk);
@@ -187,10 +199,219 @@ private slots:
         QVERIFY(caps.channels[0].talk);
         QVERIFY(caps.channels[0].aiPeople);
         QVERIFY(caps.channels[0].ai);
-        QVERIFY(!caps.channels[0].floodlight);
+        QCOMPARE(caps.channels[0].lightSupport, api::LightSupport::Unsupported);
         QVERIFY(!caps.channels[1].ptz);
         QVERIFY(!caps.channels[1].talk);
         QVERIFY(caps.channels[1].battery);
+    }
+
+    void parseAbilitySpotlightAliases()
+    {
+        const Json value = Json::parse(R"({"Ability":{"abilityChn":[
+            {"supportFLswitch":{"ver":1,"permit":6},"supportFLBrightness":{"ver":1,"permit":6}}
+        ]}})");
+        const api::Capabilities caps = api::parseAbility(value);
+        QCOMPARE(caps.channels.size(), 1);
+        QCOMPARE(caps.channels[0].lightSupport, api::LightSupport::Supported);
+        QVERIFY(caps.channels[0].lightBrightness);
+        QCOMPARE(caps.channels[0].lightType, api::LightType::Unknown);
+    }
+
+    void parseAbilityBrightnessAliasesDoNotImplyLightSupport()
+    {
+        const Json value = Json::parse(R"({"Ability":{"abilityChn":[
+            {"supportFloodlightBrightnessCtrl":{"ver":1,"permit":6}}
+        ]}})");
+        const api::Capabilities caps = api::parseAbility(value);
+        QCOMPARE(caps.channels.size(), 1);
+        QVERIFY(caps.channels[0].lightBrightness);
+        QCOMPARE(caps.channels[0].lightSupport, api::LightSupport::Unknown);
+    }
+
+    void resolvedLightTypeRequiresPositiveSupportAndExplicitType()
+    {
+        QCOMPARE(api::resolvedLightType(api::LightSupport::Unknown, api::LightType::Spotlight),
+                 api::LightType::Unknown);
+        QCOMPARE(api::resolvedLightType(api::LightSupport::Unsupported, api::LightType::Spotlight),
+                 api::LightType::Unknown);
+        QCOMPARE(api::resolvedLightType(api::LightSupport::Supported, api::LightType::Unknown),
+                 api::LightType::Unknown);
+        QCOMPARE(api::resolvedLightType(api::LightSupport::Supported, api::LightType::Spotlight),
+                 api::LightType::Spotlight);
+        QCOMPARE(api::resolvedLightType(api::LightSupport::Supported, api::LightType::Floodlight),
+                 api::LightType::Floodlight);
+    }
+
+    void parseAbilityKeepsLightSupportAndTypeSeparate()
+    {
+        const Json value = Json::parse(R"({"Ability":{"abilityChn":[
+            {"supportFLswitch":{"ver":1,"permit":6},"lightType":0},
+            {"floodLight":{"ver":1,"permit":6},"lightType":1},
+            {"floodLight":{"ver":1,"permit":6}}
+        ]}})");
+        const api::Capabilities caps = api::parseAbility(value);
+        QCOMPARE(caps.channels.size(), 3);
+        QCOMPARE(caps.channels[0].lightSupport, api::LightSupport::Supported);
+        QCOMPARE(caps.channels[0].lightType, api::LightType::Spotlight);
+        QCOMPARE(caps.channels[1].lightSupport, api::LightSupport::Supported);
+        QCOMPARE(caps.channels[1].lightType, api::LightType::Floodlight);
+        QCOMPARE(caps.channels[2].lightSupport, api::LightSupport::Supported);
+        QCOMPARE(caps.channels[2].lightType, api::LightType::Unknown);
+    }
+
+    void visibleLightNormalizationMatchesRealRlc510aAndRlc1212aEvidence()
+    {
+        // Real RLC-510A firmware: floodLight is explicitly unsupported, yet
+        // GetWhiteLed still returns generic brightness/schedule/state metadata.
+        const api::Capabilities rlc510 = api::parseAbility(Json::parse(R"({"Ability":{"abilityChn":[{
+            "floodLight":{"permit":0,"ver":0},
+            "supportFLBrightness":{"permit":0,"ver":0},
+            "ledControl":{"permit":6,"ver":1}
+        }]}})"));
+        QCOMPARE(rlc510.channels[0].lightSupport, api::LightSupport::Unsupported);
+        const api::WhiteLedInfo genericWhiteLed = api::parseWhiteLed(
+            Json{{"WhiteLed", {{"channel", 0}, {"state", 0}, {"bright", 85}}}},
+            Json{{"WhiteLed", {{"bright", {{"min", 0}, {"max", 100}}}}}}, 0);
+        QVERIFY(genericWhiteLed.supported);
+        QVERIFY(genericWhiteLed.brightnessSupported);
+        QCOMPARE(api::resolvedLightSupport(rlc510.channels[0].lightSupport,
+                                           api::LightSupport::Unknown),
+                 api::LightSupport::Unsupported);
+        QVERIFY(!api::hasVisibleLight(rlc510.channels[0].lightSupport));
+
+        // Real RLC-1212A HTTP is also floodLight ver=0. Native cmd 199 is the
+        // differentiator: ledCtrl=38 has bits 1+2 set and positively proves lamp
+        // hardware. Brightness remains metadata that is usable only after that.
+        const api::Capabilities rlc1212 = api::parseAbility(Json::parse(R"({"Ability":{"abilityChn":[{
+            "floodLight":{"permit":0,"ver":0},
+            "supportFLBrightness":{"permit":6,"ver":1}
+        }]}})"));
+        QCOMPARE(rlc1212.channels[0].lightSupport, api::LightSupport::Unsupported);
+        QVERIFY(rlc1212.channels[0].lightBrightness);
+        const auto native = BaichuanControl::parseLightAbilities(
+            QByteArrayLiteral("<body><Support><item><chnID>0</chnID><ledCtrl>38</ledCtrl></item></Support></body>"));
+        QCOMPARE(native.value(0).support, api::LightSupport::Supported);
+        const api::LightSupport resolved =
+            api::resolvedLightSupport(rlc1212.channels[0].lightSupport, native.value(0).support);
+        QCOMPARE(resolved, api::LightSupport::Supported);
+        QVERIFY(api::hasVisibleLight(resolved));
+    }
+
+    void visibleLightStrongNativeNegativeBeatsHttpPositive()
+    {
+        const api::Capabilities http = api::parseAbility(Json::parse(R"({"Ability":{"abilityChn":[{
+            "supportFLswitch":{"permit":6,"ver":1}
+        }]}})"));
+        QCOMPARE(http.channels[0].lightSupport, api::LightSupport::Supported);
+
+        // A present ledCtrl=0 is an explicit physical-hardware negative. A type
+        // value still present beside it must not resurrect the control.
+        const auto native = BaichuanControl::parseLightAbilities(
+            QByteArrayLiteral("<body><Support><item><chnID>0</chnID><ledCtrl>0</ledCtrl><lightType>0</lightType></item></Support></body>"));
+        QCOMPARE(native.value(0).support, api::LightSupport::Unsupported);
+        QCOMPARE(native.value(0).type, api::LightType::Spotlight);
+        QCOMPARE(api::resolvedLightSupport(http.channels[0].lightSupport, native.value(0).support),
+                 api::LightSupport::Unsupported);
+        QCOMPARE(api::resolvedLightType(api::LightSupport::Unsupported, native.value(0).type),
+                 api::LightType::Unknown);
+    }
+
+    void visibleLightUnknownAndIrStatusOnlyStayHidden()
+    {
+        const api::Capabilities unknown = api::parseAbility(Json::parse(
+            R"({"Ability":{"abilityChn":[{"ledControl":{"permit":6,"ver":1},"powerLed":{"permit":6,"ver":1}}]}})"));
+        QCOMPARE(unknown.channels[0].lightSupport, api::LightSupport::Unknown);
+        QVERIFY(!api::hasVisibleLight(unknown.channels[0].lightSupport));
+
+        const api::ChannelCaps defaults;
+        QCOMPARE(defaults.lightSupport, api::LightSupport::Unknown);
+        QCOMPARE(defaults.lightType, api::LightType::Unknown);
+    }
+
+    void whiteLedCommandsAndState()
+    {
+        const Json get = api::getWhiteLed(3);
+        QCOMPARE(QString::fromStdString(get.value("cmd", std::string())), QStringLiteral("GetWhiteLed"));
+        QCOMPARE(get.value("action", -1), 0);
+        QCOMPARE(get["param"].value("channel", -1), 3);
+
+        const Json set = api::setWhiteLedState(3, true);
+        QCOMPARE(QString::fromStdString(set.value("cmd", std::string())), QStringLiteral("SetWhiteLed"));
+        QCOMPARE(set.value("action", -1), 0);
+        const Json wl = set["param"]["WhiteLed"];
+        QCOMPARE(wl.value("channel", -1), 3);
+        QCOMPARE(wl.value("state", -1), 1);
+        QCOMPARE(static_cast<int>(wl.size()), 2); // do not rewrite mode/brightness/schedule
+
+        const Json setBrightness = api::setWhiteLedBrightness(3, 64);
+        QCOMPARE(QString::fromStdString(setBrightness.value("cmd", std::string())),
+                 QStringLiteral("SetWhiteLed"));
+        const Json bwl = setBrightness["param"]["WhiteLed"];
+        QCOMPARE(bwl.value("channel", -1), 3);
+        QCOMPARE(bwl.value("bright", -1), 64);
+        QCOMPARE(static_cast<int>(bwl.size()), 2); // brightness-only; preserve all other config
+
+        const api::WhiteLedInfo parsed = api::parseWhiteLed(
+            Json{{"WhiteLed", {{"channel", 3}, {"state", 1}, {"bright", 75}}}}, 0);
+        QVERIFY(parsed.supported);
+        QVERIFY(parsed.stateKnown);
+        QVERIFY(parsed.on);
+        QCOMPARE(parsed.channel, 3);
+        QVERIFY(parsed.brightnessSupported);
+        QVERIFY(parsed.brightnessKnown);
+        QCOMPARE(parsed.brightness, 75);
+
+        const api::WhiteLedInfo ranged = api::parseWhiteLed(
+            Json{{"WhiteLed", {{"channel", 3}, {"bright", 75}}}},
+            Json{{"WhiteLed", {{"bright", {{"min", 5}, {"max", 95}}}}}}, 0);
+        QVERIFY(ranged.brightnessSupported);
+        QCOMPARE(ranged.brightnessMin, 5);
+        QCOMPARE(ranged.brightnessMax, 95);
+
+        const api::WhiteLedInfo typed = api::parseWhiteLed(
+            Json{{"WhiteLed", {{"channel", 3}, {"state", 1}, {"lightType", 1}}}}, 0);
+        QCOMPARE(typed.type, api::LightType::Floodlight);
+
+        const api::WhiteLedInfo missing = api::parseWhiteLed(Json::object(), 2);
+        QVERIFY(!missing.supported);
+        QVERIFY(!missing.stateKnown);
+    }
+
+    void baichuanLightAbilitiesKeepSupportAndTypeSeparate()
+    {
+        // Native cmd 199: ledCtrl bits 1+2 advertise the controllable light;
+        // lightType is independent (0 spotlight, 1 floodlight).
+        const QByteArray xml = R"(<?xml version="1.0" encoding="UTF-8"?>
+            <body><Support>
+              <item><chnID>0</chnID><ledCtrl>6</ledCtrl><lightType>0</lightType></item>
+              <item><chnID>1</chnID><ledCtrl>6</ledCtrl><lightType>1</lightType></item>
+              <item><chnID>2</chnID><ledCtrl>1</ledCtrl><lightType>0</lightType></item>
+              <item><chnID>3</chnID><ledCtrl>6</ledCtrl></item>
+            </Support></body>)";
+        const auto lights = BaichuanControl::parseLightAbilities(xml);
+        QCOMPARE(lights.size(), 4);
+        QCOMPARE(lights.value(0).support, api::LightSupport::Supported);
+        QCOMPARE(lights.value(0).type, api::LightType::Spotlight);
+        QCOMPARE(lights.value(1).support, api::LightSupport::Supported);
+        QCOMPARE(lights.value(1).type, api::LightType::Floodlight);
+        QCOMPARE(lights.value(2).support, api::LightSupport::Unsupported);
+        QCOMPARE(lights.value(2).type, api::LightType::Spotlight);
+        QCOMPARE(lights.value(3).support, api::LightSupport::Supported);
+        QCOMPARE(lights.value(3).type, api::LightType::Unknown);
+    }
+
+    void baichuanLightAbilitiesHandleNestedCapabilityRecords()
+    {
+        const QByteArray xml = R"(<?xml version="1.0" encoding="UTF-8"?>
+            <body><Support>
+              <item><chnID>4</chnID>
+                <subItem><ledCtrl>6</ledCtrl></subItem>
+                <subItem><lightType>1</lightType></subItem>
+              </item>
+            </Support></body>)";
+        const auto lights = BaichuanControl::parseLightAbilities(xml);
+        QCOMPARE(lights.value(4).support, api::LightSupport::Supported);
+        QCOMPARE(lights.value(4).type, api::LightType::Floodlight);
     }
 
     void parseAbilityAdmin()
