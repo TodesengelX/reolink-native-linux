@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSettings>
 #include <QTimer>
 
@@ -15,6 +16,18 @@ namespace rl {
 // Retention cap: the inbox keeps only the newest N events, discarding older ones
 // from both the model and the database.
 static constexpr int kMaxEvents = 100;
+
+// Thumbnail paths come from the database, which can outlive the directory they
+// were written in: a copied profile, or an AppImage database carried into the
+// Flatpak, points at another install's files. Only ever delete our own.
+static void removeThumbnail(const QString &path)
+{
+    if (path.isEmpty())
+        return;
+    const QString ours = QDir(Paths::thumbnailsDir()).canonicalPath();
+    if (!ours.isEmpty() && QFileInfo(path).absoluteDir().canonicalPath() == ours)
+        QFile::remove(path);
+}
 
 EventManager::EventManager(Database *db, DeviceManager *devices, QObject *parent)
     : QAbstractListModel(parent), m_db(db), m_devices(devices)
@@ -244,8 +257,7 @@ void EventManager::onDetection(qint64 hostId, int channel, const QString &type,
             endRemoveRows();
         }
         for (int i = kMaxEvents; i < m_all.size(); ++i)
-            if (!m_all.at(i).thumbnail.isEmpty())
-                QFile::remove(m_all.at(i).thumbnail);
+            removeThumbnail(m_all.at(i).thumbnail);
         m_all.resize(kMaxEvents);
         m_db->trimEvents(kMaxEvents);
         emit countChanged();
@@ -292,7 +304,7 @@ void EventManager::purgeExpired()
         any = any || e.timestamp < cutoff;
     const QStringList thumbs = m_db->deleteEventsBefore(cutoff);
     for (const QString &t : thumbs)
-        QFile::remove(t);
+        removeThumbnail(t);
     if (any || !thumbs.isEmpty())
         reload();
 }
@@ -344,8 +356,7 @@ void EventManager::onConnectivity(qint64 hostId, int channel, const QString &nam
             endRemoveRows();
         }
         for (int i = kMaxEvents; i < m_all.size(); ++i)
-            if (!m_all.at(i).thumbnail.isEmpty())
-                QFile::remove(m_all.at(i).thumbnail);
+            removeThumbnail(m_all.at(i).thumbnail);
         m_all.resize(kMaxEvents);
         m_db->trimEvents(kMaxEvents);
         emit countChanged();
@@ -365,7 +376,7 @@ void EventManager::onThumbnailReady(qint64 eventId, const QString &path)
         return;
     }
     // Event already trimmed away — don't keep an orphaned file.
-    QFile::remove(path);
+    removeThumbnail(path);
 }
 
 QVariantList EventManager::eventTimesFor(qint64 hostId, int channel, qint64 dayStart) const
