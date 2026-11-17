@@ -428,6 +428,14 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
             netBuf.append(sock.readAll());
             continue;
         }
+        // A refused stream request (preview cmd 3, playback cmd 143) gets an
+        // error status and then nothing. End the stream so the player reports
+        // it, rather than waiting on "Connecting" for good.
+        if ((m.id == 3 || m.id == 143) && m.code >= 300) {
+            qCWarning(lcProto) << m_p.host << "baichuan stream: device refused cmd" << m.id
+                               << "with status" << m.code;
+            return;
+        }
         if (m.msgNum != streamMsgNum)
             continue;
         // FullAES: the Extension carries <encryptLen> — AES-decrypt that many bytes
