@@ -7,7 +7,8 @@ import ReolinkApp
 // Segments are {start,end,type,name} with start/end in seconds into the day.
 // Interactions: wheel zooms at the cursor; when zoomed, dragging the track pans
 // the view (Shift+wheel / horizontal scroll pan too); dragging the playhead
-// scrubs it; a plain click seeks.
+// scrubs it; a plain click seeks. A click in a gap near a recording snaps to
+// that recording's start, since at day zoom a short clip is barely a pixel wide.
 Rectangle {
     id: root
     // The scrub track keeps a fixed height; per-camera lanes extend the widget
@@ -42,6 +43,41 @@ Rectangle {
     function xForSec(sec) { return (sec - viewStart) / visibleSpan * width; }
     function secForX(x) { return viewStart + x / width * visibleSpan; }
 
+    // How far (in pixels) a click may land from a recording and still snap to it.
+    property real snapPx: 18
+
+    // The recording a click at `sec` should play: the one containing it, else
+    // the nearest one within `toleranceSec` (an upcoming one wins a tie).
+    // Returns the segment or null.
+    function segmentNear(sec, toleranceSec) {
+        var best = null, bestDist = toleranceSec;
+        for (var i = 0; i < segments.length; ++i) {
+            var s = segments[i];
+            if (sec >= s.start && sec <= s.end)
+                return s;
+            var d = sec < s.start ? s.start - sec : sec - s.end;
+            if (d < bestDist || (d === bestDist && best && sec < s.start)) {
+                best = s;
+                bestDist = d;
+            }
+        }
+        return best;
+    }
+    // Where a click at `sec` starts playback: inside a recording, right there;
+    // in a gap near one, at that recording's start; elsewhere, unchanged.
+    function snapSec(sec) {
+        var s = segmentNear(sec, snapPx / width * visibleSpan);
+        return s && !(sec >= s.start && sec <= s.end) ? s.start : sec;
+    }
+    function clock(sec) {
+        var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+        return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0")
+             + (zoom > 4 ? ":" + String(s).padStart(2, "0") : "");
+    }
+    // The recording under the pointer's snap reach, for the hover highlight.
+    readonly property var hoverSegment: hover.hovered
+        ? segmentNear(secForX(hover.point.position.x), snapPx / width * visibleSpan) : null
+
     // Detection-event markers: accent ticks where the inbox saw motion/AI on
     // this camera, so incidents are findable at a glance.
     property var alarmTicks: []
@@ -66,13 +102,17 @@ Rectangle {
             required property var modelData
             property real segStart: modelData.start
             property real segEnd: modelData.end
-            x: root.xForSec(segStart)
-            width: Math.max(2, root.xForSec(segEnd) - root.xForSec(segStart))
-            y: 14
-            height: root.trackHeight - 28
+            readonly property bool targeted: root.hoverSegment === modelData
+            // Short clips get a minimum width so they stay visible and aimable.
+            x: root.xForSec(segStart) - (targeted ? 1 : 0)
+            width: Math.max(3, root.xForSec(segEnd) - root.xForSec(segStart)) + (targeted ? 2 : 0)
+            y: targeted ? 10 : 14
+            height: root.trackHeight - (targeted ? 20 : 28)
             visible: segEnd >= root.viewStart && segStart <= root.viewStart + root.visibleSpan
             color: modelData.type === "alarm" ? Theme.accent : "#4a5a68"
-            opacity: 0.85
+            opacity: targeted ? 1.0 : 0.85
+            border.color: targeted ? Theme.text : "transparent"
+            border.width: targeted ? 1 : 0
         }
     }
 
@@ -180,9 +220,11 @@ Rectangle {
             color: "white"
             font.pixelSize: 10
             text: {
+                // Show where a click will actually start: "▶ 14:32" when it
+                // snaps to a nearby recording's start.
                 var s = root.secForX(hover.point.position.x);
-                var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-                return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+                var target = root.snapSec(s);
+                return target !== s ? "\u25B6 " + root.clock(target) : root.clock(s);
             }
         }
     }
@@ -227,8 +269,8 @@ Rectangle {
         onReleased: (m) => {
             if (mode === 1) {
                 root.commit(lastSec);
-            } else if (mode === 0) { // plain click: seek there
-                lastSec = secAt(m.x);
+            } else if (mode === 0) { // plain click: seek there (snapped to a nearby recording)
+                lastSec = root.snapSec(secAt(m.x));
                 root.seek(lastSec);
                 root.commit(lastSec);
             }
