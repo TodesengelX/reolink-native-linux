@@ -70,6 +70,15 @@ Rectangle {
     // error the sub stream is taken over Baichuan instead, for this camera,
     // until the pane is pointed at another one.
     property bool subViaBc: false
+    property bool rtspDelivered: false // this camera's RTSP has streamed in this pane
+    function isBaichuanKey(k) { return k.startsWith("bc:") || k.startsWith("bcsub:"); }
+    // RTSP failing on a standalone camera that is otherwise reachable means RTSP
+    // is switched off. An offline camera fails RTSP too, but Baichuan can't
+    // reach it either, so leave it on RTSP's backoff.
+    function rtspOffWhileOnline() {
+        var c = Devices.cameraInfo(deviceRow);
+        return !!c && c.kind !== "nvr" && c.online === true;
+    }
 
     // These carry the DEVICE ROW, not the pane index: the page tracks which
     // camera is maximized/selected, so both survive a rearrange.
@@ -156,7 +165,10 @@ Rectangle {
     }
     // A pane pointed at a different camera must let the old one go now — its
     // session is wanted elsewhere (a swap hands it straight to another pane).
-    onDeviceRowChanged: { bcFallback = false; subViaBc = false; seedQuality(); releaseStream(); updateSource(); }
+    onDeviceRowChanged: {
+        bcFallback = false; subViaBc = false; rtspDelivered = false;
+        seedQuality(); releaseStream(); updateSource();
+    }
     onVisibleChanged: updateSource()
     onPageActiveChanged: updateSource()
     onEffectiveMainChanged: { bcFallback = false; updateSource(); }
@@ -173,16 +185,22 @@ Rectangle {
                 root.bcFallback = true;
                 root.updateSource();
             } else if (player.state === StreamPlayer.Error && !root.subViaBc
-                       && !root.effectiveMain && root.streamKey.startsWith("rtsp://")) {
+                       && !root.effectiveMain && root.streamKey.startsWith("rtsp://")
+                       && !root.rtspDelivered && root.rtspOffWhileOnline()) {
+                // Only when RTSP never worked for this camera (switched off),
+                // not on a glitch: live RTSP reports Error on every stall and
+                // reconnect, and the switch is sticky. Never for NVR channels,
+                // whose one Baichuan slot every SD pane would then fight over.
                 root.subViaBc = true;
                 root.updateSource();
             }
+            if (player.state === StreamPlayer.Streaming && root.streamKey.startsWith("rtsp://"))
+                root.rtspDelivered = true;
             // A Baichuan session is one-shot: when the device drops it, the
             // player just stops. Reconnect after a beat unless we stopped it
             // ourselves (releaseStream/updateSource clear or change streamKey
             // before stopping, and a restart leaves Stopped right away).
-            if (player.state === StreamPlayer.Stopped
-                && root.streamKey.substring(0, 3) === "bc:")
+            if (player.state === StreamPlayer.Stopped && root.isBaichuanKey(root.streamKey))
                 bcReconnect.restart();
             else
                 bcReconnect.stop();
@@ -193,8 +211,7 @@ Rectangle {
         id: bcReconnect
         interval: 3000
         onTriggered: {
-            if (player.state !== StreamPlayer.Stopped
-                || root.streamKey.substring(0, 3) !== "bc:")
+            if (player.state !== StreamPlayer.Stopped || !root.isBaichuanKey(root.streamKey))
                 return;
             root.streamKey = ""; // force updateSource() to open a fresh session
             root.updateSource();
