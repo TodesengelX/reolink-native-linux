@@ -9,6 +9,7 @@ namespace rl {
 struct HostRecord {
     qint64 id = -1;
     QString kind;     // "camera" | "nvr" | "stream" (direct URL, for testing/generic RTSP)
+    QString transport = QStringLiteral("http"); // "http" | "baichuan"
     QString name;
     QString addr;     // IP/hostname, or full URL when kind == "stream"
     int port = 443;

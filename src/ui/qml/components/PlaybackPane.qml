@@ -158,6 +158,13 @@ Rectangle {
             playHd(sec);
             return;
         }
+        if (Devices.transportAt(deviceRow) === "baichuan") {
+            if (streaming && Devices.seekBaichuanPlayback(deviceRow, epoch))
+                return;
+            player.loop = false;
+            Devices.startBaichuanPlayback(deviceRow, epoch, player, false);
+            return;
+        }
         if (useBaichuan) {
             playBaichuan(sec);
             return;
@@ -212,7 +219,7 @@ Rectangle {
             id: video
             anchors.fill: parent
             fillMode: VideoOutput.PreserveAspectFit
-            visible: root.streaming
+            visible: player.framesDecoded > 0
             orientation: root.viewRotation
             transform: [
                 Scale {

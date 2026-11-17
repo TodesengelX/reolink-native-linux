@@ -104,7 +104,7 @@ Rectangle {
             Layout.fillHeight: true
             model: Devices
             clip: true
-            spacing: 2
+            spacing: 1
 
             // Group channels under their host. The header renders only for NVRs
             // (a standalone camera is its own host — no redundant parent row).
@@ -143,10 +143,10 @@ Rectangle {
                     function onModelReset() { nvrHeader._rev++; }
                 }
                 width: ListView.view.width
-                // Grow with the host row rather than assuming a fixed 44 px;
+                // Grow with the host row rather than assuming a fixed height;
                 // the list has to reserve that height before the first channel
                 // is laid out or the header paints over it at large font sizes.
-                height: isNvr ? Math.max(44, headerColumn.implicitHeight + 2 * Theme.spacing) : 0
+                height: isNvr ? Math.max(48, headerColumn.implicitHeight + 2 * Theme.spacing) : 0
                 // ListView drives section-item visibility itself and forces it
                 // back on, so `visible: isNvr` alone doesn't hide a standalone
                 // camera's header — it stayed shown at height 0 and its content
@@ -162,6 +162,8 @@ Rectangle {
                     anchors.fill: parent
                     anchors.leftMargin: Theme.spacing
                     anchors.rightMargin: Theme.spacing
+                    anchors.topMargin: 4
+                    anchors.bottomMargin: 4
                     spacing: 7
                     Text {
                         text: root.collapsed[nvrHeader.section] ? "▸" : "▾"
@@ -176,6 +178,7 @@ Rectangle {
                     ColumnLayout {
                         id: headerColumn
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         spacing: 1
                         RowLayout {
                             Layout.fillWidth: true
@@ -204,6 +207,7 @@ Rectangle {
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
+                                width: nvrHeader.width - 68
                                 text: {
                                     var h = nvrHeader.host;
                                     // Never string-concat a not-yet-populated host
@@ -224,6 +228,14 @@ Rectangle {
                             }
                         }
                     }
+                }
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 1
+                    color: Theme.border
+                    opacity: 0.45
                 }
                 HoverHandler { id: nvrHover; enabled: nvrHeader.isNvr }
                 MouseArea {
@@ -287,7 +299,7 @@ Rectangle {
                 width: ListView.view.width
                 // Let the row grow with the system font instead of clipping the
                 // name and status into each other at high font scales.
-                height: hidden ? 0 : Math.max(48, rowColumn.implicitHeight + 8)
+                height: hidden ? 0 : Math.max(54, rowColumn.implicitHeight + 12)
                 visible: !hidden
                 clip: true
                 color: delegateArea.containsMouse ? Theme.surfaceAlt : "transparent"
@@ -309,9 +321,9 @@ Rectangle {
                     anchors.fill: parent
                     anchors.leftMargin: camRow.underNvr ? 30 : Theme.spacing
                     anchors.rightMargin: Theme.spacing
-                    anchors.topMargin: 4
-                    anchors.bottomMargin: 4
-                    spacing: Theme.spacing
+                    anchors.topMargin: 6
+                    anchors.bottomMargin: 6
+                    spacing: 8
 
                     DeviceGlyph {
                         kind: "cam"
@@ -321,6 +333,7 @@ Rectangle {
                     ColumnLayout {
                         id: rowColumn
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         spacing: 2
                         RowLayout {
                             Layout.fillWidth: true
@@ -403,6 +416,14 @@ Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
+                }
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 1
+                    color: Theme.border
+                    opacity: 0.3
                 }
 
                 // Dragged into a Live View cell to put this camera there. Lives in

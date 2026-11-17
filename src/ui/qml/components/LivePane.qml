@@ -140,7 +140,9 @@ Rectangle {
         var want = deviceRow >= 0 && visible && pageActive;
         var key = "";
         if (want) {
-            if (effectiveMain && !bcFallback && !audioOn)
+            if (Devices.transportAt(deviceRow) === "baichuan" && !bcFallback)
+                key = "bc:" + deviceRow + ":" + (effectiveMain ? "main" : "sub");
+            else if (effectiveMain && !bcFallback && !audioOn)
                 key = "bc:" + deviceRow;
             else if (!effectiveMain && subViaBc)
                 key = "bcsub:" + deviceRow;
@@ -154,7 +156,7 @@ Rectangle {
             player.stop();
         } else if (key.substring(0, 3) === "bc:") {
             player.loop = false;
-            Devices.startBaichuanLive(root.deviceRow, player, true);
+            Devices.startBaichuanLive(root.deviceRow, player, effectiveMain);
         } else if (key.substring(0, 6) === "bcsub:") {
             player.loop = false;
             Devices.startBaichuanLive(root.deviceRow, player, false);
@@ -188,7 +190,8 @@ Rectangle {
     Connections {
         target: player
         function onStateChanged() {
-            if (player.state === StreamPlayer.Error && !root.bcFallback
+            if (player.state === StreamPlayer.Error && Devices.transportAt(root.deviceRow) !== "baichuan"
+                && !root.bcFallback
                 && root.streamKey.substring(0, 3) === "bc:") {
                 root.bcFallback = true;
                 root.updateSource();

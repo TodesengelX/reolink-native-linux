@@ -102,7 +102,8 @@ Window {
     Connections {
         target: player
         function onStateChanged() {
-            if (player.state === StreamPlayer.Error && !win.bcFallback) {
+            if (player.state === StreamPlayer.Error
+                && Devices.transportAt(win.deviceRow) !== "baichuan" && !win.bcFallback) {
                 win.bcFallback = true;
                 win.startStream();
             }
