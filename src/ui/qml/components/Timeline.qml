@@ -3,7 +3,8 @@ import QtQuick.Controls
 import ReolinkApp
 
 // 24-hour recording timeline: two-tone segments (grey = timer/continuous,
-// blue = alarm/AI), hour ticks, a draggable playhead, and click-to-seek.
+// blue = alarm/AI), time ticks that refine as you zoom, a draggable playhead,
+// and click-to-seek.
 // Segments are {start,end,type,name} with start/end in seconds into the day.
 // Interactions: wheel zooms at the cursor; when zoomed, dragging the track pans
 // the view (Shift+wheel / horizontal scroll pan too); dragging the playhead
@@ -33,7 +34,7 @@ Rectangle {
     property var lanes: []
     property real zoom: 1.0              // 1 = whole day; >1 zooms in
     property real viewStart: 0           // left edge, seconds
-    readonly property real maxZoom: 48   // a 30-minute window
+    readonly property real maxZoom: 288  // a 5-minute window, for following one movement
 
     // Zoom to `z` with `sec` in the middle, as far as the day's edges allow.
     function centerOn(sec, z) {
@@ -123,23 +124,48 @@ Rectangle {
         }
     }
 
-    // Hour ticks + labels
+    // Time ticks + labels. The step adapts to the zoom: the finest one that
+    // keeps ticks 24px apart, labels on the finest multiple of it that keeps
+    // them 70px apart. At whole-day zoom that is hour ticks labelled every two
+    // hours; zoomed in to five minutes, ten-second ticks labelled every 30s.
+    readonly property var tickSteps: [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600]
+    function stepFor(minPx, multipleOf) {
+        for (var i = 0; i < tickSteps.length; ++i) {
+            var step = tickSteps[i];
+            if (step % multipleOf === 0 && step / visibleSpan * width >= minPx)
+                return step;
+        }
+        return tickSteps[tickSteps.length - 1];
+    }
+    readonly property int tickStep: stepFor(24, 1)
+    readonly property int labelStep: stepFor(70, tickStep)
+    readonly property var tickSecs: {
+        var out = [];
+        if (width <= 0)
+            return out;
+        var end = Math.min(duration, viewStart + visibleSpan);
+        for (var s = Math.ceil(viewStart / tickStep) * tickStep; s <= end; s += tickStep)
+            out.push(s);
+        return out;
+    }
     Repeater {
-        model: 25
+        model: root.tickSecs
         Item {
-            required property int index
-            property real sec: index * 3600
-            x: root.xForSec(sec)
-            visible: sec >= root.viewStart - 1 && sec <= root.viewStart + root.visibleSpan + 1
+            required property var modelData
+            x: root.xForSec(modelData)
             Rectangle {
-                y: 0; width: 1; height: index % 6 === 0 ? root.trackHeight : 8
+                y: 0; width: 1; height: modelData % 21600 === 0 ? root.trackHeight : 8
                 color: Theme.border
             }
             Text {
-                visible: parent.index % 2 === 0
+                visible: modelData % root.labelStep === 0
                 y: root.trackHeight - 14
                 x: 2
-                text: String(parent.index).padStart(2, "0") + ":00"
+                text: {
+                    var h = Math.floor(modelData / 3600), m = Math.floor((modelData % 3600) / 60);
+                    return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0")
+                         + (root.labelStep < 60 ? ":" + String(modelData % 60).padStart(2, "0") : "");
+                }
                 color: Theme.textMuted
                 font.pixelSize: 9
             }
