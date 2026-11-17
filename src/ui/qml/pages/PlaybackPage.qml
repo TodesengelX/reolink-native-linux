@@ -526,6 +526,10 @@ Item {
                     // (detection fires as the camera starts recording): start
                     // at that recording instead of the previous file or a gap.
                     var dayStartEp = new Date(page.selYear, page.selMonth - 1, page.selDay).getTime() / 1000;
+                    // Zoom right in on the event: its marker (the detection
+                    // time, not the pre-rolled playhead) in the middle, so the
+                    // movement around it is easy to scrub.
+                    timeline.centerOn(page._jumpTimestamp - dayStartEp, timeline.maxZoom);
                     var jumpSec = ep - dayStartEp;
                     var target = timeline.segmentNear(jumpSec, 120);
                     if (target && jumpSec < target.start)

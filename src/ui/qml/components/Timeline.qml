@@ -33,6 +33,13 @@ Rectangle {
     property var lanes: []
     property real zoom: 1.0              // 1 = whole day; >1 zooms in
     property real viewStart: 0           // left edge, seconds
+    readonly property real maxZoom: 48   // a 30-minute window
+
+    // Zoom to `z` with `sec` in the middle, as far as the day's edges allow.
+    function centerOn(sec, z) {
+        zoom = Math.max(1, Math.min(maxZoom, z));
+        viewStart = Math.max(0, Math.min(duration - visibleSpan, sec - visibleSpan / 2));
+    }
 
     // seek fires continuously while pressing/dragging (move the playhead);
     // commit fires once on release (start playback there).
@@ -286,7 +293,7 @@ Rectangle {
                 return;
             }
             var focus = root.secForX(w.x);
-            root.zoom = Math.max(1, Math.min(48, root.zoom * (w.angleDelta.y > 0 ? 1.25 : 0.8)));
+            root.zoom = Math.max(1, Math.min(root.maxZoom, root.zoom * (w.angleDelta.y > 0 ? 1.25 : 0.8)));
             // Keep the focus point under the cursor.
             root.viewStart = clampView(focus - w.x / root.width * root.visibleSpan);
         }
