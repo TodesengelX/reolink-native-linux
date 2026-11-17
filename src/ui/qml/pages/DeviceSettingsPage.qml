@@ -268,7 +268,12 @@ Item {
                         required property var modelData
                         Layout.fillWidth: true
                         visible: modelData.key !== "light" || page.camera.capLight === true
-                        height: visible ? 34 : 0
+                        // A layout hint, not `height`: the ColumnLayout sizes from
+                        // hints, and Light (hidden until capabilities load) kept
+                        // the 0 it was first laid out at, so it drew over its
+                        // neighbours and couldn't be clicked. Hidden items are
+                        // already left out of the layout.
+                        Layout.preferredHeight: 34
                         radius: 4
                         color: page.category === modelData.key ? Theme.accentDim
                              : catHover.hovered ? Theme.surfaceAlt : "transparent"
