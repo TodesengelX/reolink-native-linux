@@ -1,11 +1,17 @@
 # Flatpak manifest. Build:
 #   flatpak-builder --user --install --force-clean build-flatpak \
 #     packaging/flatpak/io.github.todesengelx.ReolinkLinux.yml
-# The KDE runtime provides Qt 6 (LGPL, dynamically linked); FFmpeg comes from the
-# runtime as an LGPL build. libsecret talks to the host keyring via the portal.
+# The KDE runtime provides Qt 6 (LGPL, dynamically linked). libsecret talks to
+# the host keyring via the portal.
+#
+# FFmpeg is bundled as an LGPL build (see its module). The runtime's own FFmpeg
+# has no H.264/H.265 decoders: on 6.7 H.264 went through a separately downloaded
+# openh264, and where that was missing every stream failed with "libopenh264:
+# Unable to create decoder" (issue #5). Newer runtimes fill the gap with the
+# codecs-extra extension, but that is a GPL build.
 app-id: io.github.todesengelx.ReolinkLinux
 runtime: org.kde.Platform
-runtime-version: '6.7'
+runtime-version: '6.11'
 sdk: org.kde.Sdk
 command: reolink-client
 finish-args:
@@ -36,6 +42,31 @@ modules:
       - /bin
       - /include
       - /lib/pkgconfig
+  # LGPL FFmpeg with the native H.264/H.265 decoders. Keep it on the same major
+  # (7.1: libavcodec.so.61) as the runtime's: /app/lib comes first on the library
+  # path, so this also replaces the copy Qt Multimedia's FFmpeg plugin loads,
+  # and a different major would put two FFmpegs in one process. gnutls and
+  # VA-API match the runtime's build (HTTPS playback, hardware decode).
+  - name: ffmpeg
+    config-opts:
+      - --disable-gpl
+      - --disable-nonfree
+      - --enable-shared
+      - --disable-static
+      - --disable-programs
+      - --disable-doc
+      - --disable-avdevice
+      - --disable-avfilter
+      - --enable-gnutls
+      - --enable-vaapi
+    sources:
+      - type: archive
+        url: https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz
+        sha256: de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share
   - name: reolink-client
     buildsystem: cmake-ninja
     config-opts:

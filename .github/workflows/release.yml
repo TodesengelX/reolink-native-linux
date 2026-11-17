@@ -143,7 +143,9 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     container:
-      image: bilelmoussaoui/flatpak-github-actions:kde-6.7
+      # Must match the manifest's runtime-version. The old Docker Hub image
+      # (bilelmoussaoui/...) stopped at kde-6.7; flathub-infra maintains it now.
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.11
       options: --privileged
     steps:
       - uses: actions/checkout@v4
