@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QFile>
 #include <QSettings>
+#include <QTimer>
 
 namespace rl {
 
@@ -18,8 +19,16 @@ static constexpr int kMaxEvents = 100;
 EventManager::EventManager(Database *db, DeviceManager *devices, QObject *parent)
     : QAbstractListModel(parent), m_db(db), m_devices(devices)
 {
-    m_popupsEnabled = QSettings().value(QStringLiteral("notify/popups"), true).toBool();
+    QSettings settings;
+    m_popupsEnabled = settings.value(QStringLiteral("notify/popups"), true).toBool();
+    m_mergeSeconds = settings.value(QStringLiteral("events/mergeSeconds"), 60).toInt();
+    m_motionEvents = settings.value(QStringLiteral("events/motion"), true).toBool();
+    m_retentionDays = settings.value(QStringLiteral("events/retentionDays"), 7).toInt();
     m_db->trimEvents(kMaxEvents);   // enforce the cap on any pre-existing history
+    purgeExpired();                 // and the age limit
+    auto *hourly = new QTimer(this);
+    connect(hourly, &QTimer::timeout, this, &EventManager::purgeExpired);
+    hourly->start(60 * 60 * 1000);
     reload();
     connect(m_devices, &DeviceManager::detectionEvent, this, &EventManager::onDetection);
     connect(&m_notifier, &Notifier::activated, this, &EventManager::eventActivated);
@@ -143,9 +152,32 @@ void EventManager::setCameraFilter(const QString &camera)
     reload();
 }
 
+bool EventManager::isRepeat(qint64 hostId, int channel, const QString &type, qint64 now)
+{
+    const QString cam = QStringLiteral("%1:%2:").arg(hostId).arg(channel);
+    const qint64 last = m_lastSeen.value(cam + type, 0);
+    m_lastSeen.insert(cam + type, now); // continuing activity keeps extending the window
+    if (m_mergeSeconds <= 0)
+        return false;
+    if (now - last < m_mergeSeconds)
+        return true;
+    // Cameras report motion alongside every AI detection; it adds nothing then.
+    if (type == QLatin1String("motion")) {
+        for (const char *ai : {"person", "vehicle", "pet", "dog_cat", "visitor"})
+            if (now - m_lastSeen.value(cam + QLatin1String(ai), 0) < m_mergeSeconds)
+                return true;
+    }
+    return false;
+}
+
 void EventManager::onDetection(qint64 hostId, int channel, const QString &type,
                                const QString &camera)
 {
+    if (type == QLatin1String("motion") && !m_motionEvents)
+        return;
+    if (isRepeat(hostId, channel, type, QDateTime::currentSecsSinceEpoch()))
+        return; // same activity as an event already in the inbox
+
     EventRecord rec;
     rec.hostId = hostId;
     rec.channel = channel;
@@ -202,6 +234,51 @@ void EventManager::onDetection(qint64 hostId, int channel, const QString &type,
         m_db->trimEvents(kMaxEvents);
         emit countChanged();
     }
+}
+
+void EventManager::setMergeSeconds(int seconds)
+{
+    seconds = qMax(0, seconds);
+    if (m_mergeSeconds == seconds)
+        return;
+    m_mergeSeconds = seconds;
+    QSettings().setValue(QStringLiteral("events/mergeSeconds"), seconds);
+    emit cleanupChanged();
+}
+
+void EventManager::setMotionEvents(bool on)
+{
+    if (m_motionEvents == on)
+        return;
+    m_motionEvents = on;
+    QSettings().setValue(QStringLiteral("events/motion"), on);
+    emit cleanupChanged();
+}
+
+void EventManager::setRetentionDays(int days)
+{
+    days = qMax(0, days);
+    if (m_retentionDays == days)
+        return;
+    m_retentionDays = days;
+    QSettings().setValue(QStringLiteral("events/retentionDays"), days);
+    emit cleanupChanged();
+    purgeExpired(); // a shorter limit applies right away
+}
+
+void EventManager::purgeExpired()
+{
+    if (m_retentionDays <= 0)
+        return;
+    const qint64 cutoff = QDateTime::currentSecsSinceEpoch() - qint64(m_retentionDays) * 86400;
+    bool any = false;
+    for (const EventRecord &e : std::as_const(m_all))
+        any = any || e.timestamp < cutoff;
+    const QStringList thumbs = m_db->deleteEventsBefore(cutoff);
+    for (const QString &t : thumbs)
+        QFile::remove(t);
+    if (any || !thumbs.isEmpty())
+        reload();
 }
 
 void EventManager::setPopupsEnabled(bool on)

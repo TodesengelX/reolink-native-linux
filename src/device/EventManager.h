@@ -4,6 +4,7 @@
 #include "core/Notifier.h"
 
 #include <QAbstractListModel>
+#include <QHash>
 
 namespace rl {
 
@@ -21,6 +22,14 @@ class EventManager : public QAbstractListModel
     // Desktop pop-ups for new events. Off still records every event in the
     // inbox; it only silences the notification. Persisted across runs.
     Q_PROPERTY(bool popupsEnabled READ popupsEnabled WRITE setPopupsEnabled NOTIFY popupsEnabledChanged)
+    // Inbox cleanup, all persisted:
+    // - repeats of an event on the same camera are folded into the first one
+    //   until the camera has been quiet for mergeSeconds (0 = log every one);
+    // - motionEvents off drops plain-motion events (AI types are kept);
+    // - events older than retentionDays are deleted (0 = keep forever).
+    Q_PROPERTY(int mergeSeconds READ mergeSeconds WRITE setMergeSeconds NOTIFY cleanupChanged)
+    Q_PROPERTY(bool motionEvents READ motionEvents WRITE setMotionEvents NOTIFY cleanupChanged)
+    Q_PROPERTY(int retentionDays READ retentionDays WRITE setRetentionDays NOTIFY cleanupChanged)
 
 public:
     enum Role {
@@ -46,6 +55,12 @@ public:
     void setCameraFilter(const QString &camera);
     bool popupsEnabled() const { return m_popupsEnabled; }
     void setPopupsEnabled(bool on);
+    int mergeSeconds() const { return m_mergeSeconds; }
+    void setMergeSeconds(int seconds);
+    bool motionEvents() const { return m_motionEvents; }
+    void setMotionEvents(bool on);
+    int retentionDays() const { return m_retentionDays; }
+    void setRetentionDays(int days);
 
     Q_INVOKABLE void markAllRead();
     // Seconds-into-day of each detection event for this camera on the given day
@@ -59,6 +74,7 @@ signals:
     void filterChanged();
     void cameraFilterChanged();
     void popupsEnabledChanged();
+    void cleanupChanged();
     // The user clicked a desktop notification — jump to this event's playback.
     void eventActivated(qint64 hostId, int channel, qint64 timestamp);
 
@@ -69,6 +85,10 @@ private slots:
 
 private:
     void reload();
+    // True when this detection continues one already in the inbox (same
+    // camera, still active within the merge window). Records it as seen.
+    bool isRepeat(qint64 hostId, int channel, const QString &type, qint64 now);
+    void purgeExpired();
     bool matches(const EventRecord &e) const;
 
     Database *m_db;
@@ -80,6 +100,10 @@ private:
     QString m_cameraFilter;          // "" = all cameras, else a camera name
     int m_unread = 0;
     bool m_popupsEnabled = true;
+    int m_mergeSeconds = 60;
+    bool m_motionEvents = true;
+    int m_retentionDays = 7;
+    QHash<QString, qint64> m_lastSeen; // "host:channel:type" -> last detection (Unix s)
 };
 
 } // namespace rl

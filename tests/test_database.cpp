@@ -57,6 +57,31 @@ private slots:
         QCOMPARE(db.recentEvents(10).size(), 0);
     }
 
+    void deleteEventsBeforeCutoff()
+    {
+        QTemporaryDir dir;
+        Database db(dir.filePath("t.db"), QStringLiteral("test_event_age"));
+        QVERIFY(db.open());
+        EventRecord e;
+        e.hostId = 7;
+        e.type = QStringLiteral("motion");
+        e.timestamp = 1000; // old, with a snapshot
+        const qint64 oldId = db.addEvent(e);
+        QVERIFY(db.setEventThumbnail(oldId, QStringLiteral("/tmp/event_old.jpg")));
+        e.timestamp = 1500; // old, no snapshot
+        QVERIFY(db.addEvent(e) > 0);
+        e.timestamp = 5000; // recent
+        e.type = QStringLiteral("person");
+        QVERIFY(db.addEvent(e) > 0);
+
+        const QStringList thumbs = db.deleteEventsBefore(2000);
+        QCOMPARE(thumbs, QStringList{QStringLiteral("/tmp/event_old.jpg")});
+        const QVector<EventRecord> left = db.recentEvents(10);
+        QCOMPARE(left.size(), 1);
+        QCOMPARE(left[0].type, QStringLiteral("person"));
+        QVERIFY(db.deleteEventsBefore(2000).isEmpty()); // nothing more to remove
+    }
+
     void hostCrud()
     {
         QTemporaryDir dir;

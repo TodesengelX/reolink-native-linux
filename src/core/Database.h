@@ -52,6 +52,10 @@ public:
     bool clearEvents();
     // Retention cap: delete all but the newest `keep` events.
     bool trimEvents(int keep);
+    // Age-based retention: delete events older than `cutoff` (Unix seconds).
+    // Returns the thumbnail paths of the deleted rows so the caller can remove
+    // the files.
+    QStringList deleteEventsBefore(qint64 cutoff);
     bool setEventThumbnail(qint64 id, const QString &path);
 
 private:
