@@ -15,7 +15,7 @@ qt_standard_project_setup(REQUIRES 6.5)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
-    libavformat libavcodec libavutil libswscale)
+    libavformat libavcodec libavutil libswscale libswresample)
 pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
 pkg_check_modules(SECRET REQUIRED IMPORTED_TARGET libsecret-1)
 
