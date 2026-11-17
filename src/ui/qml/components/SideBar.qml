@@ -176,7 +176,7 @@ Rectangle {
                             Layout.fillWidth: true
                             spacing: 6
                             Text {
-                                Layout.maximumWidth: implicitWidth
+                                Layout.maximumWidth: Math.ceil(implicitWidth) // layouts round down; a fraction short elides
                                 Layout.fillWidth: true
                                 text: nvrHeader.host ? nvrHeader.host.name : ""
                                 color: Theme.text; font.pixelSize: 13; font.bold: true
@@ -318,7 +318,7 @@ Rectangle {
                             Layout.fillWidth: true
                             spacing: 6
                             Text {
-                                Layout.maximumWidth: implicitWidth
+                                Layout.maximumWidth: Math.ceil(implicitWidth) // layouts round down; a fraction short elides
                                 Layout.fillWidth: true
                                 text: name
                                 color: Theme.text
