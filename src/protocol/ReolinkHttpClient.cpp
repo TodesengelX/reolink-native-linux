@@ -7,6 +7,7 @@
 #include <curl/curl.h>
 
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 
 namespace rl {
@@ -35,7 +36,15 @@ void configureDeviceTls(void *curl)
     // params of older firmware ("dh key too small" -> CURLE_SSL_CONNECT_ERROR),
     // making such cameras unreachable over HTTPS. Level 1 accepts them; the
     // negotiation still picks the strongest suite both ends support.
-    curl_easy_setopt(curl, CURLOPT_SSL_CIPHER_LIST, "DEFAULT:@SECLEVEL=1");
+    // "@SECLEVEL" is OpenSSL syntax: a libcurl on another TLS backend (Debian's
+    // libcurl4-gnutls-dev, say) rejects the whole list and every HTTPS
+    // connection fails, so set it only where it means something.
+    static const bool openssl = [] {
+        const curl_version_info_data *v = curl_version_info(CURLVERSION_NOW);
+        return v && v->ssl_version && std::strncmp(v->ssl_version, "OpenSSL/", 8) == 0;
+    }();
+    if (openssl)
+        curl_easy_setopt(curl, CURLOPT_SSL_CIPHER_LIST, "DEFAULT:@SECLEVEL=1");
 }
 
 namespace {
