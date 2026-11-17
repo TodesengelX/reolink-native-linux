@@ -12,8 +12,8 @@
 // Feed each message's already-decrypted media bytes to append(); the parser
 // re-splits the rolling buffer by BCMedia framing and emits video NAL data (which
 // is already Annex-B with 00 00 00 01 start codes — SPS/PPS/VPS inline in every
-// I-frame). Info frames update the declared width/height. Audio frames are
-// currently skipped.
+// I-frame). Info frames update the declared width/height. AAC audio frames
+// (ADTS) are handed to onAudio; ADPCM audio is skipped.
 //
 // Clean-room from the documented BCMedia frame layout (a factual wire format),
 // not from AGPL neolink.
@@ -34,6 +34,8 @@ public:
 
     // Called for each complete video frame, in stream order.
     std::function<void(const VideoFrame &)> onVideo;
+    // Called for each AAC audio frame's payload (ADTS-framed), in stream order.
+    std::function<void(const QByteArray &adts)> onAudio;
 
     // Append decrypted media bytes from one BC message and parse any now-complete
     // frames (invoking onVideo). Returns the number of video frames emitted.

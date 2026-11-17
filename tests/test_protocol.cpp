@@ -451,6 +451,44 @@ private slots:
         QCOMPARE(frames[0].microseconds, quint32(12345));
         QCOMPARE(frames[0].annexB, nal);
     }
+
+    void bcMediaParserAudio()
+    {
+        // Audio frame: magic, payload size twice (u16), payload, pad to 8.
+        auto audioFrame = [](const char *magic, const QByteArray &payload) {
+            QByteArray f(magic);
+            f.append(char(payload.size() & 0xFF)).append(char(payload.size() >> 8));
+            f.append(char(payload.size() & 0xFF)).append(char(payload.size() >> 8));
+            f.append(payload);
+            f.append(QByteArray((8 - payload.size() % 8) % 8, 0));
+            return f;
+        };
+        const QByteArray adts = QByteArrayLiteral("\xff\xf1\x60\x40\x0d\x9f\xfc\x21\x2a"); // 9 bytes
+        const QByteArray adpcm = QByteArray(6, '\x11');
+        const QByteArray nal = QByteArrayLiteral("\x00\x00\x00\x01\x41");
+        QByteArray pframe("01dcH264");
+        putLE32(pframe, nal.size());
+        putLE32(pframe, 0);
+        putLE32(pframe, 1);
+        putLE32(pframe, 0);
+        pframe.append(nal).append(QByteArray(3, 0));
+
+        rl::BcMediaParser mp;
+        QList<QByteArray> audio;
+        int video = 0;
+        mp.onAudio = [&](const QByteArray &a) { audio.append(a); };
+        mp.onVideo = [&](const rl::BcMediaParser::VideoFrame &) { ++video; };
+
+        // AAC is delivered byte-exact (even split mid-frame); ADPCM is skipped
+        // without losing sync with the video frame after it.
+        const QByteArray stream = audioFrame("05wb", adts) + audioFrame("01wb", adpcm) + pframe;
+        mp.append(stream.left(11));
+        QCOMPARE(audio.size(), 0);
+        mp.append(stream.mid(11));
+        QCOMPARE(audio.size(), 1);
+        QCOMPARE(audio[0], adts);
+        QCOMPARE(video, 1);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestProtocol)

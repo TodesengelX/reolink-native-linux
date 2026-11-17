@@ -53,6 +53,7 @@ Rectangle {
     // DeviceManager's in-place-seek slot holds one playback session — one HD
     // pane at a time is the constraint, not a style choice.
     property bool showHdToggle: false
+    property bool audioOn: false // this pane is the one being listened to
     property bool hdActive: false
     // Epoch at 00:00 of the selected day, so the pane can turn playhead
     // seconds into wall-clock time without reaching into the page.
@@ -149,7 +150,8 @@ Rectangle {
 
     // Retry on connection error: NVRs are connection-limited and may
     // momentarily refuse a playback stream while others are opening.
-    StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true }
+    StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true
+                   audioEnabled: root.audioOn }
     Component.onDestruction: player.stop()
 
     // ---- Video with digital zoom (same interaction as a live pane) --------
