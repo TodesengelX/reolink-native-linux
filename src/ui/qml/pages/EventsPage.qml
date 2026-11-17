@@ -75,6 +75,27 @@ Item {
                 bottomPadding: 2
             }
             Item { Layout.fillWidth: true }
+            // Desktop pop-ups on/off (events are still recorded here either way).
+            Rectangle {
+                implicitWidth: popupsText.implicitWidth + 20
+                height: 30
+                radius: Theme.radius
+                color: Events.popupsEnabled ? Theme.accentDim
+                     : popupsHover.hovered ? Theme.surfaceAlt : "transparent"
+                border.color: Events.popupsEnabled ? Theme.accent : Theme.border
+                Text {
+                    id: popupsText
+                    anchors.centerIn: parent
+                    text: Events.popupsEnabled ? qsTr("✓ Pop-ups on") : qsTr("Pop-ups off")
+                    color: Events.popupsEnabled ? Theme.text : Theme.textMuted
+                    font.pixelSize: 12
+                }
+                HoverHandler { id: popupsHover }
+                TapHandler { onTapped: Events.popupsEnabled = !Events.popupsEnabled }
+                ToolTip.visible: popupsHover.hovered
+                ToolTip.delay: 500
+                ToolTip.text: qsTr("Show a desktop notification for each new event")
+            }
             Rectangle {
                 visible: Events.count > 0
                 implicitWidth: clearText.implicitWidth + 20

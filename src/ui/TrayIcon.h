@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QSystemTrayIcon>
 
+class QAction;
 class QMenu;
 
 namespace rl {
@@ -27,11 +28,13 @@ public:
     void setStartOnLogin(bool on);
 
     void setUnread(int unread); // tooltip badge
+    void setPopupsChecked(bool on); // mirror EventManager::popupsEnabled
 
 signals:
     void closeToTrayChanged();
     void openRequested();
     void quitRequested();
+    void popupsToggled(bool on);
 
 private:
     QString autostartFile() const;
@@ -39,6 +42,7 @@ private:
 
     QSystemTrayIcon *m_tray = nullptr;
     QMenu *m_menu = nullptr;
+    QAction *m_popups = nullptr;
     bool m_available = false;
     bool m_closeToTray = true;
 };

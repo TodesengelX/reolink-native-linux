@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QSettings>
 
 namespace rl {
 
@@ -17,6 +18,7 @@ static constexpr int kMaxEvents = 100;
 EventManager::EventManager(Database *db, DeviceManager *devices, QObject *parent)
     : QAbstractListModel(parent), m_db(db), m_devices(devices)
 {
+    m_popupsEnabled = QSettings().value(QStringLiteral("notify/popups"), true).toBool();
     m_db->trimEvents(kMaxEvents);   // enforce the cap on any pre-existing history
     reload();
     connect(m_devices, &DeviceManager::detectionEvent, this, &EventManager::onDetection);
@@ -171,7 +173,7 @@ void EventManager::onDetection(qint64 hostId, int channel, const QString &type,
 
     // Desktop notification for this detection, gated on the camera's Push
     // Notifications being enabled (mirrors how the official apps gate push).
-    if (m_devices->pushEnabledFor(hostId, channel)) {
+    if (m_popupsEnabled && m_devices->pushEnabledFor(hostId, channel)) {
         QString what;
         if (type == QLatin1String("person"))       what = tr("Person detected");
         else if (type == QLatin1String("vehicle")) what = tr("Vehicle detected");
@@ -202,6 +204,15 @@ void EventManager::onDetection(qint64 hostId, int channel, const QString &type,
     }
 }
 
+void EventManager::setPopupsEnabled(bool on)
+{
+    if (m_popupsEnabled == on)
+        return;
+    m_popupsEnabled = on;
+    QSettings().setValue(QStringLiteral("notify/popups"), on);
+    emit popupsEnabledChanged();
+}
+
 void EventManager::onConnectivity(qint64 hostId, int channel, const QString &name, bool online)
 {
     // Health alert: a camera (channel >= 0) or a whole host dropped or returned.
@@ -227,10 +238,11 @@ void EventManager::onConnectivity(qint64 hostId, int channel, const QString &nam
     ++m_unread;
     emit unreadChanged();
 
-    m_notifier.notify(name.isEmpty() ? tr("Device") : name,
-                      online ? tr("Back online") : tr("Went offline \u26a0"),
-                      QStringLiteral("io.github.todesengelx.ReolinkLinux"),
-                      hostId, rec.channel, rec.timestamp);
+    if (m_popupsEnabled)
+        m_notifier.notify(name.isEmpty() ? tr("Device") : name,
+                          online ? tr("Back online") : tr("Went offline \u26a0"),
+                          QStringLiteral("io.github.todesengelx.ReolinkLinux"),
+                          hostId, rec.channel, rec.timestamp);
 
     if (m_all.size() > kMaxEvents) {
         for (int vi = m_view.size() - 1; vi >= 0 && m_view[vi] >= kMaxEvents; --vi) {
