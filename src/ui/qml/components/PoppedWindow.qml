@@ -106,9 +106,24 @@ Window {
                 win.bcFallback = true;
                 win.startStream();
             }
+            // The device dropped the one-shot Baichuan session: reconnect after
+            // a beat (startStream's own stop/start leaves Stopped immediately).
+            if (player.state === StreamPlayer.Stopped && !win.bcFallback && !win.closed)
+                bcReconnect.restart();
+            else
+                bcReconnect.stop();
         }
     }
-    onClosing: player.stop()
+    Timer {
+        id: bcReconnect
+        interval: 3000
+        onTriggered: {
+            if (player.state === StreamPlayer.Stopped && !win.bcFallback && !win.closed)
+                win.startStream();
+        }
+    }
+    property bool closed: false
+    onClosing: { win.closed = true; bcReconnect.stop(); player.stop(); }
 
     Text {
         anchors.centerIn: parent

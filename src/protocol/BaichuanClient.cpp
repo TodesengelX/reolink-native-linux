@@ -1,5 +1,6 @@
 #include "BaichuanClient.h"
 
+#include "core/Log.h"
 #include "protocol/BcCrypto.h"
 
 #include <QDateTime>
@@ -360,6 +361,13 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
     QByteArray netBuf = m_streamTail;
     Msg m;
     int stalls = 0;
+    // Live preview streams continuously; this long without a byte means the
+    // connection is half-open (device rebooted, Wi-Fi dropped) — end it so the
+    // reader sees EOF and the pane can reconnect. Recorded playback legitimately
+    // stalls between bursts, so it relies on the disconnect check alone.
+    constexpr qint64 kLiveSilenceMs = 15000;
+    QElapsedTimer lastData;
+    lastData.start();
     while (!m_abort.load()) {
         // In-place seek: reissue by-time playback and reset the media pipeline. The
         // BC message framing stays intact (continuous connection); only the BCMedia
@@ -387,6 +395,21 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
             // Short wait so abort is honored quickly; recorded playback bursts then
             // stalls, so nudge it with a keep-alive after ~1s of silence.
             if (!sock.waitForReadyRead(300)) {
+                // waitForReadyRead() returns false IMMEDIATELY on a socket that is
+                // no longer connected, so without this exit a dropped connection
+                // turns the loop into a busy-spin at 100% CPU — and the reader
+                // blocks forever on a stream that never finishes.
+                if (sock.state() != QAbstractSocket::ConnectedState &&
+                    sock.bytesAvailable() == 0) {
+                    qCWarning(lcProto) << m_p.host << "baichuan stream: connection closed ("
+                                       << sock.errorString() << ")";
+                    return;
+                }
+                if (!pace && lastData.hasExpired(kLiveSilenceMs)) {
+                    qCWarning(lcProto) << m_p.host << "baichuan stream: no data for"
+                                       << kLiveSilenceMs / 1000 << "s — closing";
+                    return;
+                }
                 if (++stalls >= 4) {
                     stalls = 0;
                     sock.write(frame(93, 0, 0, 99, 0, 0x6414, QByteArray())); // keep-alive: connection-level
@@ -395,6 +418,7 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
                 continue;
             }
             stalls = 0;
+            lastData.restart();
             netBuf.append(sock.readAll());
             continue;
         }
