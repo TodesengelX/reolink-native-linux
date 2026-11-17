@@ -44,6 +44,12 @@ Item {
     // Some camera firmware closes /flv when HTTPS is enabled. After the first
     // FLV failure the page uses the native Baichuan sub stream for playback.
     property bool useBaichuan: false
+    onDeviceRowChanged: useBaichuan = false // that was the previous camera's firmware
+    // Not for NVR channels; see PlaybackPane.flvFallbackAllowed().
+    function flvFallbackAllowed() {
+        var c = Devices.cameraInfo(page.deviceRow);
+        return !!c && c.kind !== "nvr";
+    }
 
     // ---- Synced multi-camera playback ---------------------------------------
     // Like the official client: up to 4 panes, one calendar and one timeline
@@ -253,7 +259,7 @@ Item {
         interval: 12000; repeat: false
         running: page.active && page.paneCount === 1 && page.deviceRow >= 0
                  && !page.hdMode && !page.useBaichuan
-                 && player.state === StreamPlayer.Connecting
+                 && player.state === StreamPlayer.Connecting && page.flvFallbackAllowed()
         onTriggered: {
             page.useBaichuan = true;
             page.playBaichuan(page.playheadSecs);
@@ -304,7 +310,8 @@ Item {
         function onStateChanged() {
             // HTTPS /flv is rejected by some firmware; switch to Baichuan once.
             if (player.state === StreamPlayer.Error && page.paneCount === 1
-                    && !page.hdMode && page.deviceRow >= 0 && !page.useBaichuan) {
+                    && !page.hdMode && page.deviceRow >= 0 && !page.useBaichuan
+                    && page.flvFallbackAllowed()) {
                 page.useBaichuan = true;
                 page.playBaichuan(page.playheadSecs);
                 return;

@@ -59,6 +59,13 @@ Rectangle {
     // closes the TLS connection on /flv). Once it fails, use Baichuan for the
     // sub stream instead of retrying FLV forever.
     property bool useBaichuan: false
+    // Never for NVR channels: an NVR refuses FLV now and then while other panes
+    // open (retryOnError rides that out), and it grants about one Baichuan
+    // session, which every pane would then fight over for the rest of the run.
+    function flvFallbackAllowed() {
+        var c = Devices.cameraInfo(deviceRow);
+        return !!c && c.kind !== "nvr";
+    }
     // Epoch at 00:00 of the selected day, so the pane can turn playhead
     // seconds into wall-clock time without reaching into the page.
     property real dayEpoch: 0
@@ -113,7 +120,8 @@ Rectangle {
             // FLV over HTTPS can fail before any packet arrives (firmware closes
             // /flv). Switch this pane to the native Baichuan sub stream once.
             if (player.state === StreamPlayer.Error
-                    && !root.hdActive && root.hasSource && !root.useBaichuan) {
+                    && !root.hdActive && root.hasSource && !root.useBaichuan
+                    && root.flvFallbackAllowed()) {
                 root.useBaichuan = true;
                 root.playBaichuan(root.playheadSecs);
                 return;
@@ -183,6 +191,7 @@ Rectangle {
         repeat: false
         running: root.visible && root.hasSource && !root.hdActive
                  && !root.useBaichuan && player.state === StreamPlayer.Connecting
+                 && root.flvFallbackAllowed()
         onTriggered: {
             root.useBaichuan = true;
             root.playBaichuan(root.playheadSecs);
@@ -464,6 +473,10 @@ Rectangle {
     }
     // Imperative sync, not a binding: the ComboBox writes currentIndex itself on
     // user interaction, which would sever a declarative binding the first time.
-    onDeviceRowChanged: if (deviceRow >= 0) paneCombo.currentIndex = deviceRow
+    onDeviceRowChanged: {
+        useBaichuan = false; // the fallback was for the previous camera's firmware
+        if (deviceRow >= 0)
+            paneCombo.currentIndex = deviceRow;
+    }
     Component.onCompleted: if (deviceRow >= 0) paneCombo.currentIndex = deviceRow
 }
