@@ -8,6 +8,11 @@
 
 namespace rl {
 
+// TLS settings for talking to a Reolink device over HTTPS (takes a CURL*):
+// accept its self-signed certificate, and allow the 1024-bit DH/RSA keys that
+// older firmware (e.g. RLC-410) still uses, which distro OpenSSL defaults reject.
+void configureDeviceTls(void *curl);
+
 // Blocking HTTP-CGI transport for one Reolink host (camera or NVR).
 // Owns the login token lifecycle: logs in on demand, refreshes before the
 // lease expires, retries once on "please login first". Call from a worker
