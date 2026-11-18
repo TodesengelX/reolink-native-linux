@@ -61,6 +61,12 @@ atripathy86, aalap, greenfanDev, MathiasDeWeerdt and 815rx1.
 
 ### Changed
 
+- **Full screen can be left without a keyboard** ([#37]): touching the screen or
+  moving the pointer shows an **Exit full screen** button in the corner for a
+  few seconds. Made for wall-mounted touchscreens, where Esc and F11 don't exist.
+- The Add Device scan now says when no device answered, and explains that
+  battery cameras (the Argus series) can't be added on their own yet; paired
+  with a Reolink Home Hub, they can be added through the hub ([#9]).
 - **Flatpak: streams decode on every system.** It now bundles its own LGPL
   FFmpeg 7.1.5 (with VA-API) on the KDE 6.11 runtime instead of relying on
   Cisco's separately downloaded openh264, whose absence left every stream
@@ -111,6 +117,7 @@ atripathy86, aalap, greenfanDev, MathiasDeWeerdt and 815rx1.
 [#6]: https://github.com/TodesengelX/reolink-native-linux/pull/6
 [#7]: https://github.com/TodesengelX/reolink-native-linux/issues/7
 [#8]: https://github.com/TodesengelX/reolink-native-linux/pull/8
+[#9]: https://github.com/TodesengelX/reolink-native-linux/issues/9
 [#10]: https://github.com/TodesengelX/reolink-native-linux/pull/10
 [#12]: https://github.com/TodesengelX/reolink-native-linux/pull/12
 [#13]: https://github.com/TodesengelX/reolink-native-linux/pull/13
@@ -135,6 +142,7 @@ atripathy86, aalap, greenfanDev, MathiasDeWeerdt and 815rx1.
 [#34]: https://github.com/TodesengelX/reolink-native-linux/pull/34
 [#35]: https://github.com/TodesengelX/reolink-native-linux/pull/35
 [#36]: https://github.com/TodesengelX/reolink-native-linux/pull/36
+[#37]: https://github.com/TodesengelX/reolink-native-linux/issues/37
 
 ## [0.1.8] — 2026-08-12
 

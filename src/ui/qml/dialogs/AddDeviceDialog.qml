@@ -14,6 +14,7 @@ Dialog {
     // or rejected password is an inline message here — not a phantom row stuck
     // on "connecting…" in the sidebar.
     property bool testing: false
+    property bool scanFinished: false // a scan has run to the end since the dialog opened
     property string errorText: ""
 
     // ---- Add all discovered devices with one set of credentials ----
@@ -241,6 +242,8 @@ Dialog {
         function onScanningChanged() {
             if (Discovery.scanning)
                 discoveredModel.clear();
+            else
+                dialog.scanFinished = true;
         }
         function onDeviceFound(ip, info) {
             for (var i = 0; i < discoveredModel.count; i++)
@@ -330,8 +333,9 @@ Dialog {
                         Layout.fillWidth: true
                         text: discoveredModel.count > 0
                             ? qsTr("%1 found — click to select").arg(discoveredModel.count)
-                            : (Discovery.scanning ? qsTr("Looking for Reolink devices…")
-                                                  : qsTr("or enter an address below"))
+                            : Discovery.scanning ? qsTr("Looking for Reolink devices…")
+                            : dialog.scanFinished ? qsTr("No Reolink device answered — enter an address below")
+                            : qsTr("or enter an address below")
                         color: Theme.textMuted
                         font.pixelSize: 11
                         elide: Text.ElideRight
@@ -441,6 +445,18 @@ Dialog {
                     }
                 }
 
+                // Battery cameras are the usual "why isn't it listed" (#9): they
+                // sleep, and on their own speak only Baichuan over UDP, which the
+                // app doesn't do yet. Through a Home Hub they work.
+                Text {
+                    Layout.fillWidth: true
+                    visible: dialog.scanFinished && !Discovery.scanning
+                    text: qsTr("Not listed? Battery cameras (the Argus series) can't be added on their own yet. Pair them with a Reolink Home Hub and add the hub instead.")
+                    color: Theme.textMuted
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                }
+
                 ThemedField {
                     id: addrField
                     placeholderText: qsTr("IP address or hostname")
@@ -533,6 +549,7 @@ Dialog {
         streamNameField.text = "";
         streamUrlField.text = "";
         discoveredModel.clear();
+        scanFinished = false;
         testing = false;
         errorText = "";
         bulkQueue = [];

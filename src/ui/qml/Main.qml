@@ -347,6 +347,59 @@ ApplicationWindow {
             toastTimer.restart();
         }
     }
+    // A way out of video fullscreen without a keyboard (#37: a wall-mounted
+    // touchscreen has no Esc or F11). Any touch or pointer movement shows an
+    // exit button for a few seconds; it then fades so the cameras stay clean.
+    // The handlers here only watch: taps still reach the panes underneath.
+    Item {
+        anchors.fill: parent
+        z: 1000
+        visible: window.videoFullscreen
+        PointHandler { onActiveChanged: if (active) fsReveal.restart() }
+        HoverHandler {
+            property point last: Qt.point(-100, -100)
+            // Qt re-sends hover at the same spot whenever the scene repaints,
+            // which live video does all the time: only real movement counts.
+            onPointChanged: {
+                const p = point.position;
+                if (Math.abs(p.x - last.x) + Math.abs(p.y - last.y) > 2) {
+                    last = p;
+                    fsReveal.restart();
+                }
+            }
+        }
+        Timer { id: fsReveal; interval: 3500 }
+        Rectangle {
+            id: fsExit
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: 16
+            height: 44
+            width: fsExitRow.implicitWidth + 32
+            radius: height / 2
+            color: fsExitArea.pressed ? Theme.accentDim : "#d90d141b"
+            border.color: fsExitArea.containsMouse ? Theme.accent : Theme.border
+            opacity: fsReveal.running || fsExitArea.containsMouse ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: 250 } }
+            Row {
+                id: fsExitRow
+                anchors.centerIn: parent
+                spacing: 8
+                Text { text: "✕"; color: Theme.text; font.pixelSize: 16; anchors.verticalCenter: parent.verticalCenter }
+                Text { text: qsTr("Exit full screen"); color: Theme.text; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
+            }
+            // A MouseArea, not a TapHandler, so the press stops here instead of
+            // also landing on the pane under the button.
+            MouseArea {
+                id: fsExitArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: window.videoFullscreen = false
+            }
+        }
+    }
     Connections {
         target: Devices
         function onSnapshotSaved(row, path) { toast.show(qsTr("Snapshot saved"), false); }
