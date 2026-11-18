@@ -337,10 +337,14 @@ private slots:
                      .value("bSaveCurrentPos", 0), 1);
         QVERIFY(!api::ptzGuardCommand(6, QStringLiteral("toPos"))["param"]["PtzGuard"]
                      .contains("bSaveCurrentPos"));
-        const Json opts = api::setPtzGuardOptions(6, false, 120)["param"]["PtzGuard"];
-        QVERIFY(!opts.contains("bSaveCurrentPos"));
-        QCOMPARE(opts.value("benable", -1), 0);
-        QCOMPARE(opts.value("timeout", -1), 120);
+        // Options over Baichuan 331 (reolink_aio's layout), never re-saving the point.
+        const QByteArray opts = BaichuanControl::ptzGuardOptionsXml(6, false, 120);
+        QVERIFY(opts.contains("<channelId>6</channelId>"));
+        QVERIFY(opts.contains("<benable>0</benable>"));
+        QVERIFY(opts.contains("<command>setGrd</command>"));
+        QVERIFY(opts.contains("<timeout>120</timeout>"));
+        QVERIFY(opts.contains("<needSetPos>0</needSetPos>"));
+        QVERIFY(BaichuanControl::ptzGuardOptionsXml(6, true, 60).contains("<benable>1</benable>"));
 
         const Json ai = api::setAiCfg(6, Json{{"bSmartTrack", 0}});
         QCOMPARE(ai.value("cmd", std::string{}), std::string("SetAiCfg"));

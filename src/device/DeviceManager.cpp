@@ -1249,9 +1249,19 @@ void DeviceManager::ptz3D(int row, double left, double top, double w, double h, 
 {
     if (row < 0 || row >= m_entries.size())
         return;
+    // Baichuan cmd 445 in the official app's form; through an NVR the HTTP
+    // Set3DPos is refused, so this is the one route (see ptz3DLocationXml).
+    const QString stream = mainStream ? QStringLiteral("mainStream") : QStringLiteral("subStream");
+    runBaichuanPtzCommand(row, QStringLiteral("Set3DPos"), 445,
+                          BaichuanControl::ptz3DLocationXml(left, top, w, h, speed, stream));
+}
+
+void DeviceManager::runBaichuanPtzCommand(int row, const QString &label, quint32 cmdId,
+                                          const QByteArray &body)
+{
     const Entry &e = m_entries.at(row);
     if (e.rec.kind == QLatin1String("stream") || !e.primed) {
-        emit ptzCommandDone(row, QStringLiteral("Set3DPos"), false, tr("device not ready"));
+        emit ptzCommandDone(row, label, false, tr("device not ready"));
         return;
     }
     BaichuanControl::Params p;
@@ -1259,10 +1269,7 @@ void DeviceManager::ptz3D(int row, double left, double top, double w, double h, 
     p.username = e.rec.username;
     p.password = e.password;
     const int ch = e.channel;
-    const QString stream = mainStream ? QStringLiteral("mainStream") : QStringLiteral("subStream");
-    m_pending.addFuture(QtConcurrent::run([this, p, row, ch, left, top, w, h, speed, stream] {
-        // Baichuan cmd 445 in the official app's form; through an NVR the HTTP
-        // Set3DPos is refused, so this is the one route (see ptz3DLocationXml).
+    m_pending.addFuture(QtConcurrent::run([this, p, row, ch, label, cmdId, body] {
         QString error;
         bool ok = false;
         BaichuanControl bc(p);
@@ -1270,17 +1277,16 @@ void DeviceManager::ptz3D(int row, double left, double top, double w, double h, 
             error = tr("couldn't open a Baichuan session");
         } else {
             quint16 status = 0;
-            bc.transact(445, ch, BaichuanControl::ptz3DLocationXml(left, top, w, h, speed, stream),
-                        &status);
+            bc.transact(cmdId, ch, body, &status);
             bc.close();
             ok = status == 200;
             if (!ok)
                 error = status ? tr("device refused (status %1)").arg(status) : tr("no reply");
         }
         if (!ok)
-            qCWarning(lcProto) << "PTZ 3D positioning failed:" << error;
+            qCWarning(lcProto) << "PTZ" << label << "failed:" << error;
         QMetaObject::invokeMethod(
-            this, [this, row, ok, error] { emit ptzCommandDone(row, QStringLiteral("Set3DPos"), ok, error); },
+            this, [this, row, label, ok, error] { emit ptzCommandDone(row, label, ok, error); },
             Qt::QueuedConnection);
     }));
 }
@@ -1333,8 +1339,11 @@ void DeviceManager::ptzGuardOptions(int row, bool enable, int timeoutSecs)
 {
     if (row < 0 || row >= m_entries.size())
         return;
-    runPtzCommand(row, QStringLiteral("SetPtzGuard"),
-                  api::setPtzGuardOptions(m_entries.at(row).channel, enable, timeoutSecs));
+    // Baichuan, not HTTP: an RLN8-410 answers HTTP SetPtzGuard with success
+    // but keeps the old options (see ptzGuardOptionsXml).
+    runBaichuanPtzCommand(row, QStringLiteral("SetPtzGuard"), 331,
+                          BaichuanControl::ptzGuardOptionsXml(m_entries.at(row).channel, enable,
+                                                              timeoutSecs));
 }
 
 void DeviceManager::setAiTracking(int row, const QVariantMap &fields)

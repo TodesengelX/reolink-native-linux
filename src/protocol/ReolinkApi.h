@@ -107,8 +107,7 @@ Json startZoomFocus(int channel, const QString &op, int pos);
 Json setPtzPreset(int channel, int id, bool enable, const QString &name = QString());
 // Guard position: "toPos" goes there, "setPos" saves the current position.
 Json ptzGuardCommand(int channel, const QString &cmdStr);
-// Guard options without moving the guard point: auto-return on/off and its delay.
-Json setPtzGuardOptions(int channel, bool enable, int timeoutSecs);
+// (Its options go over Baichuan: BaichuanControl::ptzGuardOptionsXml.)
 // SetAiCfg with only the given fields (e.g. bSmartTrack, trackType) plus channel.
 Json setAiCfg(int channel, const Json &fields);
 

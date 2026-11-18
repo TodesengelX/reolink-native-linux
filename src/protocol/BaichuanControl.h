@@ -73,6 +73,13 @@ public:
     static QByteArray ptz3DLocationXml(double left, double top, double w, double h, int speed,
                                        const QString &streamType);
 
+    // Home ("guard") position options (cmd 331, read back with 332): whether
+    // the camera returns there when idle, and after how many seconds. The
+    // home point itself is kept (needSetPos 0). Through an RLN8-410 this is
+    // the route that works: HTTP SetPtzGuard is accepted but ignored, and
+    // its "setTime" form is refused.
+    static QByteArray ptzGuardOptionsXml(int channel, bool enable, int timeoutSecs);
+
     struct LightAbility {
         api::LightSupport support = api::LightSupport::Unknown;
         api::LightType type = api::LightType::Unknown;

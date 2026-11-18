@@ -411,6 +411,18 @@ QByteArray BaichuanControl::ptz3DLocationXml(double left, double top, double w, 
            "</Ptz3DLocation>\n</body>\n";
 }
 
+QByteArray BaichuanControl::ptzGuardOptionsXml(int channel, bool enable, int timeoutSecs)
+{
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<PtzGuard version=\"1.1\">\n"
+           "<channelId>" + QByteArray::number(channel) + "</channelId>\n"
+           "<benable>" + QByteArray(enable ? "1" : "0") + "</benable>\n"
+           "<command>setGrd</command>\n"
+           "<timeout>" + QByteArray::number(qMax(1, timeoutSecs)) + "</timeout>\n"
+           "<needSetPos>0</needSetPos>\n"
+           "<imageName></imageName>\n"
+           "</PtzGuard>\n</body>\n";
+}
+
 QHash<int, BaichuanControl::LightAbility> BaichuanControl::lightAbilities()
 {
     // cmd 199 is host-level and returns per-channel <item> capability records.

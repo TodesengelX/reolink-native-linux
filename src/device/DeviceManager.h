@@ -404,6 +404,9 @@ private:
     std::shared_ptr<ReolinkHttpClient> clientFor(int row);
     // Send one PTZ Set*/PtzCtrl command off the GUI thread; reports ptzCommandDone.
     void runPtzCommand(int row, const QString &label, const Json &command);
+    // The same over Baichuan (TCP 9000): send body to cmdId; status 200 is success.
+    void runBaichuanPtzCommand(int row, const QString &label, quint32 cmdId,
+                               const QByteArray &body);
 
     Database *m_db;
     CredentialStore *m_credentials;

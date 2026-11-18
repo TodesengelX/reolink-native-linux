@@ -235,17 +235,6 @@ Json ptzGuardCommand(int channel, const QString &cmdStr)
     return command(QStringLiteral("SetPtzGuard"), Json{{"PtzGuard", std::move(guard)}});
 }
 
-Json setPtzGuardOptions(int channel, bool enable, int timeoutSecs)
-{
-    // "setPos" without bSaveCurrentPos updates the options, not the guard point.
-    return command(QStringLiteral("SetPtzGuard"),
-                   Json{{"PtzGuard",
-                         {{"channel", channel},
-                          {"cmdStr", "setPos"},
-                          {"benable", enable ? 1 : 0},
-                          {"timeout", timeoutSecs}}}});
-}
-
 Json setAiCfg(int channel, const Json &fields)
 {
     Json param = fields.is_object() ? fields : Json::object();
