@@ -6,9 +6,10 @@
 namespace rl {
 
 // Finds Reolink cameras/NVRs on the local network. WiFi APs usually drop
-// multicast, so the reliable path is a subnet scan for the Baichuan port (9000)
-// confirmed by an unauthenticated api.cgi probe; ONVIF WS-Discovery is attempted
-// too for wired setups. Results stream in via deviceFound as they're confirmed.
+// multicast, so the reliable path is a subnet scan: a quick check for the
+// Baichuan port (9000), then an unauthenticated api.cgi probe, or a Baichuan
+// handshake for cameras without HTTP. Container and VM networks are skipped.
+// Results stream in via deviceFound as they're confirmed.
 class DeviceDiscovery : public QObject
 {
     Q_OBJECT

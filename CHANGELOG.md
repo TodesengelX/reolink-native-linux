@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the project is pre-1.0, minor versions may still change behaviour.
 
+## [Unreleased]
+
+### Fixed
+
+- **The network scan takes a couple of seconds again** instead of about 40.
+  Since 0.2.0 it sent a slow HTTPS probe to every address on the subnet
+  rather than first checking for the port every Reolink device listens on,
+  and it also scanned container and VM networks such as Docker's.
+- Playback no longer draws "Click a recording on the timeline to play" over a
+  paused or stopped picture, and switching camera or day no longer leaves the
+  previous picture on screen. The 4-camera panes show their picture from the
+  first frame instead of after a few seconds of black.
+
 ## [0.2.0] — 2026-11-18
 
 A large release: twenty-four community pull requests, a full PTZ panel, and

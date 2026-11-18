@@ -59,6 +59,20 @@ bool portOpen(const QString &ip, int port)
     return sock.waitForConnected(kPortConnectMs);
 }
 
+// Bridges and host-only networks for containers and VMs (Docker, libvirt,
+// VirtualBox, VMware, Waydroid…). A camera is never on one, and scanning them
+// doubled the time on a machine with Docker installed.
+bool isVirtualInterface(const QString &name)
+{
+    static const char *const prefixes[] = {"docker", "br-", "virbr", "veth", "waydroid", "lxcbr",
+                                           "lxdbr", "vboxnet", "vmnet", "podman", "cni", "flannel",
+                                           "cali", "kube"};
+    for (const char *p : prefixes)
+        if (name.startsWith(QLatin1String(p)))
+            return true;
+    return false;
+}
+
 // All host IPs on the machine's IPv4 /24 subnets (private ranges only).
 QStringList localSubnetHosts()
 {
@@ -66,7 +80,7 @@ QStringList localSubnetHosts()
     QSet<QString> prefixes;
     for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces()) {
         if (!(iface.flags() & QNetworkInterface::IsUp) ||
-            (iface.flags() & QNetworkInterface::IsLoopBack))
+            (iface.flags() & QNetworkInterface::IsLoopBack) || isVirtualInterface(iface.name()))
             continue;
         for (const QNetworkAddressEntry &entry : iface.addressEntries()) {
             const QHostAddress addr = entry.ip();
@@ -134,7 +148,7 @@ void DeviceDiscovery::scan()
     // without starving the app's other worker tasks.
     static QThreadPool *pool = [] {
         auto *p = new QThreadPool;
-        p->setMaxThreadCount(48);
+        p->setMaxThreadCount(64);
         return p;
     }();
 
@@ -151,6 +165,12 @@ void DeviceDiscovery::scan()
                 setScanning(false);
         });
         watcher->setFuture(QtConcurrent::run(pool, [ip]() -> QString {
+            // Every Reolink device listens on 9000 (Baichuan), the HTTP ones
+            // included. Checking it first (0.5 s) spares an address with
+            // nothing on it the 3-4 s HTTPS timeout below; skipping this made
+            // a /24 scan take ~40 s.
+            if (!portOpen(ip, kReolinkPort))
+                return {};
             if (confirmReolink(ip))
                 return ip + QStringLiteral("\nhttps");
             if (BaichuanSession::probe(ip, kReolinkPort))
