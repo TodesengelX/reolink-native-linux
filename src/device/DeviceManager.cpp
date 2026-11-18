@@ -1089,22 +1089,50 @@ std::shared_ptr<ReolinkHttpClient> DeviceManager::clientFor(int row)
 
 void DeviceManager::ptzMove(int row, const QString &op, int speed)
 {
-    auto client = clientFor(row);
-    if (!client)
+    if (row < 0 || row >= m_entries.size())
         return;
-    const int ch = m_entries.at(row).channel;
-    m_pending.addFuture(QtConcurrent::run(
-        [client, ch, op, speed] { client->call(Json::array({api::ptzCtrl(ch, op, speed)})); }));
+    sendPtzMotion(row, api::ptzCtrl(m_entries.at(row).channel, op, speed));
 }
 
 void DeviceManager::ptzStop(int row)
 {
+    if (row < 0 || row >= m_entries.size())
+        return;
+    sendPtzMotion(row, api::ptzCtrl(m_entries.at(row).channel, QStringLiteral("Stop")));
+}
+
+void DeviceManager::sendPtzMotion(int row, Json command)
+{
     auto client = clientFor(row);
     if (!client)
         return;
-    const int ch = m_entries.at(row).channel;
-    m_pending.addFuture(QtConcurrent::run(
-        [client, ch] { client->call(Json::array({api::ptzCtrl(ch, QStringLiteral("Stop"))})); }));
+    const Entry &e = m_entries.at(row);
+    std::shared_ptr<PtzMotion> &slot = m_ptzMotion[qMakePair(e.rec.id, e.channel)];
+    if (!slot)
+        slot = std::make_shared<PtzMotion>();
+    const std::shared_ptr<PtzMotion> motion = slot;
+    {
+        QMutexLocker lock(&motion->mutex);
+        motion->pending = std::move(command); // replaces any move not yet sent
+        if (motion->sending)
+            return;
+        motion->sending = true;
+    }
+    m_pending.addFuture(QtConcurrent::run([client, motion] {
+        for (;;) {
+            Json next;
+            {
+                QMutexLocker lock(&motion->mutex);
+                if (motion->pending.is_null()) {
+                    motion->sending = false;
+                    return;
+                }
+                next = std::move(motion->pending);
+                motion->pending = Json();
+            }
+            client->call(Json::array({next}));
+        }
+    }));
 }
 
 void DeviceManager::ptzPreset(int row, int presetId)

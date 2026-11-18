@@ -412,6 +412,17 @@ private:
     CredentialStore *m_credentials;
     QVector<Entry> m_entries;
     QFutureSynchronizer<void> m_pending; // drains in-flight validations at teardown
+    // PtzCtrl moves and stops for one camera go out one at a time and only the
+    // newest unsent one is kept. A joystick sends many updates; with a task per
+    // command a stop could overtake an older move and leave the camera running.
+    // Keyed by (host id, channel); one worker at a time drains `pending`.
+    struct PtzMotion {
+        QMutex mutex;
+        Json pending;         // next command to send; null when none
+        bool sending = false; // a worker is draining this camera's queue
+    };
+    QHash<QPair<qint64, int>, std::shared_ptr<PtzMotion>> m_ptzMotion;
+    void sendPtzMotion(int row, Json command);
 
     QTimer m_pollTimer;
     // Keyed by "hostId:channel" so each NVR camera is tracked independently.

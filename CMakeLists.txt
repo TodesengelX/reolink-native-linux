@@ -66,6 +66,7 @@ set(APP_QML_FILES
     src/ui/qml/components/LivePane.qml
     src/ui/qml/components/PlaybackPane.qml
     src/ui/qml/components/PtzPad.qml
+    src/ui/qml/components/PtzStick.qml
     src/ui/qml/components/PtzPanel.qml
     src/ui/qml/components/Timeline.qml
     src/ui/qml/components/MonthCalendar.qml

@@ -38,6 +38,9 @@ Rectangle {
     property bool confirmSetHome: false
     property bool savingPreset: false
     property bool focusing: false
+    property bool savingHome: false // "Set current view as home" sent, no answer yet
+    property bool homeSaved: false  // shows the confirmation for a few seconds
+    readonly property bool stickMode: ptzStore.padStyle === "stick"
     readonly property bool hasHome: guard !== null && parseInt(guard.bexistPos) === 1
 
     width: 304
@@ -52,6 +55,7 @@ Rectangle {
         id: ptzStore
         category: "ptz"
         property string tab: "presets"
+        property string padStyle: "arrows" // "arrows" | "stick"
     }
     function speedKey() { return "speed_h" + cam.hostId + "c" + cam.channel; }
 
@@ -107,6 +111,7 @@ Rectangle {
     Timer { id: lensRefresh; interval: 2000; onTriggered: { Devices.fetchZoomFocus(panel.deviceRow); lensRefreshLate.restart(); } }
     Timer { id: lensRefreshLate; interval: 3500; onTriggered: Devices.fetchZoomFocus(panel.deviceRow) }
     Timer { id: stateRefresh; interval: 800; onTriggered: Devices.fetchPtzState(panel.deviceRow) }
+    Timer { id: homeSavedTimer; interval: 5000; onTriggered: panel.homeSaved = false }
     function lensMoved() { lensRefresh.restart(); patrolRunning = -1; }
 
     Connections {
@@ -117,6 +122,12 @@ Rectangle {
                 return;
             if (command === "AutoFocus")
                 panel.focusing = false;
+            if (command === "SetPtzGuard" && panel.savingHome) {
+                panel.savingHome = false;
+                panel.homeSaved = ok;
+                if (ok)
+                    homeSavedTimer.restart();
+            }
             panel.status = ok ? "" : qsTr("%1 failed: %2").arg(command).arg(error);
             if (!ok)
                 return;
@@ -410,20 +421,94 @@ Rectangle {
                     anchors.margins: 12
                     spacing: 10
 
-                    PtzPad {
-                        Layout.alignment: Qt.AlignHCenter
-                        deviceRow: panel.deviceRow
-                        speed: panel.speed
-                        showHome: panel.hasHome
-                        onMoved: panel.patrolRunning = -1
-                        onHomeRequested: panel.goHome()
+                    // Arrow pad or joystick, with the style switch in the corner. The
+                    // joystick's centre is its knob, so its home button sits opposite.
+                    Item {
+                        Layout.fillWidth: true
+                        implicitHeight: 156
+                        Loader {
+                            anchors.centerIn: parent
+                            sourceComponent: panel.stickMode ? stickComponent : padComponent
+                        }
+                        Component {
+                            id: padComponent
+                            PtzPad {
+                                deviceRow: panel.deviceRow
+                                speed: panel.speed
+                                showHome: panel.hasHome
+                                onMoved: panel.patrolRunning = -1
+                                onHomeRequested: panel.goHome()
+                            }
+                        }
+                        Component {
+                            id: stickComponent
+                            PtzStick {
+                                deviceRow: panel.deviceRow
+                                maxSpeed: panel.speed
+                                onMoved: panel.patrolRunning = -1
+                            }
+                        }
+                        Rectangle { // style switch
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            width: 30
+                            height: styleColumn.implicitHeight + 4
+                            radius: width / 2
+                            color: Theme.surfaceAlt
+                            border.color: Theme.border
+                            Column {
+                                id: styleColumn
+                                anchors.centerIn: parent
+                                spacing: 2
+                                Repeater {
+                                    model: [{ key: "arrows", glyph: "✛", tip: qsTr("Arrows: hold one to move at the set speed") },
+                                            { key: "stick", glyph: "◉", tip: qsTr("Joystick: push further to move faster") }]
+                                    delegate: Rectangle {
+                                        id: styleButton
+                                        required property var modelData
+                                        readonly property bool current: ptzStore.padStyle === modelData.key
+                                        width: 26
+                                        height: 26
+                                        radius: 13
+                                        color: current ? Theme.accentDim : (styleHover.hovered ? Theme.border : "transparent")
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: styleButton.modelData.glyph
+                                            color: styleButton.current ? Theme.text : Theme.textMuted
+                                            font.pixelSize: 13
+                                        }
+                                        HoverHandler { id: styleHover; cursorShape: Qt.PointingHandCursor }
+                                        TapHandler { onTapped: ptzStore.padStyle = styleButton.modelData.key }
+                                        ToolTip.visible: styleHover.hovered
+                                        ToolTip.delay: 400
+                                        ToolTip.text: modelData.tip
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle { // home, for the joystick
+                            visible: panel.stickMode && panel.hasHome
+                            anchors.top: parent.top
+                            anchors.left: parent.left
+                            width: 30
+                            height: 30
+                            radius: 15
+                            color: stickHomeHover.hovered ? Theme.border : Theme.surfaceAlt
+                            border.color: stickHomeHover.hovered ? Theme.accent : Theme.border
+                            Text { anchors.centerIn: parent; text: "⌂"; color: Theme.text; font.pixelSize: 16 }
+                            HoverHandler { id: stickHomeHover; cursorShape: Qt.PointingHandCursor }
+                            TapHandler { onTapped: panel.goHome() }
+                            ToolTip.visible: stickHomeHover.hovered
+                            ToolTip.delay: 500
+                            ToolTip.text: qsTr("Return to home")
+                        }
                     }
 
                     RowLayout {
                         visible: panel.cam.capPtzSpeed === true
                         Layout.fillWidth: true
                         spacing: 8
-                        Text { text: qsTr("Speed"); color: Theme.textMuted; font.pixelSize: 12 }
+                        Text { text: panel.stickMode ? qsTr("Max speed") : qsTr("Speed"); color: Theme.textMuted; font.pixelSize: 12 }
                         ThemedSlider {
                             Layout.fillWidth: true
                             from: 1; to: 64; stepSize: 1
@@ -769,9 +854,30 @@ Rectangle {
                         Pill {
                             label: qsTr("Replace home")
                             danger: true
-                            onActivated: { Devices.ptzGuard(panel.deviceRow, "setPos"); panel.confirmSetHome = false; }
+                            onActivated: {
+                                panel.homeSaved = false;
+                                panel.savingHome = true;
+                                Devices.ptzGuard(panel.deviceRow, "setPos");
+                                panel.confirmSetHome = false;
+                            }
                         }
                         Pill { label: qsTr("Cancel"); onActivated: panel.confirmSetHome = false }
+                    }
+                }
+                Row { // outcome of "Set current view as home"
+                    visible: panel.savingHome || panel.homeSaved
+                    spacing: 6
+                    Text {
+                        text: panel.savingHome ? "…" : "✓"
+                        color: panel.savingHome ? Theme.textMuted : Theme.online
+                        font.pixelSize: 13
+                        font.bold: true
+                    }
+                    Text {
+                        text: panel.savingHome ? qsTr("Saving the home position…")
+                                               : qsTr("Home position set to the current view")
+                        color: panel.savingHome ? Theme.textMuted : Theme.online
+                        font.pixelSize: 12
                     }
                 }
                 ThemedSwitch {
