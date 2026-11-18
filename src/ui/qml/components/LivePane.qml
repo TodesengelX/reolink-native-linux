@@ -175,7 +175,7 @@ Rectangle {
     // A pane pointed at a different camera must let the old one go now — its
     // session is wanted elsewhere (a swap hands it straight to another pane).
     onDeviceRowChanged: {
-        bcFallback = false; subViaBc = false; rtspDelivered = false;
+        bcFallback = false; subViaBc = false; rtspDelivered = false; threeD = false;
         seedQuality(); releaseStream(); updateSource();
     }
     onVisibleChanged: updateSource()
@@ -471,16 +471,213 @@ Rectangle {
         }
     }
 
-    // ---- PTZ joystick overlay ---------------------------------------------
+    // ---- PTZ: 3D positioning, keyboard, side panel ------------------------
     property bool ptzOpen: false
+    property bool threeD: false // 3D positioning armed: the video steers the camera
+    onPtzOpenChanged: {
+        if (ptzOpen)
+            root.forceActiveFocus();
+        else
+            threeD = false;
+    }
+
+    // While armed, the video is a pointer onto the scene, as in the official
+    // app: a click centres that spot, a dragged box zooms into it, a double-
+    // click zooms in around the point, and the wheel drives the lens. Points go
+    // through the video item's own transform and content rect, so digital
+    // zoom/pan and letterboxing still give true frame fractions.
+    MouseArea {
+        id: threeDArea
+        anchors.fill: parent
+        anchors.margins: 1
+        visible: root.threeD && root.hasSource
+        hoverEnabled: true
+        preventStealing: true
+        cursorShape: Qt.CrossCursor
+        property real sx: 0
+        property real sy: 0
+        property bool boxing: false
+        property bool doubled: false
+        property point pending
+
+        // Frame fraction under (x, y); null outside the picture unless clamped.
+        function frac(x, y, clamp) {
+            const p = threeDArea.mapToItem(video, x, y);
+            const cr = video.contentRect;
+            if (cr.width <= 0 || cr.height <= 0)
+                return null;
+            let fx = (p.x - cr.x) / cr.width, fy = (p.y - cr.y) / cr.height;
+            if (!clamp && (fx < 0 || fx > 1 || fy < 0 || fy > 1))
+                return null;
+            return Qt.point(Math.max(0, Math.min(1, fx)), Math.max(0, Math.min(1, fy)));
+        }
+        function send(left, top, w, h, atX, atY) {
+            Devices.ptz3D(root.deviceRow, left, top, w, h,
+                          ptzLoader.item ? ptzLoader.item.speed : 32, root.effectiveMain);
+            clickRing.show(atX, atY);
+        }
+        onPressed: (m) => {
+            root.forceActiveFocus();
+            sx = m.x; sy = m.y; boxing = false;
+        }
+        onPositionChanged: (m) => {
+            if (pressed && !boxing && Math.hypot(m.x - sx, m.y - sy) > Theme.dragThreshold)
+                boxing = true;
+        }
+        onReleased: (m) => {
+            if (doubled) { doubled = false; return; }
+            if (boxing) {
+                boxing = false;
+                const a = frac(Math.min(sx, m.x), Math.min(sy, m.y), true);
+                const b = frac(Math.max(sx, m.x), Math.max(sy, m.y), true);
+                if (a && b && b.x - a.x > 0.01 && b.y - a.y > 0.01)
+                    send(a.x, a.y, b.x - a.x, b.y - a.y, (sx + m.x) / 2, (sy + m.y) / 2);
+                return;
+            }
+            // Wait out the double-click interval so a double-click doesn't
+            // also centre first.
+            const f = frac(m.x, m.y, false);
+            if (f) {
+                pending = Qt.point(f.x, f.y);
+                clickAt = Qt.point(m.x, m.y);
+                clickDelay.restart();
+            }
+        }
+        property point clickAt
+        onDoubleClicked: (m) => {
+            clickDelay.stop();
+            doubled = true;
+            const f = frac(m.x, m.y, false);
+            if (f) // the official app's double-tap: a 0.3 x 0.3 box around the point
+                send(Math.max(0, Math.min(0.7, f.x - 0.15)), Math.max(0, Math.min(0.7, f.y - 0.15)),
+                     0.3, 0.3, m.x, m.y);
+        }
+        onWheel: (w) => { if (ptzLoader.item) ptzLoader.item.nudgeZoom(w.angleDelta.y > 0 ? 2 : -2); }
+        Timer {
+            id: clickDelay
+            interval: Qt.styleHints.mouseDoubleClickInterval
+            onTriggered: threeDArea.send(threeDArea.pending.x, threeDArea.pending.y, 0, 0,
+                                         threeDArea.clickAt.x, threeDArea.clickAt.y)
+        }
+
+        Rectangle { // rubber band for a box zoom
+            visible: threeDArea.boxing
+            x: Math.min(threeDArea.sx, threeDArea.mouseX)
+            y: Math.min(threeDArea.sy, threeDArea.mouseY)
+            width: Math.abs(threeDArea.mouseX - threeDArea.sx)
+            height: Math.abs(threeDArea.mouseY - threeDArea.sy)
+            color: "#332aa7ff"
+            border.color: Theme.accent
+            border.width: 2
+        }
+        Rectangle { // where the camera was sent
+            id: clickRing
+            width: 34; height: 34; radius: 17
+            color: "transparent"
+            border.color: Theme.accent
+            border.width: 2
+            opacity: 0
+            function show(px, py) { x = px - width / 2; y = py - height / 2; ringFade.restart(); }
+            NumberAnimation on opacity { id: ringFade; running: false; from: 1; to: 0; duration: 700 }
+        }
+        Rectangle { // what armed 3D does, said once on the video itself
+            anchors.top: parent.top
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.topMargin: 36
+            width: hint3d.implicitWidth + 20
+            height: 24
+            radius: 12
+            color: "#cc0d141b"
+            border.color: Theme.accent
+            Text {
+                id: hint3d
+                anchors.centerIn: parent
+                text: qsTr("3D · click to centre · drag a box to zoom · double-click to zoom in · Esc to leave")
+                color: Theme.text
+                font.pixelSize: 11
+            }
+        }
+    }
+
+    // Keyboard while the PTZ panel is open: arrows pan/tilt (two at once for a
+    // diagonal), + / − zoom, [ / ] focus, Esc leaves 3D, then the panel.
+    property var ptzKeys: ({})
+    readonly property var ptzKeyNames: ({ [Qt.Key_Up]: "up", [Qt.Key_Down]: "down",
+                                          [Qt.Key_Left]: "left", [Qt.Key_Right]: "right" })
+    readonly property var ptzLensKeys: ({ [Qt.Key_Plus]: "ZoomInc", [Qt.Key_Equal]: "ZoomInc",
+                                          [Qt.Key_Minus]: "ZoomDec", [Qt.Key_BracketLeft]: "FocusDec",
+                                          [Qt.Key_BracketRight]: "FocusInc" })
+    function ptzSpeed() { return ptzLoader.item ? ptzLoader.item.speed : 32; }
+    function steerFromKeys() {
+        const k = ptzKeys;
+        const v = k.up ? "Up" : k.down ? "Down" : "";
+        const h = k.left ? "Left" : k.right ? "Right" : "";
+        const op = h && v ? h + v : (h || v);
+        if (op)
+            Devices.ptzMove(root.deviceRow, op, ptzSpeed());
+        else
+            Devices.ptzStop(root.deviceRow);
+    }
+    Keys.onShortcutOverride: (e) => { e.accepted = root.ptzOpen && e.key === Qt.Key_Escape; }
+    Keys.onPressed: (e) => {
+        if (!root.ptzOpen || !root.hasSource)
+            return;
+        if (e.key === Qt.Key_Escape) {
+            if (root.threeD) root.threeD = false; else root.ptzOpen = false;
+            e.accepted = true;
+            return;
+        }
+        const dir = ptzKeyNames[e.key], lens = ptzLensKeys[e.key];
+        if (!dir && !lens)
+            return;
+        e.accepted = true;
+        if (e.isAutoRepeat)
+            return;
+        if (dir) {
+            const k = Object.assign({}, ptzKeys);
+            k[dir] = true;
+            ptzKeys = k;
+            steerFromKeys();
+        } else {
+            Devices.ptzMove(root.deviceRow, lens, ptzSpeed());
+        }
+    }
+    Keys.onReleased: (e) => {
+        const dir = ptzKeyNames[e.key], lens = ptzLensKeys[e.key];
+        if (!root.ptzOpen || e.isAutoRepeat || (!dir && !lens))
+            return;
+        e.accepted = true;
+        if (dir) {
+            const k = Object.assign({}, ptzKeys);
+            delete k[dir];
+            ptzKeys = k;
+            steerFromKeys();
+        } else {
+            Devices.ptzStop(root.deviceRow);
+            if (ptzLoader.item) ptzLoader.item.lensMoved();
+        }
+    }
+
     Loader {
+        id: ptzLoader
         active: root.ptzOpen && root.capPtz
         anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        anchors.rightMargin: 10
-        sourceComponent: PtzPad {
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.margins: 10
+        anchors.bottomMargin: 52 // clear the floating toolbar
+        sourceComponent: PtzPanel {
             deviceRow: root.deviceRow
-            showZoom: root.capZoom
+            threeD: root.threeD
+            threeDAvailable: root.viewRotation === 0
+            onToggleThreeD: { root.threeD = !root.threeD; root.forceActiveFocus(); }
+            onCloseRequested: root.ptzOpen = false
+            // The camera keeps no preset pictures; save what the pane shows now.
+            onCaptureThumbnail: (path) => video.grabToImage(function (result) {
+                result.saveToFile(path);
+                if (ptzLoader.item)
+                    ptzLoader.item.thumbStamp++;
+            }, Qt.size(320, 180))
         }
     }
 

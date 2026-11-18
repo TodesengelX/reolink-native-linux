@@ -8,6 +8,7 @@ Rectangle {
     id: pad
     property int deviceRow: -1
     property bool showZoom: true
+    property int speed: 32 // PtzCtrl speed, 1..64
 
     width: 120
     height: showZoom ? 168 : 120
@@ -15,7 +16,8 @@ Rectangle {
     color: "#e60d141b"
     border.color: Theme.border
 
-    function move(op) { if (deviceRow >= 0) Devices.ptzMove(deviceRow, op, 32); }
+    signal moved()
+    function move(op) { if (deviceRow >= 0) { Devices.ptzMove(deviceRow, op, speed); moved(); } }
     function stop() { if (deviceRow >= 0) Devices.ptzStop(deviceRow); }
 
     Column {
