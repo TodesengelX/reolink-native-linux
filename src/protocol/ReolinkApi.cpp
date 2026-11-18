@@ -2,6 +2,7 @@
 
 #include <QUrl>
 
+#include <cmath>
 #include <initializer_list>
 
 namespace rl {
@@ -80,8 +81,15 @@ Json toJson(const QVariant &v)
     case QMetaType::LongLong:
         return static_cast<qint64>(v.toLongLong());
     case QMetaType::Double:
-    case QMetaType::Float:
-        return v.toDouble();
+    case QMetaType::Float: {
+        // Device integers that make a round trip through QML come back as
+        // doubles, and firmware rejects "1.0" where it wants 1 ("param error"
+        // on SetAiCfg trackType). Write whole numbers as integers.
+        const double d = v.toDouble();
+        if (std::isfinite(d) && d == std::trunc(d) && std::abs(d) < 9.0e15)
+            return static_cast<qint64>(d);
+        return d;
+    }
     case QMetaType::QString:
         return v.toString().toStdString();
     default:

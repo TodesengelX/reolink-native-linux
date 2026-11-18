@@ -286,6 +286,21 @@ private slots:
         QCOMPARE(preset["param"].value("id", -1), 3);
     }
 
+    void toJsonWritesWholeDoublesAsIntegers()
+    {
+        // Integers that went through QML come back as doubles; firmware rejects
+        // "1.0" where it expects 1 (SetAiCfg trackType "param error").
+        const Json j = api::toJson(QVariantMap{{QStringLiteral("trackType"),
+                                                QVariantMap{{QStringLiteral("people"), 1.0},
+                                                            {QStringLiteral("vehicle"), 0.0}}},
+                                               {QStringLiteral("ratio"), 0.5}});
+        QVERIFY(j["trackType"]["people"].is_number_integer());
+        QCOMPARE(j["trackType"]["people"].get<int>(), 1);
+        QVERIFY(j["trackType"]["vehicle"].is_number_integer());
+        QCOMPARE(j.dump().find("1.0"), std::string::npos);
+        QVERIFY(j["ratio"].is_number_float()); // real fractions stay fractions
+    }
+
     void snapUrlBuild()
     {
         const QString url = api::snapUrl(QStringLiteral("10.0.0.5"), 443, true, 1,
