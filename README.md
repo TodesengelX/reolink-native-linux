@@ -1,7 +1,24 @@
-# Reolink Native Linux Client
+<p align="center">
+  <img src="packaging/io.github.todesengelx.ReolinkLinux.svg" width="104" alt="">
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/TodesengelX/reolink-native-linux)](../../releases/latest)
+<h1 align="center">Reolink Native Linux Client</h1>
+
+<p align="center">
+  A native Linux desktop client for Reolink cameras and NVRs.<br>
+  Live view, synced playback, PTZ, events and device settings. C++ and Qt 6: no Wine, no Electron.
+</p>
+
+<p align="center">
+  <a href="https://github.com/TodesengelX/reolink-native-linux/actions/workflows/ci.yml"><img src="https://github.com/TodesengelX/reolink-native-linux/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/TodesengelX/reolink-native-linux/releases/latest"><img src="https://img.shields.io/github/v/release/TodesengelX/reolink-native-linux" alt="Latest release"></a>
+  <a href="https://github.com/TodesengelX/reolink-native-linux/releases"><img src="https://img.shields.io/github/downloads/TodesengelX/reolink-native-linux/total" alt="Downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  <a href="docs/screenshots/live.jpg"><img src="docs/screenshots/live.jpg" alt="Live view: four cameras from an RLN8-410 NVR" width="100%"></a>
+</p>
 
 A fully **native Linux desktop client** for Reolink cameras and NVRs — built to work like the official Reolink Client (Windows/macOS/Android): the 1/4/6/9/12/16 live grid, synced multi-camera playback on one timeline, double-click maximize, fullscreen, PTZ, and a full device-settings surface.
 
@@ -10,6 +27,27 @@ A fully **native Linux desktop client** for Reolink cameras and NVRs — built t
 > **Status: alpha.** Actively developed against a real RLN8-410 NVR with a PTZ camera, with community-confirmed setups on an RLC-823S1 standalone camera, a Home Hub Pro and Baichuan-only cameras. Live view with audio, playback, events, notifications, PTZ and device settings all work; two-way talk and remote/P2P access are still in progress. Battery cameras (Argus series) work only through a Reolink Home Hub for now; on their own they speak a UDP protocol the app doesn't support yet.
 
 Grab the [latest release](../../releases/latest), and see the [changelog](CHANGELOG.md) for what's new. Found a bug? [Issues](../../issues) are read and acted on — recent reports were fixed and released within a day.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/ptz.jpg"><img src="docs/screenshots/ptz.jpg" alt="PTZ panel with 3D positioning on a 360° camera"></a></td>
+    <td width="50%"><a href="docs/screenshots/playback.jpg"><img src="docs/screenshots/playback.jpg" alt="Playback in HD with detection markers on the timeline"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><b>PTZ</b>: 3D positioning, pad or joystick, zoom and focus, presets, tracking</td>
+    <td align="center"><b>Playback</b>: detection markers from the NVR, filtered by type</td>
+  </tr>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/playback-sync.jpg"><img src="docs/screenshots/playback-sync.jpg" alt="Synced playback of four cameras on one timeline"></a></td>
+    <td width="50%"><a href="docs/screenshots/events.jpg"><img src="docs/screenshots/events.jpg" alt="Events inbox with snapshots and filters"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Synced playback</b>: four cameras on one timeline, a lane each</td>
+    <td align="center"><b>Events</b>: detections with snapshots, filters and one-click playback</td>
+  </tr>
+</table>
 
 ## Install
 
