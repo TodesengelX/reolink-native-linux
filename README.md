@@ -26,7 +26,7 @@ A fully **native Linux desktop client** for Reolink cameras and NVRs — built t
 
 > **Status: alpha.** Actively developed against a real RLN8-410 NVR with a PTZ camera, with community-confirmed setups on an RLC-823S1 standalone camera, a Home Hub Pro and Baichuan-only cameras. Live view with audio, playback, events, notifications, PTZ and device settings all work; two-way talk and remote/P2P access are still in progress. Battery cameras (Argus series) work only through a Reolink Home Hub for now; on their own they speak a UDP protocol the app doesn't support yet.
 
-Grab the [latest release](../../releases/latest), and see the [changelog](CHANGELOG.md) for what's new. Found a bug? [Issues](../../issues) are read and acted on — recent reports were fixed and released within a day.
+Grab the [latest release](../../releases/latest), and see the [changelog](CHANGELOG.md) for what's new. Found a bug? [Issues](../../issues).
 
 ## Screenshots
 
