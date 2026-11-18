@@ -93,11 +93,24 @@ inline constexpr auto FocusInc = "FocusInc";
 inline constexpr auto FocusDec = "FocusDec";
 inline constexpr auto Stop = "Stop";
 inline constexpr auto ToPos = "ToPos"; // go to preset (needs presetId)
+inline constexpr auto StartPatrol = "StartPatrol"; // needs the patrol's id
+inline constexpr auto StopPatrol = "StopPatrol";
 } // namespace ptz
 
-// Build a PtzCtrl command. presetId >= 0 is included (for ToPos); speed is clamped
-// by the device to its own range (typically 1..64).
+// Build a PtzCtrl command. presetId >= 0 is included as `id`: the preset for
+// ToPos, the patrol for Start/StopPatrol. Speed is clamped to 1..64.
 Json ptzCtrl(int channel, const QString &op, int speed = 32, int presetId = -1);
+
+// Absolute lens move: op "ZoomPos" or "FocusPos", pos within GetZoomFocus's range.
+Json startZoomFocus(int channel, const QString &op, int pos);
+// Save the camera's current position as preset `id` (enable) or delete it.
+Json setPtzPreset(int channel, int id, bool enable, const QString &name = QString());
+// Guard position: "toPos" goes there, "setPos" saves the current position.
+Json ptzGuardCommand(int channel, const QString &cmdStr);
+// Guard options without moving the guard point: auto-return on/off and its delay.
+Json setPtzGuardOptions(int channel, bool enable, int timeoutSecs);
+// SetAiCfg with only the given fields (e.g. bSmartTrack, trackType) plus channel.
+Json setAiCfg(int channel, const Json &fields);
 
 // GET URL that returns a JPEG snapshot of the channel (not JSON). rs is a
 // cache-buster the device expects.
@@ -142,6 +155,12 @@ struct ChannelCaps {
     bool ptzPreset = false;
     bool zoom = false;
     bool focus = false;
+    bool ptzSpeed = false;      // PtzCtrl honours `speed`
+    bool ptz3D = false;         // 3D positioning (Set3DPos / Baichuan 445)
+    bool autoFocus = false;     // auto focus can be switched (Baichuan 224/225)
+    bool zoomFocusPos = false;  // absolute zoom/focus positions (sliders)
+    bool ptzPatrol = false;
+    bool aiTrack = false;       // AI auto-tracking (SetAiCfg bSmartTrack)
     bool ai = false;
     bool aiPeople = false;
     bool aiVehicle = false;

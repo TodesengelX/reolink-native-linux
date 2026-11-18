@@ -211,6 +211,48 @@ Json ptzCtrl(int channel, const QString &op, int speed, int presetId)
     return command(QStringLiteral("PtzCtrl"), std::move(param));
 }
 
+// PTZ command shapes below follow reolink_aio (MIT): set_zoom/set_focus,
+// set_ptz_guard and set_auto_tracking.
+Json startZoomFocus(int channel, const QString &op, int pos)
+{
+    return command(QStringLiteral("StartZoomFocus"),
+                   Json{{"ZoomFocus", {{"channel", channel}, {"op", op.toStdString()}, {"pos", pos}}}});
+}
+
+Json setPtzPreset(int channel, int id, bool enable, const QString &name)
+{
+    Json preset = {{"channel", channel}, {"id", id}, {"enable", enable ? 1 : 0}};
+    if (enable)
+        preset["name"] = name.left(31).toStdString(); // GetPtzPreset's range: maxLen 31
+    return command(QStringLiteral("SetPtzPreset"), Json{{"PtzPreset", std::move(preset)}});
+}
+
+Json ptzGuardCommand(int channel, const QString &cmdStr)
+{
+    Json guard = {{"channel", channel}, {"cmdStr", cmdStr.toStdString()}};
+    if (cmdStr == QLatin1String("setPos"))
+        guard["bSaveCurrentPos"] = 1;
+    return command(QStringLiteral("SetPtzGuard"), Json{{"PtzGuard", std::move(guard)}});
+}
+
+Json setPtzGuardOptions(int channel, bool enable, int timeoutSecs)
+{
+    // "setPos" without bSaveCurrentPos updates the options, not the guard point.
+    return command(QStringLiteral("SetPtzGuard"),
+                   Json{{"PtzGuard",
+                         {{"channel", channel},
+                          {"cmdStr", "setPos"},
+                          {"benable", enable ? 1 : 0},
+                          {"timeout", timeoutSecs}}}});
+}
+
+Json setAiCfg(int channel, const Json &fields)
+{
+    Json param = fields.is_object() ? fields : Json::object();
+    param["channel"] = channel;
+    return command(QStringLiteral("SetAiCfg"), std::move(param));
+}
+
 QString snapUrl(const QString &host, int port, bool https, int channel, const QString &token,
                 const QString &rs)
 {
@@ -273,6 +315,13 @@ Capabilities parseAbility(const Json &value)
         c.ptzPreset = capVer(chn, "ptzPreset");
         c.zoom = capVer(chn, "ptzCtrl") || capVer(chn, "supportPtzZoom");
         c.focus = capVer(chn, "ptzCtrl") || capVer(chn, "supportPtzFocus");
+        c.ptzSpeed = capVer(chn, "supportPtzSpeed");
+        c.ptz3D = capVer(chn, "supportPtz3DLocation");
+        c.autoFocus = capVer(chn, "disableAutoFocus");
+        c.zoomFocusPos = capVer(chn, "supportZoomAndFocusSliderCfg")
+                         || (capVer(chn, "supportZoom") && capVer(chn, "supportFocus"));
+        c.ptzPatrol = capVer(chn, "ptzPatrol");
+        c.aiTrack = capVer(chn, "aiTrack");
         // AI: some firmware exposes supportAi, others per-type flags.
         c.aiPeople = capVer(chn, "supportAiPeople");
         c.aiVehicle = capVer(chn, "supportAiVehicle");

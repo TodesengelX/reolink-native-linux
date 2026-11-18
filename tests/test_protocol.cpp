@@ -301,6 +301,70 @@ private slots:
         QVERIFY(j["ratio"].is_number_float()); // real fractions stay fractions
     }
 
+    void ptzCommandBuilders()
+    {
+        const Json zf = api::startZoomFocus(6, QStringLiteral("ZoomPos"), 12);
+        QCOMPARE(zf.value("cmd", std::string{}), std::string("StartZoomFocus"));
+        QCOMPARE(zf["param"]["ZoomFocus"].value("op", std::string{}), std::string("ZoomPos"));
+        QCOMPARE(zf["param"]["ZoomFocus"].value("pos", -1), 12);
+
+        // 3D positioning over Baichuan, byte-for-byte the shape the official app
+        // sends through an NVR: frame fractions in "%e", top-left corner, a 0x0
+        // box for click-to-centre. Out-of-frame values clamp; speed to 1..64.
+        const QByteArray click = BaichuanControl::ptz3DLocationXml(0.8376311, 0.4731935, 0, 0, 32,
+                                                                   QStringLiteral("subStream"));
+        QVERIFY(click.contains("<Ptz3DLocation version=\"1.1\">\n<topLeftX>8.376311e-01</topLeftX>\n"
+                               "<topLeftY>4.731935e-01</topLeftY>\n<width>0.000000e+00</width>\n"
+                               "<height>0.000000e+00</height>\n<speed>32</speed>\n"
+                               "<streamType>subStream</streamType>\n</Ptz3DLocation>"));
+        QVERIFY(!click.contains("channelId")); // the channel travels in the extension
+        const QByteArray box = BaichuanControl::ptz3DLocationXml(-0.2, 1.5, 0.3, 0.3, 99,
+                                                                 QStringLiteral("mainStream"));
+        QVERIFY(box.contains("<topLeftX>0.000000e+00</topLeftX>"));
+        QVERIFY(box.contains("<topLeftY>1.000000e+00</topLeftY>"));
+        QVERIFY(box.contains("<width>3.000000e-01</width>"));
+        QVERIFY(box.contains("<speed>64</speed>") && box.contains("<streamType>mainStream</streamType>"));
+
+        const Json save = api::setPtzPreset(6, 10, true, QStringLiteral("Gate"))["param"]["PtzPreset"];
+        QCOMPARE(save.value("enable", -1), 1);
+        QCOMPARE(save.value("name", std::string{}), std::string("Gate"));
+        const Json del = api::setPtzPreset(6, 10, false)["param"]["PtzPreset"];
+        QCOMPARE(del.value("enable", -1), 0);
+        QVERIFY(!del.contains("name"));
+
+        // Saving the guard point is explicit; changing its options never moves it.
+        QCOMPARE(api::ptzGuardCommand(6, QStringLiteral("setPos"))["param"]["PtzGuard"]
+                     .value("bSaveCurrentPos", 0), 1);
+        QVERIFY(!api::ptzGuardCommand(6, QStringLiteral("toPos"))["param"]["PtzGuard"]
+                     .contains("bSaveCurrentPos"));
+        const Json opts = api::setPtzGuardOptions(6, false, 120)["param"]["PtzGuard"];
+        QVERIFY(!opts.contains("bSaveCurrentPos"));
+        QCOMPARE(opts.value("benable", -1), 0);
+        QCOMPARE(opts.value("timeout", -1), 120);
+
+        const Json ai = api::setAiCfg(6, Json{{"bSmartTrack", 0}});
+        QCOMPARE(ai.value("cmd", std::string{}), std::string("SetAiCfg"));
+        QCOMPARE(ai["param"].value("channel", -1), 6);
+        QCOMPARE(ai["param"].value("bSmartTrack", -1), 0);
+    }
+
+    void parseAbilityPtzExtras()
+    {
+        // Flags as a real 360PTZ (behind an RLN8-410) reports them.
+        const api::Capabilities caps = api::parseAbility(Json::parse(R"({"Ability":{"abilityChn":[{
+            "ptzType":{"permit":6,"ver":2},"ptzCtrl":{"permit":6,"ver":29157},
+            "supportPtz3DLocation":{"permit":6,"ver":1},"disableAutoFocus":{"permit":6,"ver":1},
+            "supportPtzSpeed":{"permit":6,"ver":1},"supportZoomAndFocusSliderCfg":{"permit":6,"ver":1},
+            "ptzPatrol":{"permit":6,"ver":1},"aiTrack":{"permit":6,"ver":1}},
+            {"ptzType":{"permit":6,"ver":0}}]}})"));
+        QCOMPARE(caps.channels.size(), 2);
+        const api::ChannelCaps &ptz = caps.channels[0];
+        QVERIFY(ptz.ptz3D && ptz.autoFocus && ptz.ptzSpeed && ptz.zoomFocusPos);
+        QVERIFY(ptz.ptzPatrol && ptz.aiTrack);
+        const api::ChannelCaps &fixed = caps.channels[1];
+        QVERIFY(!fixed.ptz3D && !fixed.autoFocus && !fixed.ptzSpeed && !fixed.aiTrack);
+    }
+
     void snapUrlBuild()
     {
         const QString url = api::snapUrl(QStringLiteral("10.0.0.5"), 443, true, 1,

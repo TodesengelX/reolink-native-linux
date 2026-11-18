@@ -49,6 +49,37 @@ int loadRotation(qint64 hostId, int channel)
 {
     return QSettings().value(rotationKey(hostId, channel), 0).toInt();
 }
+
+// One channel Get*, retrying only transient transport failures: NVRs (e.g.
+// RLN8-410) intermittently return HTTP 502 when proxying a camera command
+// under load. Retry a few times with a short backoff (the lighter action=0 on
+// the 2nd try); a DEFINITIVE device error (rspCode set — e.g. -9 "not
+// supported") stops immediately so we don't hammer the NVR for nothing.
+api::CommandResult getWithRetry(ReolinkHttpClient &client, const QString &cmd, int channel,
+                                int action = 1)
+{
+    api::CommandResult r;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        r = client.callOne(cmd, Json{{"channel", channel}}, attempt == 1 ? 0 : action);
+        if (r.ok || r.rspCode != 0)
+            break;
+        QThread::msleep(400);
+    }
+    return r;
+}
+
+// A Get*'s value as a QVariant, with the device's optional range object kept
+// beside it under "_range" so panels can honour model-specific bounds.
+QVariant valueWithRange(const api::CommandResult &r)
+{
+    QVariant value = api::toVariant(r.value);
+    if (!r.range.empty() && value.metaType().id() == QMetaType::QVariantMap) {
+        QVariantMap map = value.toMap();
+        map.insert(QStringLiteral("_range"), api::toVariant(r.range));
+        value = map;
+    }
+    return value;
+}
 } // namespace
 
 
@@ -1087,6 +1118,195 @@ void DeviceManager::ptzPreset(int row, int presetId)
     }));
 }
 
+namespace {
+// Whether a single-command batch succeeded; otherwise why not, for the UI.
+bool singleOk(const api::BatchResult &b, QString *error)
+{
+    if (b.transportOk && !b.results.isEmpty() && b.results.first().ok)
+        return true;
+    if (!b.transportOk)
+        *error = b.error.isEmpty() ? QObject::tr("no reply") : b.error;
+    else if (b.results.isEmpty())
+        *error = QObject::tr("no reply");
+    else
+        *error = b.results.first().detail.isEmpty()
+                     ? QObject::tr("device error %1").arg(b.results.first().rspCode)
+                     : b.results.first().detail;
+    return false;
+}
+} // namespace
+
+void DeviceManager::runPtzCommand(int row, const QString &label, const Json &command)
+{
+    auto client = clientFor(row);
+    if (!client) {
+        emit ptzCommandDone(row, label, false, tr("device not ready"));
+        return;
+    }
+    m_pending.addFuture(QtConcurrent::run([this, client, row, label, command] {
+        QString error;
+        const bool ok = singleOk(client->call(Json::array({command})), &error);
+        if (!ok)
+            qCWarning(lcProto) << "PTZ" << label << "failed:" << error;
+        QMetaObject::invokeMethod(
+            this, [this, row, label, ok, error] { emit ptzCommandDone(row, label, ok, error); },
+            Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::fetchPtzState(int row)
+{
+    auto client = clientFor(row);
+    if (!client)
+        return;
+    const int ch = m_entries.at(row).channel;
+    m_pending.addFuture(QtConcurrent::run([this, client, row, ch] {
+        static const QStringList cmds = {
+            QStringLiteral("GetZoomFocus"),
+            QStringLiteral("GetPtzPreset"), QStringLiteral("GetPtzPatrol"),
+            QStringLiteral("GetPtzGuard"),  QStringLiteral("GetAiCfg")};
+        QVariantMap values;
+        for (const QString &c : cmds) {
+            const api::CommandResult r = getWithRetry(*client, c, ch);
+            if (r.ok)
+                values.insert(c, valueWithRange(r));
+        }
+        QMetaObject::invokeMethod(
+            this,
+            [this, row, values] {
+                emit ptzStateLoaded(row, values);
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::fetchZoomFocus(int row)
+{
+    auto client = clientFor(row);
+    if (!client)
+        return;
+    const int ch = m_entries.at(row).channel;
+    m_pending.addFuture(QtConcurrent::run([this, client, row, ch] {
+        const api::CommandResult r = getWithRetry(*client, QStringLiteral("GetZoomFocus"), ch);
+        if (!r.ok)
+            return;
+        const QVariantMap values{{QStringLiteral("GetZoomFocus"), valueWithRange(r)}};
+        QMetaObject::invokeMethod(
+            this, [this, row, values] { emit ptzStateLoaded(row, values); }, Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::ptzZoomFocusTo(int row, const QString &what, int pos)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    const QString op = what == QLatin1String("focus") ? QStringLiteral("FocusPos")
+                                                      : QStringLiteral("ZoomPos");
+    runPtzCommand(row, QStringLiteral("StartZoomFocus"),
+                  api::startZoomFocus(m_entries.at(row).channel, op, pos));
+}
+
+void DeviceManager::ptz3D(int row, double left, double top, double w, double h, int speed,
+                          bool mainStream)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    const Entry &e = m_entries.at(row);
+    if (e.rec.kind == QLatin1String("stream") || !e.primed) {
+        emit ptzCommandDone(row, QStringLiteral("Set3DPos"), false, tr("device not ready"));
+        return;
+    }
+    BaichuanControl::Params p;
+    p.host = e.rec.addr;
+    p.username = e.rec.username;
+    p.password = e.password;
+    const int ch = e.channel;
+    const QString stream = mainStream ? QStringLiteral("mainStream") : QStringLiteral("subStream");
+    m_pending.addFuture(QtConcurrent::run([this, p, row, ch, left, top, w, h, speed, stream] {
+        // Baichuan cmd 445 in the official app's form; through an NVR the HTTP
+        // Set3DPos is refused, so this is the one route (see ptz3DLocationXml).
+        QString error;
+        bool ok = false;
+        BaichuanControl bc(p);
+        if (!bc.open()) {
+            error = tr("couldn't open a Baichuan session");
+        } else {
+            quint16 status = 0;
+            bc.transact(445, ch, BaichuanControl::ptz3DLocationXml(left, top, w, h, speed, stream),
+                        &status);
+            bc.close();
+            ok = status == 200;
+            if (!ok)
+                error = status ? tr("device refused (status %1)").arg(status) : tr("no reply");
+        }
+        if (!ok)
+            qCWarning(lcProto) << "PTZ 3D positioning failed:" << error;
+        QMetaObject::invokeMethod(
+            this, [this, row, ok, error] { emit ptzCommandDone(row, QStringLiteral("Set3DPos"), ok, error); },
+            Qt::QueuedConnection);
+    }));
+}
+
+void DeviceManager::ptzPatrol(int row, int patrolId, bool start)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    const QString op = start ? QStringLiteral("StartPatrol") : QStringLiteral("StopPatrol");
+    runPtzCommand(row, op, api::ptzCtrl(m_entries.at(row).channel, op, 32, patrolId));
+}
+
+void DeviceManager::ptzPresetSave(int row, int presetId, const QString &name)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    runPtzCommand(row, QStringLiteral("SetPtzPreset"),
+                  api::setPtzPreset(m_entries.at(row).channel, presetId, true, name));
+}
+
+void DeviceManager::ptzPresetDelete(int row, int presetId)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    QFile::remove(ptzPresetImagePath(row, presetId));
+    runPtzCommand(row, QStringLiteral("SetPtzPreset"),
+                  api::setPtzPreset(m_entries.at(row).channel, presetId, false));
+}
+
+QString DeviceManager::ptzPresetImagePath(int row, int presetId) const
+{
+    if (row < 0 || row >= m_entries.size())
+        return {};
+    const QString dir = Paths::dataDir() + QStringLiteral("/ptz-presets");
+    QDir().mkpath(dir);
+    const Entry &e = m_entries.at(row);
+    return dir + QStringLiteral("/%1_%2_%3.jpg").arg(e.rec.id).arg(e.channel).arg(presetId);
+}
+
+void DeviceManager::ptzGuard(int row, const QString &cmdStr)
+{
+    if (row < 0 || row >= m_entries.size()
+        || (cmdStr != QLatin1String("toPos") && cmdStr != QLatin1String("setPos")))
+        return;
+    runPtzCommand(row, QStringLiteral("SetPtzGuard"),
+                  api::ptzGuardCommand(m_entries.at(row).channel, cmdStr));
+}
+
+void DeviceManager::ptzGuardOptions(int row, bool enable, int timeoutSecs)
+{
+    if (row < 0 || row >= m_entries.size())
+        return;
+    runPtzCommand(row, QStringLiteral("SetPtzGuard"),
+                  api::setPtzGuardOptions(m_entries.at(row).channel, enable, timeoutSecs));
+}
+
+void DeviceManager::setAiTracking(int row, const QVariantMap &fields)
+{
+    if (row < 0 || row >= m_entries.size() || fields.isEmpty())
+        return;
+    runPtzCommand(row, QStringLiteral("SetAiCfg"),
+                  api::setAiCfg(m_entries.at(row).channel, api::toJson(fields)));
+}
+
 void DeviceManager::snapshot(int row)
 {
     auto client = clientFor(row);
@@ -1679,23 +1899,9 @@ void DeviceManager::fetchSettings(int row, const QStringList &getCommands)
         QVariantMap values;
         QStringList failed;
         QString lastError;
-        // Fetch one command, retrying only transient transport failures: NVRs (e.g.
-        // RLN8-410) intermittently return HTTP 502 when proxying a camera command
-        // under load. Retry a few times with a short backoff (the lighter action=0
-        // on the 2nd try); a DEFINITIVE device error (rspCode set — e.g. -9 "not
-        // supported") stops immediately so we don't hammer the NVR for nothing.
+        // GetWhiteLed only answers action=0; everything else asks for its range too.
         auto fetchOne = [&](const QString &cmd) {
-            api::CommandResult r;
-            for (int attempt = 0; attempt < 3; ++attempt) {
-                const int action = cmd == QLatin1String("GetWhiteLed")
-                                       ? 0
-                                       : (attempt == 1 ? 0 : 1);
-                r = client->callOne(cmd, Json{{"channel", ch}}, action);
-                if (r.ok || r.rspCode != 0)
-                    break;
-                QThread::msleep(400);
-            }
-            return r;
+            return getWithRetry(*client, cmd, ch, cmd == QLatin1String("GetWhiteLed") ? 0 : 1);
         };
         // Newer firmware renamed several commands with a "V20" suffix (a different
         // schedule shape). If the device says the legacy name isn't supported, try
@@ -1710,16 +1916,7 @@ void DeviceManager::fetchSettings(int row, const QStringList &getCommands)
             if (!r.ok && r.rspCode != 0 && v20Alt.contains(c))
                 r = fetchOne(v20Alt.value(c));
             if (r.ok) {
-                // Keep the device's optional range object beside the value. This
-                // is generic rather than WhiteLed-specific and lets every settings
-                // panel honor model/firmware-specific bounds.
-                QVariant value = api::toVariant(r.value);
-                if (!r.range.empty() && value.metaType().id() == QMetaType::QVariantMap) {
-                    QVariantMap map = value.toMap();
-                    map.insert(QStringLiteral("_range"), api::toVariant(r.range));
-                    value = map;
-                }
-                values.insert(c, value);
+                values.insert(c, valueWithRange(r));
             } else {
                 failed.append(c);
                 if (!r.detail.isEmpty())
@@ -1840,6 +2037,14 @@ QVariantMap DeviceManager::cameraInfo(int row) const
     m["isAdmin"] = e.isAdmin;
     m["capPtz"] = e.caps.ptz;
     m["capZoom"] = e.caps.zoom;
+    m["capFocus"] = e.caps.focus;
+    m["capPtzPreset"] = e.caps.ptzPreset;
+    m["capPtzSpeed"] = e.caps.ptzSpeed;
+    m["capPtz3D"] = e.caps.ptz3D;
+    m["capAutoFocus"] = e.caps.autoFocus;
+    m["capZoomFocusPos"] = e.caps.zoomFocusPos;
+    m["capPtzPatrol"] = e.caps.ptzPatrol;
+    m["capAiTrack"] = e.caps.aiTrack;
     m["capAudio"] = e.caps.audio;
     m["capSiren"] = e.caps.siren;
     m["capLight"] = api::hasVisibleLight(e.caps.lightSupport);

@@ -396,6 +396,21 @@ BaichuanControl::parseLightAbilities(const QByteArray &xml)
     return out;
 }
 
+QByteArray BaichuanControl::ptz3DLocationXml(double left, double top, double w, double h, int speed,
+                                             const QString &streamType)
+{
+    // Same elements, order and "%e" number format the official app sends.
+    const auto frac = [](double v) { return QString::asprintf("%e", qBound(0.0, v, 1.0)).toUtf8(); };
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<Ptz3DLocation version=\"1.1\">\n"
+           "<topLeftX>" + frac(left) + "</topLeftX>\n"
+           "<topLeftY>" + frac(top) + "</topLeftY>\n"
+           "<width>" + frac(w) + "</width>\n"
+           "<height>" + frac(h) + "</height>\n"
+           "<speed>" + QByteArray::number(qBound(1, speed, 64)) + "</speed>\n"
+           "<streamType>" + streamType.toUtf8() + "</streamType>\n"
+           "</Ptz3DLocation>\n</body>\n";
+}
+
 QHash<int, BaichuanControl::LightAbility> BaichuanControl::lightAbilities()
 {
     // cmd 199 is host-level and returns per-channel <item> capability records.

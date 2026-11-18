@@ -63,6 +63,16 @@ public:
     // Returns true on a success status (200/201/300).
     bool writeEnable(quint32 getCmdId, quint32 setCmdId, int channel, bool enable);
 
+    // 3D positioning request (cmd 445): pan, tilt and zoom so the box at
+    // (left, top), w x h fills the view. All four are fractions of the frame
+    // shown in streamType ("mainStream" | "subStream"); w = h = 0 centres the
+    // camera on (left, top) without zooming. This is the form the official app
+    // sends through an NVR (observed on the wire); reolink_aio's pixel form is
+    // refused there (HTTP "param error", Baichuan accepted but ignored). The
+    // channel travels in the message extension, not the body.
+    static QByteArray ptz3DLocationXml(double left, double top, double w, double h, int speed,
+                                       const QString &streamType);
+
     struct LightAbility {
         api::LightSupport support = api::LightSupport::Unknown;
         api::LightType type = api::LightType::Unknown;

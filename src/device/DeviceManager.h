@@ -161,6 +161,30 @@ public:
     Q_INVOKABLE void ptzMove(int row, const QString &op, int speed = 32);
     Q_INVOKABLE void ptzStop(int row);
     Q_INVOKABLE void ptzPreset(int row, int presetId);
+    // Everything the PTZ panel shows, read in one pass: GetZoomFocus (positions and
+    // ranges), GetPtzPreset, GetPtzPatrol, GetPtzGuard and GetAiCfg.
+    // Emits ptzStateLoaded(row, { cmd: value }); commands the device refuses are
+    // left out. fetchZoomFocus re-reads just the lens positions after a move.
+    Q_INVOKABLE void fetchPtzState(int row);
+    Q_INVOKABLE void fetchZoomFocus(int row);
+    // what: "zoom" | "focus"; pos within GetZoomFocus's range.
+    Q_INVOKABLE void ptzZoomFocusTo(int row, const QString &what, int pos);
+    // 3D positioning: pan, tilt and zoom so the box at (left, top), w x h, fills
+    // the view; all fractions (0..1) of the frame of the stream being shown
+    // (mainStream = HD). w = h = 0 centres the camera on (left, top).
+    Q_INVOKABLE void ptz3D(int row, double left, double top, double w, double h, int speed,
+                           bool mainStream);
+    Q_INVOKABLE void ptzPatrol(int row, int patrolId, bool start);
+    // Save the current position as preset presetId, or delete it (and its thumbnail).
+    Q_INVOKABLE void ptzPresetSave(int row, int presetId, const QString &name);
+    Q_INVOKABLE void ptzPresetDelete(int row, int presetId);
+    // Where this app keeps a preset's thumbnail (the camera doesn't store one).
+    Q_INVOKABLE QString ptzPresetImagePath(int row, int presetId) const;
+    // cmdStr "toPos" goes to the guard point, "setPos" saves the current position.
+    Q_INVOKABLE void ptzGuard(int row, const QString &cmdStr);
+    Q_INVOKABLE void ptzGuardOptions(int row, bool enable, int timeoutSecs);
+    // SetAiCfg with just these fields (bSmartTrack, trackType, aiStopBackTime...).
+    Q_INVOKABLE void setAiTracking(int row, const QVariantMap &fields);
     // Capture a JPEG snapshot; emits snapshotSaved/snapshotFailed.
     Q_INVOKABLE void snapshot(int row);
     // Quiet snapshot for an event thumbnail: fetches a Snap JPEG, downscales it,
@@ -267,6 +291,9 @@ signals:
     void clipExported(int row, const QString &path);
     void clipExportFailed(int row, const QString &error);
     void settingsLoaded(int row, const QVariantMap &values);
+    void ptzStateLoaded(int row, const QVariantMap &values);
+    // Outcome of a PTZ write (preset save/delete, guard, patrol, tracking, 3D...).
+    void ptzCommandDone(int row, const QString &command, bool ok, const QString &error);
     void settingsFailed(int row, const QString &error);
     void settingStarted(int row, const QString &command);
     void settingApplied(int row, const QString &command, bool ok, const QString &error);
@@ -372,6 +399,8 @@ private:
     void applyValidation(qint64 hostId, const Validation &v);
     void postValidation(qint64 hostId, const Validation &v); // marshals to GUI thread
     std::shared_ptr<ReolinkHttpClient> clientFor(int row);
+    // Send one PTZ Set*/PtzCtrl command off the GUI thread; reports ptzCommandDone.
+    void runPtzCommand(int row, const QString &label, const Json &command);
 
     Database *m_db;
     CredentialStore *m_credentials;
