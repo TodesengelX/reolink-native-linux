@@ -423,14 +423,14 @@ Rectangle {
             }
 
             // ---- guard position ----
-            SectionTitle { text: qsTr("Guard position"); visible: panel.guard !== null }
+            SectionTitle { text: qsTr("Home position"); visible: panel.guard !== null }
             Flow {
                 visible: panel.guard !== null
                 Layout.fillWidth: true
                 spacing: 4
                 PanelButton {
                     visible: panel.guard !== null && parseInt(panel.guard.bexistPos) === 1
-                    label: qsTr("Go to guard")
+                    label: qsTr("Return to home")
                     onActivated: { Devices.ptzGuard(panel.deviceRow, "toPos"); panel.lensMoved(); }
                 }
                 PanelButton {
@@ -440,7 +440,7 @@ Rectangle {
                 }
                 PanelButton {
                     visible: panel.confirmSetGuard
-                    label: qsTr("Replace guard")
+                    label: qsTr("Replace home")
                     danger: true
                     onActivated: { Devices.ptzGuard(panel.deviceRow, "setPos"); panel.confirmSetGuard = false; }
                 }
@@ -512,7 +512,7 @@ Rectangle {
                     }
                 }
                 RowLayout {
-                    Text { text: qsTr("Back to guard"); color: Theme.textMuted; font.pixelSize: 12 }
+                    Text { text: qsTr("Back to home"); color: Theme.textMuted; font.pixelSize: 12 }
                     ComboBox {
                         Layout.preferredWidth: 78
                         readonly property var secs: panel.ai && panel.ai._range && panel.ai._range.aiStopBackTime
