@@ -199,6 +199,9 @@ public:
     // {start,end,type,name} where start/end are seconds into the day), and build
     // a playable URL for a recording file handle.
     Q_INVOKABLE void searchRecordings(int row, int year, int month, int day);
+    // The day's detections from the device's own index (Baichuan alarm search):
+    // reports alarmEventsFound with [{ start, end, kinds }], seconds into the day.
+    Q_INVOKABLE void searchAlarmEvents(int row, int year, int month, int day);
     // Playable HTTP-FLV URL for a recording starting at startEpoch (Unix seconds).
     Q_INVOKABLE QString playbackUrl(int row, qint64 startEpoch, bool mainStream = false);
     // Full-resolution (main-stream) playback: download the clip covering
@@ -289,6 +292,8 @@ signals:
     void recordingsFound(int row, const QVariantList &segments);
     void recordingDaysFound(int row, int year, int month, const QVariantList &days);
     void recordingsFailed(int row, const QString &error);
+    void alarmEventsFound(int row, int year, int month, int day, const QVariantList &events);
+    void alarmEventsFailed(int row, int year, int month, int day, const QString &error);
     void hdClipReady(int row, const QString &localPath, qint64 startEpoch);
     void hdClipFailed(int row, const QString &error);
     void clipExported(int row, const QString &path);

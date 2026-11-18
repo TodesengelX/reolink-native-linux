@@ -63,9 +63,10 @@ public:
     void setRetentionDays(int days);
 
     Q_INVOKABLE void markAllRead();
-    // Seconds-into-day of each detection event for this camera on the given day
-    // (dayStart = local midnight epoch). Feeds the playback timeline's markers.
-    Q_INVOKABLE QVariantList eventTimesFor(qint64 hostId, int channel, qint64 dayStart) const;
+    // This camera's inbox detections on the given day (dayStart = local midnight
+    // epoch) as timeline markers [{ start, end, kinds }]. Playback's fallback
+    // when the device's own event search isn't available.
+    Q_INVOKABLE QVariantList eventMarkersFor(qint64 hostId, int channel, qint64 dayStart) const;
     // The inbox event at exactly this camera and time: {type, camera, thumbnail},
     // or an empty map. Lets Playback show an event's snapshot when no recording
     // covers it.

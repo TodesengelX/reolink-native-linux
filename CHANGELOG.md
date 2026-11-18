@@ -73,6 +73,16 @@ atripathy86, aalap, greenfanDev, MathiasDeWeerdt and 815rx1.
 
 ### Fixed
 
+- **Detection markers were missing from the playback timeline** on most days
+  ([#31]). They only came from the app's own inbox, which keeps the last 100
+  events and only sees what happens while the app runs. The timeline now reads
+  each day's detections from the device itself, as the official apps do, and
+  shows each one as a coloured bar for its length: person, vehicle, animal or
+  motion (and other types when there are any). Chips under the timeline show
+  the day's count of each kind and switch it on or off; the choice is
+  remembered.
+- In the 4-camera playback view, the per-camera lanes under the timeline were
+  cut off. They show again, each with its own camera's detection markers.
 - A standalone camera listed above an NVR could have the NVR's header drawn
   over its row ([#7], fixed by [#16] from greenfanDev), and a standalone
   camera could stay classified as an NVR ([#8], by iibaranov-IG).
@@ -120,6 +130,7 @@ atripathy86, aalap, greenfanDev, MathiasDeWeerdt and 815rx1.
 [#28]: https://github.com/TodesengelX/reolink-native-linux/pull/28
 [#29]: https://github.com/TodesengelX/reolink-native-linux/pull/29
 [#30]: https://github.com/TodesengelX/reolink-native-linux/pull/30
+[#31]: https://github.com/TodesengelX/reolink-native-linux/issues/31
 [#32]: https://github.com/TodesengelX/reolink-native-linux/pull/32
 [#34]: https://github.com/TodesengelX/reolink-native-linux/pull/34
 [#35]: https://github.com/TodesengelX/reolink-native-linux/pull/35

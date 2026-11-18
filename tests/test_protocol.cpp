@@ -118,6 +118,50 @@ private slots:
                  parsed.segments.first().start);
     }
 
+    void baichuanAlarmSearchParsesClipsAndKinds()
+    {
+        // Shape of an RLN8-410's cmd 273 reply (trimmed): one clip per detection.
+        const auto page = rl::bcrecording::parseAlarmPage(
+            R"(<?xml version="1.0" encoding="UTF-8" ?><body><alarmVideoInfo version="1.1">
+               <channelId>6</channelId><fileHandle>5</fileHandle><bFinished>0</bFinished><alarmVideoList>
+               <alarmVideo><fileName>0720261117055957</fileName><bHasRecFile>1</bHasRecFile>
+                 <alarmType>vehicle</alarmType><fileId></fileId>
+                 <startTime><year>2026</year><month>11</month><day>17</day><hour>6</hour><minute>25</minute><second>21</second></startTime>
+                 <endTime><year>2026</year><month>11</month><day>17</day><hour>6</hour><minute>25</minute><second>38</second></endTime></alarmVideo>
+               <alarmVideo><alarmType>md, people, dog_cat, other, visitor</alarmType>
+                 <startTime><year>2026</year><month>11</month><day>17</day><hour>7</hour><minute>9</minute><second>50</second></startTime>
+                 <endTime><year>2026</year><month>11</month><day>17</day><hour>7</hour><minute>10</minute><second>2</second></endTime></alarmVideo>
+               <alarmVideo><alarmType>md</alarmType></alarmVideo>
+               </alarmVideoList></alarmVideoInfo></body>)");
+        QVERIFY(page.ok);
+        QVERIFY(!page.finished);
+        QCOMPARE(page.clips.size(), 2); // the one without a time is dropped
+        QCOMPARE(page.clips[0].start, QDateTime(QDate(2026, 11, 17), QTime(6, 25, 21)));
+        QCOMPARE(page.clips[0].end, QDateTime(QDate(2026, 11, 17), QTime(6, 25, 38)));
+        QCOMPARE(page.clips[0].kinds, QStringList{QStringLiteral("vehicle")});
+        // md and other both read as motion, listed once; visitor is "other".
+        QCOMPARE(page.clips[1].kinds, (QStringList{QStringLiteral("motion"), QStringLiteral("person"),
+                                                   QStringLiteral("animal"), QStringLiteral("other")}));
+
+        QVERIFY(rl::bcrecording::parseAlarmPage(
+                    "<body><alarmVideoInfo><bFinished>1</bFinished></alarmVideoInfo></body>").finished);
+        // No info element: nothing (more) to page through.
+        const auto none = rl::bcrecording::parseAlarmPage("<body><findAlarmVideo/></body>");
+        QVERIFY(none.ok);
+        QVERIFY(none.finished);
+        QVERIFY(!rl::bcrecording::parseAlarmPage({}).ok);
+
+        QCOMPARE(rl::bcrecording::alarmSearchHandle(
+                     "<body><findAlarmVideo><channelId>6</channelId><fileHandle>5</fileHandle></findAlarmVideo></body>"),
+                 QByteArray("5"));
+        QVERIFY(rl::bcrecording::alarmSearchHandle("<body/>").isEmpty());
+        const QByteArray open = rl::bcrecording::alarmSearchOpenXml(6, "9527000N0H8M1J58", QDate(2026, 11, 17));
+        QVERIFY(open.contains("<uid>9527000N0H8M1J58</uid>"));
+        QVERIFY(open.contains("<channelId>6</channelId>"));
+        QVERIFY(open.contains("<startTime>\n<year>2026</year>\n<month>11</month>\n<day>17</day>\n<hour>0</hour>"));
+        QVERIFY(open.contains("<hour>23</hour>\n<minute>59</minute>\n<second>59</second>\n</endTime>"));
+    }
+
     void baichuanRecordingSearchToleratesEmptyAndMalformed()
     {
         QVERIFY(!rl::bcrecording::parseSearch({}).ok);

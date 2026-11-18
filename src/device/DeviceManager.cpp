@@ -1700,6 +1700,83 @@ void DeviceManager::searchRecordings(int row, int year, int month, int day)
     }));
 }
 
+void DeviceManager::searchAlarmEvents(int row, int year, int month, int day)
+{
+    const QDate date(year, month, day);
+    if (row < 0 || row >= m_entries.size() || !date.isValid())
+        return;
+    const Entry &e = m_entries.at(row);
+    if (e.rec.kind == QLatin1String("stream") || !e.primed) {
+        emit alarmEventsFailed(row, year, month, day, tr("device not ready"));
+        return;
+    }
+    BaichuanControl::Params params{e.rec.addr, 9000, e.rec.username, e.password};
+    const int ch = e.channel;
+    // An NVR channel's camera UID ("<uid>_<n>" on dual-lens cameras: the
+    // search wants the base). Baichuan-only hosts may not have one stored yet;
+    // the worker asks the device (cmd 114) then.
+    const QByteArray knownUid = e.uid.section(QLatin1Char('_'), 0, 0).toUtf8();
+    m_pending.addFuture(QtConcurrent::run([this, row, ch, date, year, month, day, params, knownUid] {
+        QVariantList events;
+        QString error;
+        BaichuanControl bc(params);
+        if (!bc.open()) {
+            error = tr("couldn't open a Baichuan session");
+        } else {
+            QByteArray uid = knownUid;
+            if (uid.isEmpty()) {
+                const QByteArray x = bc.get(114, -1);
+                const int s = x.indexOf("<uid>"), t = x.indexOf("</uid>", s);
+                if (s >= 0 && t > s)
+                    uid = x.mid(s + 5, t - s - 5).trimmed();
+            }
+            quint16 status = 0;
+            const QByteArray handle = bcrecording::alarmSearchHandle(
+                bc.transact(272, ch, bcrecording::alarmSearchOpenXml(ch, uid, date), &status));
+            if (handle.isEmpty()) {
+                error = tr("the device refused the event search (status %1)").arg(status);
+            } else {
+                const QByteArray fetch = bcrecording::alarmSearchFetchXml(ch, handle);
+                const QDateTime dayStart(date, QTime(0, 0));
+                // ~60 clips a page; 50 pages is far beyond any real day.
+                for (int page = 0; page < 50; ++page) {
+                    const bcrecording::AlarmPage p = bcrecording::parseAlarmPage(bc.transact(273, ch, fetch, &status));
+                    if (!p.ok) {
+                        // Keep what earlier pages gave; only an empty result is a failure.
+                        if (events.isEmpty())
+                            error = p.error;
+                        else
+                            qCWarning(lcProto) << "Event search page" << page << "unreadable:" << p.error;
+                        break;
+                    }
+                    for (const bcrecording::AlarmClip &c : p.clips) {
+                        const qint64 a = qBound(qint64(0), dayStart.secsTo(c.start), qint64(86400));
+                        const qint64 b = qBound(a, dayStart.secsTo(c.end), qint64(86400));
+                        events.append(QVariantMap{{QStringLiteral("start"), double(a)},
+                                                  {QStringLiteral("end"), double(b)},
+                                                  {QStringLiteral("kinds"), c.kinds}});
+                    }
+                    if (p.finished || p.clips.isEmpty())
+                        break;
+                }
+                bc.transact(274, ch, fetch, &status); // release the device's search handle
+            }
+            bc.close();
+        }
+        if (!error.isEmpty())
+            qCWarning(lcProto) << "Event search failed for row" << row << date << ":" << error;
+        QMetaObject::invokeMethod(
+            this,
+            [this, row, year, month, day, events, error] {
+                if (error.isEmpty())
+                    emit alarmEventsFound(row, year, month, day, events);
+                else
+                    emit alarmEventsFailed(row, year, month, day, error);
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
 QSize DeviceManager::declaredSize(int row, bool mainStream) const
 {
     if (row < 0 || row >= m_entries.size())

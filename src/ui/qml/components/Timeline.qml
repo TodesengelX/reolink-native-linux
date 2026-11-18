@@ -18,7 +18,9 @@ Rectangle {
     readonly property real laneHeight: 7
     readonly property real lanesHeight:
         lanes.length > 0 ? lanes.length * (laneHeight + 3) + 5 : 0
-    height: trackHeight + lanesHeight
+    // Implicit, not height: the page's ColumnLayout sizes by implicit height,
+    // and with a plain height the lanes were laid out but clipped away.
+    implicitHeight: trackHeight + lanesHeight
     color: Theme.surface
     border.color: Theme.border
     radius: Theme.radius
@@ -86,20 +88,38 @@ Rectangle {
     readonly property var hoverSegment: hover.hovered
         ? segmentNear(secForX(hover.point.position.x), snapPx / width * visibleSpan) : null
 
-    // Detection-event markers: accent ticks where the inbox saw motion/AI on
-    // this camera, so incidents are findable at a glance.
-    property var alarmTicks: []
+    // Detection markers: one bar per detection, spanning it, coloured by kind,
+    // in a strip above the recordings. events: [{ start, end, kinds: [...] }]
+    // (seconds into the day); shownKinds switches kinds off without refetching.
+    property var events: []
+    property var shownKinds: ({ person: true, vehicle: true, animal: true, motion: true, other: true })
+    // Same colours as the Events page.
+    readonly property var kindColors: ({ person: Theme.accent, vehicle: "#e08a3c", animal: Theme.online,
+                                         motion: Theme.textMuted, other: "#b07fd6" })
+    // A detection that is both motion and a person reads as a person.
+    readonly property var kindOrder: ["person", "vehicle", "animal", "other", "motion"]
+    function shownKind(kinds) {
+        for (var i = 0; i < kindOrder.length; i++)
+            if (shownKinds[kindOrder[i]] && kinds.indexOf(kindOrder[i]) >= 0)
+                return kindOrder[i];
+        return "";
+    }
+    component Marker: Rectangle {
+        required property var modelData
+        readonly property string kind: root.shownKind(modelData.kinds || [])
+        readonly property real x0: root.xForSec(modelData.start)
+        x: x0 - 1
+        width: Math.max(3, root.xForSec(modelData.end) - x0)
+        visible: kind !== "" && x + width >= 0 && x <= root.width
+        color: kind !== "" ? root.kindColors[kind] : "transparent"
+    }
     Repeater {
-        model: root.alarmTicks
-        Rectangle {
-            required property var modelData
-            x: root.xForSec(modelData) - 1
-            visible: x >= -1 && x <= root.width
-            y: 0
-            width: 2
-            height: root.trackHeight * 0.35
-            color: Theme.danger
-            opacity: 0.9
+        model: root.events
+        Marker {
+            y: 2
+            height: 10
+            radius: 1.5
+            opacity: 0.95
         }
     }
 
@@ -203,6 +223,11 @@ Rectangle {
                         color: modelData.type === "alarm" ? Theme.accent : "#4a5a68"
                         opacity: 0.9
                     }
+                }
+                // This camera's detections over its footage.
+                Repeater {
+                    model: laneItem.modelData.events || []
+                    Marker { height: laneItem.height }
                 }
                 ToolTip {
                     visible: laneHover.hovered

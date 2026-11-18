@@ -379,8 +379,10 @@ void EventManager::onThumbnailReady(qint64 eventId, const QString &path)
     removeThumbnail(path);
 }
 
-QVariantList EventManager::eventTimesFor(qint64 hostId, int channel, qint64 dayStart) const
+QVariantList EventManager::eventMarkersFor(qint64 hostId, int channel, qint64 dayStart) const
 {
+    // Same shape as DeviceManager::alarmEventsFound, so the timeline can fall
+    // back to what the inbox caught when the device can't be searched.
     QVariantList out;
     const qint64 dayEnd = dayStart + 86400;
     for (const EventRecord &e : m_all) {
@@ -390,7 +392,19 @@ QVariantList EventManager::eventTimesFor(qint64 hostId, int channel, qint64 dayS
             continue;
         if (e.type == QLatin1String("offline") || e.type == QLatin1String("online"))
             continue; // connectivity events aren't recordings
-        out.append(int(e.timestamp - dayStart));
+        QString kind = QStringLiteral("other");
+        if (e.type == QLatin1String("person") || e.type == QLatin1String("face"))
+            kind = QStringLiteral("person");
+        else if (e.type == QLatin1String("vehicle"))
+            kind = QStringLiteral("vehicle");
+        else if (e.type == QLatin1String("pet"))
+            kind = QStringLiteral("animal");
+        else if (e.type == QLatin1String("motion"))
+            kind = QStringLiteral("motion");
+        const double t = double(e.timestamp - dayStart);
+        out.append(QVariantMap{{QStringLiteral("start"), t},
+                               {QStringLiteral("end"), t},
+                               {QStringLiteral("kinds"), QStringList{kind}}});
     }
     return out;
 }

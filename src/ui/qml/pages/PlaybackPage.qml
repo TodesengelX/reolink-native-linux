@@ -44,7 +44,10 @@ Item {
     // Some camera firmware closes /flv when HTTPS is enabled. After the first
     // FLV failure the page uses the native Baichuan sub stream for playback.
     property bool useBaichuan: false
-    onDeviceRowChanged: useBaichuan = false // that was the previous camera's firmware
+    onDeviceRowChanged: {
+        useBaichuan = false; // that was the previous camera's firmware
+        dayEvents = [];      // and those were its detections
+    }
     // Not for NVR channels; see PlaybackPane.flvFallbackAllowed().
     function flvFallbackAllowed() {
         var c = Devices.cameraInfo(page.deviceRow);
@@ -60,6 +63,66 @@ Item {
     property int paneCount: 1
     property var gridRows: [-1, -1, -1, -1]   // pane -> device row
     property var gridSegs: ({})               // device row -> that day's segments
+    // Detection markers [{ start, end, kinds }]: the device's own list for the
+    // day (Baichuan event search), or what the inbox caught until it answers.
+    property var dayEvents: []                // single pane
+    property var gridEvents: ({})             // device row -> its markers (grid)
+    property var gridEventsUnion: []          // every grid camera's, for the main track
+    readonly property var shownEvents: paneCount === 4 ? gridEventsUnion : dayEvents
+    readonly property var markerKinds: [
+        { key: "person", label: qsTr("Person") }, { key: "vehicle", label: qsTr("Vehicle") },
+        { key: "animal", label: qsTr("Animal") }, { key: "motion", label: qsTr("Motion") },
+        { key: "other", label: qsTr("Other") }]
+    readonly property var shownKinds: {
+        var hidden = pbStore.hiddenKinds.split(","), out = {};
+        for (var i = 0; i < markerKinds.length; i++)
+            out[markerKinds[i].key] = hidden.indexOf(markerKinds[i].key) < 0;
+        return out;
+    }
+    readonly property var kindCounts: {
+        var c = { person: 0, vehicle: 0, animal: 0, motion: 0, other: 0 };
+        for (var i = 0; i < shownEvents.length; i++) {
+            var k = shownEvents[i].kinds || [];
+            for (var j = 0; j < k.length; j++)
+                if (c[k[j]] !== undefined) c[k[j]]++;
+        }
+        return c;
+    }
+    function toggleKind(key) {
+        var hidden = pbStore.hiddenKinds ? pbStore.hiddenKinds.split(",") : [];
+        var i = hidden.indexOf(key);
+        if (i >= 0) hidden.splice(i, 1); else hidden.push(key);
+        pbStore.hiddenKinds = hidden.join(",");
+    }
+    function inboxMarkers(row) {
+        var info = Devices.cameraInfo(row);
+        if (!info || info.hostId === undefined)
+            return [];
+        var dayStart = new Date(page.selYear, page.selMonth - 1, page.selDay).getTime() / 1000;
+        return Events.eventMarkersFor(info.hostId, info.channel, dayStart);
+    }
+    // One event search at a time: they're Baichuan sessions on the same device,
+    // which also serves the playback streams.
+    property var _eventQueue: []
+    property int _eventSearching: -1
+    function searchEvents(row) {
+        if (row < 0 || row === _eventSearching || _eventQueue.indexOf(row) >= 0)
+            return;
+        _eventQueue = _eventQueue.concat([row]);
+        _nextEventSearch();
+    }
+    function _nextEventSearch() {
+        if (_eventSearching >= 0 || _eventQueue.length === 0)
+            return;
+        _eventSearching = _eventQueue[0];
+        _eventQueue = _eventQueue.slice(1);
+        Devices.searchAlarmEvents(_eventSearching, page.selYear, page.selMonth, page.selDay);
+    }
+    function _eventSearchDone(row) {
+        if (row === _eventSearching)
+            _eventSearching = -1;
+        _nextEventSearch();
+    }
     property int streamingPanes: 0            // recount kept by the panes
     // Double-clicked pane, expanded OVER the grid rather than instead of it —
     // the covered panes keep playing, so restoring reconnects nothing and the
@@ -71,6 +134,8 @@ Item {
         id: pbStore
         category: "playback"
         property string gridArrangement: ""
+        // Detection kinds hidden on the timeline, comma-separated ("" = all shown).
+        property string hiddenKinds: ""
         // Remember SD/HD across restarts: event jumps and Play use it.
         property alias hdMode: page.hdMode
     }
@@ -99,18 +164,22 @@ Item {
     function recomputeGrid() {
         var lanes = [];
         var union = [];
+        var eventUnion = [];
         for (var i = 0; i < 4; i++) {
             var r = page.gridRows[i];
             if (r === undefined || r < 0)
                 continue;
             var segs = page.gridSegs[r] || [];
             var info = Devices.cameraInfo(r);
+            var evs = page.gridEvents[r] || [];
             lanes.push({ name: info && info.name ? info.name : qsTr("Camera %1").arg(i + 1),
-                         segments: segs });
+                         segments: segs, events: evs });
             union = union.concat(segs);
+            eventUnion = eventUnion.concat(evs);
         }
         timeline.lanes = lanes;
         timeline.segments = union;
+        page.gridEventsUnion = eventUnion;
         statusText.text = qsTr("Synced playback — %n camera(s)", "", lanes.length);
     }
 
@@ -237,6 +306,7 @@ Item {
             page.paneCount = 1;
             timeline.lanes = [];
             timeline.segments = [];
+            page.gridEvents = ({});
             page.refresh();
         }
     }
@@ -503,6 +573,12 @@ Item {
                 var s = Object.assign({}, page.gridSegs);
                 s[row] = segments;
                 page.gridSegs = s;   // wholesale reassign so pane bindings re-evaluate
+                if (page.gridEvents[row] === undefined) {
+                    var g = Object.assign({}, page.gridEvents);
+                    g[row] = page.inboxMarkers(row);
+                    page.gridEvents = g;
+                    page.searchEvents(row);
+                }
                 page.recomputeGrid();
                 // If this camera just joined mid-playback, start it (alone) at
                 // the watched moment — the other panes never stopped.
@@ -512,12 +588,10 @@ Item {
             if (row === page.deviceRow) {
                 timeline.segments = segments;
                 statusText.text = segments.length + qsTr(" recordings");
-                // Overlay this day's detection events as timeline markers.
-                var info = Devices.cameraInfo(page.deviceRow);
-                if (info && info.hostId !== undefined) {
-                    var dayStart = new Date(page.selYear, page.selMonth - 1, page.selDay).getTime() / 1000;
-                    timeline.alarmTicks = Events.eventTimesFor(info.hostId, info.channel, dayStart);
-                }
+                // Detection markers: the inbox's at once, the device's full list
+                // when its event search answers.
+                page.dayEvents = page.inboxMarkers(row);
+                page.searchEvents(row);
                 // Event jump: play the requested moment now that recordings loaded.
                 if (page._pendingPlayEpoch > 0) {
                     var ep = page._pendingPlayEpoch;
@@ -565,6 +639,26 @@ Item {
             var calRow = page.paneCount === 4 ? page.gridRows[0] : page.deviceRow;
             if (row === calRow && year === page.selYear && month === page.selMonth)
                 page.recordingDays = days;
+        }
+        function onAlarmEventsFound(row, year, month, day, events) {
+            page._eventSearchDone(row);
+            if (year !== page.selYear || month !== page.selMonth || day !== page.selDay)
+                return; // an answer for a day no longer shown
+            if (page.paneCount === 4) {
+                if (page.gridRows.indexOf(row) < 0)
+                    return;
+                var g = Object.assign({}, page.gridEvents);
+                g[row] = events;
+                page.gridEvents = g;
+                page.recomputeGrid();
+            } else if (row === page.deviceRow) {
+                page.dayEvents = events;
+            }
+        }
+        function onAlarmEventsFailed(row, year, month, day, error) {
+            page._eventSearchDone(row);
+            // The inbox's markers stay up; they're the best available.
+            console.warn("Playback: event search failed for row", row, "-", error);
         }
         function onRecordingsFailed(row, error) {
             if (page.paneCount === 4) {
@@ -1005,6 +1099,8 @@ Item {
                 id: timeline
                 Layout.fillWidth: true
                 position: page.playheadSecs
+                events: page.shownEvents
+                shownKinds: page.shownKinds
                 onSeek: (seconds) => page.playheadSecs = seconds  // move playhead only
                 onCommit: (seconds) => page.playAt(seconds)       // start playback on release
             }
@@ -1096,6 +1192,67 @@ Item {
                     }
                 }
                 Item { Layout.fillWidth: true }
+                // Detection filter: which kinds of marker the timeline shows, with
+                // the day's count of each. "Other" (doorbell, package, line
+                // crossing…) only appears when there is some.
+                Row {
+                    spacing: 4
+                    Repeater {
+                        model: page.markerKinds
+                        delegate: Rectangle {
+                            id: kindChip
+                            required property var modelData
+                            readonly property bool on: page.shownKinds[modelData.key] === true
+                            readonly property int count: page.kindCounts[modelData.key] || 0
+                            visible: modelData.key !== "other" || count > 0
+                            width: chipRow.implicitWidth + 20
+                            height: 30
+                            radius: 15
+                            color: on ? (chipHover.hovered ? Theme.border : Theme.surfaceAlt)
+                                      : (chipHover.hovered ? Theme.surfaceAlt : "transparent")
+                            border.color: on ? timeline.kindColors[modelData.key] : Theme.border
+                            opacity: on ? 1 : 0.6
+                            Row {
+                                id: chipRow
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Rectangle {
+                                    width: 8; height: 8; radius: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: kindChip.on ? timeline.kindColors[kindChip.modelData.key] : "transparent"
+                                    border.color: timeline.kindColors[kindChip.modelData.key]
+                                }
+                                Text {
+                                    text: kindChip.modelData.label
+                                    color: kindChip.on ? Theme.text : Theme.textMuted
+                                    font.pixelSize: 12
+                                    font.strikeout: !kindChip.on
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    text: kindChip.count
+                                    color: Theme.textMuted
+                                    font.pixelSize: 11
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+                            HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
+                            TapHandler { onTapped: page.toggleKind(kindChip.modelData.key) }
+                            ToolTip {
+                                visible: chipHover.hovered
+                                delay: 500
+                                x: (parent.width - width) / 2
+                                y: -height - 8
+                                contentItem: Text {
+                                    text: kindChip.on ? qsTr("Hide markers: %1").arg(kindChip.modelData.label)
+                                                      : qsTr("Show markers: %1").arg(kindChip.modelData.label)
+                                    color: Theme.text; font.pixelSize: 11
+                                }
+                                background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: 4 }
+                            }
+                        }
+                    }
+                }
                 // Quality toggle: SD = light sub-stream (FLV) scrubbing; HD = full-res
                 // main stream over native Baichuan. Grid mode is forced to the sub
                 // stream (as in the official client): the device budget allows only
@@ -1159,6 +1316,8 @@ Item {
                     // would make assignGridPane skip the search for a camera
                     // re-entering the grid and play the wrong day.
                     page.gridSegs = ({});
+                    page.gridEvents = ({});
+                    page.dayEvents = [];
                     page.refresh();
                 }
             }
