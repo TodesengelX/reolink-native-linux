@@ -11,7 +11,9 @@ permissions:
 
 jobs:
   appimage:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the AppImage needs a glibc old enough for the
+    # distros it runs on, and Qt 6.7 (below) doesn't link with 26.04's GCC 15.
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4

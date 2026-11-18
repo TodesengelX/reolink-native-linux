@@ -22,7 +22,10 @@ concurrency:
 jobs:
   tests:
     name: build + tests (Ubuntu, pinned Qt)
-    runs-on: ubuntu-latest
+    # Pinned with the Qt below: Qt 6.7's headers don't link with GCC 15
+    # (duplicate QtPrivate::IsFloatType_v<_Float16>), and ubuntu-latest moved
+    # to 26.04 / GCC 15 in Nov 2026. 24.04 ships GCC 13, the last green setup.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install Qt 6
