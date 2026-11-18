@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="docs/screenshots/live.jpg"><img src="docs/screenshots/live.jpg" alt="Live view: four cameras from an RLN8-410 NVR" width="100%"></a>
+  <a href=".github/assets/live.jpg"><img src=".github/assets/live.jpg" alt="Live view: four cameras from an RLN8-410 NVR" width="100%"></a>
 </p>
 
 A fully **native Linux desktop client** for Reolink cameras and NVRs — built to work like the official Reolink Client (Windows/macOS/Android): the 1/4/6/9/12/16 live grid, synced multi-camera playback on one timeline, double-click maximize, fullscreen, PTZ, and a full device-settings surface.
@@ -32,16 +32,16 @@ Grab the [latest release](../../releases/latest), and see the [changelog](CHANGE
 
 <table>
   <tr>
-    <td width="50%"><a href="docs/screenshots/ptz.jpg"><img src="docs/screenshots/ptz.jpg" alt="PTZ panel with 3D positioning on a 360° camera"></a></td>
-    <td width="50%"><a href="docs/screenshots/playback.jpg"><img src="docs/screenshots/playback.jpg" alt="Playback in HD with detection markers on the timeline"></a></td>
+    <td width="50%"><a href=".github/assets/ptz.jpg"><img src=".github/assets/ptz.jpg" alt="PTZ panel with 3D positioning on a 360° camera"></a></td>
+    <td width="50%"><a href=".github/assets/playback.jpg"><img src=".github/assets/playback.jpg" alt="Playback in HD with detection markers on the timeline"></a></td>
   </tr>
   <tr>
     <td align="center"><b>PTZ</b>: 3D positioning, pad or joystick, zoom and focus, presets, tracking</td>
     <td align="center"><b>Playback</b>: detection markers from the NVR, filtered by type</td>
   </tr>
   <tr>
-    <td width="50%"><a href="docs/screenshots/playback-sync.jpg"><img src="docs/screenshots/playback-sync.jpg" alt="Synced playback of four cameras on one timeline"></a></td>
-    <td width="50%"><a href="docs/screenshots/events.jpg"><img src="docs/screenshots/events.jpg" alt="Events inbox with snapshots and filters"></a></td>
+    <td width="50%"><a href=".github/assets/playback-sync.jpg"><img src=".github/assets/playback-sync.jpg" alt="Synced playback of four cameras on one timeline"></a></td>
+    <td width="50%"><a href=".github/assets/events.jpg"><img src=".github/assets/events.jpg" alt="Events inbox with snapshots and filters"></a></td>
   </tr>
   <tr>
     <td align="center"><b>Synced playback</b>: four cameras on one timeline, a lane each</td>
@@ -113,8 +113,6 @@ Requires Qt 6.5+ (base / declarative / multimedia / shadertools / tools), FFmpeg
 ## Documentation
 
 - **[CHANGELOG.md](CHANGELOG.md)** — what changed in each release.
-- **[docs/DESIGN.md](docs/DESIGN.md)** — the definitive design document (goals, stack, architecture, protocols, media pipeline, UI inventory, data model, packaging, roadmap, risks).
-- [docs/research/](docs/research/) — the research dossiers behind the design (official-client UI, protocols, video pipeline, GUI stack, prior art, fact-checks).
 
 ## Licensing
 

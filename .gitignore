@@ -11,3 +11,7 @@ AppDir/
 *.flatpak
 build-flatpak/
 .flatpak-builder/
+
+# Kept locally, not published: design notes, research and dev tools
+docs/
+tools/
