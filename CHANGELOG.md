@@ -8,16 +8,122 @@ While the project is pre-1.0, minor versions may still change behaviour.
 
 ## [Unreleased]
 
+A large release: twenty-four community pull requests, a full PTZ panel, and
+audio. Thanks to everyone who sent code: gsoros, thelabcorner, iibaranov-IG,
+atripathy86, aalap, greenfanDev, MathiasDeWeerdt and 815rx1.
+
+### Added
+
+- **PTZ panel.** Open it from a PTZ camera's toolbar (⇅). Everything in it is
+  read back from the camera and shown only when the camera supports it.
+  - **Pad or joystick.** A round eight-way pad (hold to move) or a joystick
+    where a small push moves slowly and a full push moves at the chosen
+    maximum. Switch between them in the pad's corner; the choice and the
+    speed are remembered.
+  - **3D positioning**, like the phone app: click the video to centre that
+    spot, drag a box to zoom into it, double-click to zoom in, scroll to zoom.
+    Works through an NVR.
+  - **Zoom and focus** sliders with the lens's real position, hold-to-move
+    buttons, and an **Auto focus** button.
+  - **Presets** as picture cards: save the current view with a snapshot, go
+    to one, delete one.
+  - **Patrol** start/stop; **Home position**: return to it, set it to the
+    current view, and choose whether (and after how long) the camera returns
+    there when idle; **AI auto-tracking**: on/off, which targets to follow,
+    and how soon to return home once the target stops.
+  - Keyboard on a maximized PTZ camera: arrows pan and tilt, `+`/`−` zoom,
+    `[`/`]` focus, `Esc` leaves 3D mode.
+- **Audio.** Live audio with a speaker toggle on each pane ([#20]), and
+  recorded audio in playback, over Baichuan too ([#24]). By greenfanDev.
+- **Baichuan-only cameras** (no HTTP or RTSP, such as some Lumus and E1
+  models) can be discovered, added and watched live over TCP 9000 ([#6]).
+  By gsoros, who also made recorded playback on such firmware work.
+- **Spotlight and floodlight control**, shown only on cameras that really have
+  a light, with brightness in Device Settings → Light ([#10]). By thelabcorner.
+- **12-pane live layout** ([#13]), and the chosen layout is remembered
+  ([#12]). By atripathy86.
+- **Event inbox tidying**: repeated events from one camera merge into one,
+  plain motion events can be hidden, and events older than 7 days are
+  deleted ([#26]). A setting turns off event pop-ups ([#21]). Events show
+  their real time instead of "just now" ([#29]), and opening one plays it in
+  your chosen quality or shows its snapshot when nothing was recorded ([#28]).
+  By greenfanDev.
+- Opening an event zooms the playback timeline to a 5-minute window with the
+  event's marker centred; the time ticks follow the zoom level.
+- Timeline clicks snap to a nearby recording instead of landing in a gap
+  ([#25]). By greenfanDev.
+- The sidebar shows each device's IP address ([#19]). By greenfanDev.
+- **Add all discovered devices** at once with one set of credentials ([#36]).
+  By 815rx1.
+- SD/HD is remembered per camera ([#35]). By 815rx1.
+- **German translation**; the app follows the system language ([#34]).
+  By 815rx1.
+
+### Changed
+
+- **Flatpak: streams decode on every system.** It now bundles its own LGPL
+  FFmpeg 7.1.5 (with VA-API) on the KDE 6.11 runtime instead of relying on
+  Cisco's separately downloaded openh264, whose absence left every stream
+  blank ([#5]). The error now names the decoder that failed (from [#32], by
+  815rx1).
+- Video stops streaming while the window is hidden in the tray, and resumes
+  when it's shown ([#23]). By greenfanDev.
+- A live pane's SD stream switches to Baichuan only when the camera's RTSP is
+  actually turned off ([#35]), not after any temporary RTSP error.
+
 ### Fixed
 
+- A standalone camera listed above an NVR could have the NVR's header drawn
+  over its row ([#7], fixed by [#16] from greenfanDev), and a standalone
+  camera could stay classified as an NVR ([#8], by iibaranov-IG).
+- Live streams stayed stopped after a reconnect, and a stalled decoder wasn't
+  recovered ([#14]). By atripathy86 and aalap.
+- The Baichuan connection spun at 100% CPU after a device dropped off
+  ([#15]). By greenfanDev.
+- Older firmware with 1024-bit TLS keys couldn't be added ([#17]). By
+  greenfanDev.
+- The Add Device scan list left out some discovered devices ([#18]).
+  By greenfanDev.
+- Streams now send RTSP TEARDOWN when they stop, and the app quits cleanly
+  ([#22]). By greenfanDev.
 - The sidebar keeps its intended width when the window is maximized or the
   layout is tight. Camera rows now grow with the system font instead of
-  overlapping, and a section header that is not an NVR can no longer paint over
-  the first camera row.
-- Playback falls back to the native Baichuan sub stream when the device's HTTPS
-  `/flv` endpoint is unavailable, instead of retrying FLV forever on
-  “Connecting…”. This covers cameras whose firmware closes the TLS connection
-  on `/flv` and redirects plain HTTP back to HTTPS.
+  overlapping ([#30], by MathiasDeWeerdt).
+- Playback on a standalone camera falls back to the native Baichuan sub
+  stream when the camera's HTTPS `/flv` endpoint is unavailable, instead of
+  retrying FLV forever on "Connecting…" ([#30], by MathiasDeWeerdt).
+- A device that refuses a Baichuan stream request no longer leaves the player
+  on "Connecting" forever; the player reports the error and falls back.
+- Event cleanup only ever deletes thumbnails inside the app's own thumbnails
+  folder, even when the database came from another install.
+
+[#5]: https://github.com/TodesengelX/reolink-native-linux/issues/5
+[#6]: https://github.com/TodesengelX/reolink-native-linux/pull/6
+[#7]: https://github.com/TodesengelX/reolink-native-linux/issues/7
+[#8]: https://github.com/TodesengelX/reolink-native-linux/pull/8
+[#10]: https://github.com/TodesengelX/reolink-native-linux/pull/10
+[#12]: https://github.com/TodesengelX/reolink-native-linux/pull/12
+[#13]: https://github.com/TodesengelX/reolink-native-linux/pull/13
+[#14]: https://github.com/TodesengelX/reolink-native-linux/pull/14
+[#15]: https://github.com/TodesengelX/reolink-native-linux/pull/15
+[#16]: https://github.com/TodesengelX/reolink-native-linux/pull/16
+[#17]: https://github.com/TodesengelX/reolink-native-linux/pull/17
+[#18]: https://github.com/TodesengelX/reolink-native-linux/pull/18
+[#19]: https://github.com/TodesengelX/reolink-native-linux/pull/19
+[#20]: https://github.com/TodesengelX/reolink-native-linux/pull/20
+[#21]: https://github.com/TodesengelX/reolink-native-linux/pull/21
+[#22]: https://github.com/TodesengelX/reolink-native-linux/pull/22
+[#23]: https://github.com/TodesengelX/reolink-native-linux/pull/23
+[#24]: https://github.com/TodesengelX/reolink-native-linux/pull/24
+[#25]: https://github.com/TodesengelX/reolink-native-linux/pull/25
+[#26]: https://github.com/TodesengelX/reolink-native-linux/pull/26
+[#28]: https://github.com/TodesengelX/reolink-native-linux/pull/28
+[#29]: https://github.com/TodesengelX/reolink-native-linux/pull/29
+[#30]: https://github.com/TodesengelX/reolink-native-linux/pull/30
+[#32]: https://github.com/TodesengelX/reolink-native-linux/pull/32
+[#34]: https://github.com/TodesengelX/reolink-native-linux/pull/34
+[#35]: https://github.com/TodesengelX/reolink-native-linux/pull/35
+[#36]: https://github.com/TodesengelX/reolink-native-linux/pull/36
 
 ## [0.1.8] — 2026-08-12
 

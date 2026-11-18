@@ -8,18 +8,19 @@
   <description>
     <p>
       A fully native Linux desktop client for Reolink cameras and NVRs — a 1:1
-      replica of the official Reolink Client. Live grid (1/4/9/16) with
-      hardware-accelerated H.264/H.265 decode, double-click maximize and
-      fullscreen, PTZ, snapshots, manual recording, a color-coded playback
-      timeline, an events inbox, and the full device-settings surface.
+      replica of the official Reolink Client. Live grid (1/4/6/9/12/16) with
+      hardware-accelerated H.264/H.265 decode and audio, double-click maximize
+      and fullscreen, a PTZ panel with 3D positioning, snapshots, manual
+      recording, a color-coded playback timeline, an events inbox, and the
+      full device-settings surface.
     </p>
     <p>Not affiliated with or endorsed by Reolink.</p>
   </description>
   <launchable type="desktop-id">io.github.todesengelx.ReolinkLinux.desktop</launchable>
-  <url type="homepage">https://github.com/TodesengelX/reolink-client-linux</url>
-  <url type="bugtracker">https://github.com/TodesengelX/reolink-client-linux/issues</url>
+  <url type="homepage">https://github.com/TodesengelX/reolink-native-linux</url>
+  <url type="bugtracker">https://github.com/TodesengelX/reolink-native-linux/issues</url>
   <developer id="io.github.todesengelx">
-    <name>reolink-client-linux contributors</name>
+    <name>reolink-native-linux contributors</name>
   </developer>
   <content_rating type="oars-1.1"/>
   <categories>
