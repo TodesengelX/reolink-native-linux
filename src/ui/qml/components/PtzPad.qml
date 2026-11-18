@@ -1,94 +1,116 @@
 import QtQuick
+import QtQuick.Controls
 import ReolinkApp
 import ReolinkApp.Core
 
-// PTZ joystick: 8-way directional pad (press-and-hold to move, release to Stop)
-// plus optional zoom rocker. Sends PtzCtrl via the Devices model.
-Rectangle {
+// Round PTZ pad: eight directions around a centre button. Press and hold to
+// move at `speed`; release stops. The centre returns the camera to its home
+// position when it has one (showHome).
+Item {
     id: pad
     property int deviceRow: -1
-    property bool showZoom: true
     property int speed: 32 // PtzCtrl speed, 1..64
-
-    width: 120
-    height: showZoom ? 168 : 120
-    radius: Theme.radius
-    color: "#e60d141b"
-    border.color: Theme.border
-
+    property bool showHome: false
     signal moved()
-    function move(op) { if (deviceRow >= 0) { Devices.ptzMove(deviceRow, op, speed); moved(); } }
+    signal homeRequested()
+
+    implicitWidth: 156
+    implicitHeight: 156
+
+    function move(op) {
+        if (deviceRow < 0)
+            return;
+        Devices.ptzMove(deviceRow, op, speed);
+        moved();
+    }
     function stop() { if (deviceRow >= 0) Devices.ptzStop(deviceRow); }
 
-    Column {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
-        anchors.topMargin: 6
-        spacing: 6
+    Rectangle {
+        anchors.fill: parent
+        radius: width / 2
+        color: Theme.surfaceAlt
+        border.color: Theme.border
+    }
 
-        // Directional ring
-        Item {
-            width: 104; height: 104
-            anchors.horizontalCenter: parent.horizontalCenter
-
-            Rectangle { // hub
+    Repeater {
+        model: [{ op: "Up", a: -90 }, { op: "RightUp", a: -45 }, { op: "Right", a: 0 },
+                { op: "RightDown", a: 45 }, { op: "Down", a: 90 }, { op: "LeftDown", a: 135 },
+                { op: "Left", a: 180 }, { op: "LeftUp", a: -135 }]
+        delegate: Item {
+            required property var modelData
+            readonly property real reach: pad.width / 2 - 25
+            width: 38; height: 38
+            x: pad.width / 2 + reach * Math.cos(modelData.a * Math.PI / 180) - width / 2
+            y: pad.height / 2 + reach * Math.sin(modelData.a * Math.PI / 180) - height / 2
+            Rectangle {
+                anchors.fill: parent
+                radius: width / 2
+                color: dirArea.pressed ? Theme.accentDim : (dirArea.containsMouse ? Theme.border : "transparent")
+            }
+            // Chevron drawn from two rounded bars meeting at the tip, so all
+            // eight directions look the same (a rotated glyph doesn't). The
+            // point is 70°, not 90°: a right-angle chevron turned 45° lies
+            // flat along the axes and reads as a corner, not an arrow.
+            Item {
+                id: chevron
                 anchors.centerIn: parent
-                width: 34; height: 34; radius: 17
-                color: Theme.surfaceAlt
-                border.color: Theme.border
-            }
-
-            component Dir: Rectangle {
-                property string op: ""
-                property string glyph: ""
-                width: 30; height: 30; radius: 6
-                color: press.pressed ? Theme.accentDim : Theme.surface
-                border.color: Theme.border
-                Text { anchors.centerIn: parent; text: parent.glyph; color: Theme.text; font.pixelSize: 13 }
-                TapHandler {
-                    id: press
-                    onGrabChanged: (transition, point) => {}
+                width: 14; height: 14
+                rotation: parent.modelData.a
+                readonly property real arm: 35 // degrees from the pointing axis
+                readonly property real rise: 4.5 * Math.sin(arm * Math.PI / 180) - 0.15
+                readonly property color ink: dirArea.pressed || dirArea.containsMouse ? Theme.text : Theme.textMuted
+                Rectangle {
+                    width: 9; height: 2.5; radius: 1.25
+                    x: (parent.width - width) / 2; y: parent.height / 2 - chevron.rise - height / 2
+                    rotation: chevron.arm
+                    color: chevron.ink
+                    antialiasing: true
                 }
-                MouseArea {
-                    anchors.fill: parent
-                    onPressed: pad.move(parent.op)
-                    onReleased: pad.stop()
-                    onCanceled: pad.stop()
+                Rectangle {
+                    width: 9; height: 2.5; radius: 1.25
+                    x: (parent.width - width) / 2; y: parent.height / 2 + chevron.rise - height / 2
+                    rotation: -chevron.arm
+                    color: chevron.ink
+                    antialiasing: true
                 }
             }
-
-            Dir { op: "Up";        glyph: "▲"; anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter }
-            Dir { op: "Down";      glyph: "▼"; anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter }
-            Dir { op: "Left";      glyph: "◀"; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter }
-            Dir { op: "Right";     glyph: "▶"; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter }
-            Dir { op: "LeftUp";    glyph: "↖"; anchors.top: parent.top; anchors.left: parent.left }
-            Dir { op: "RightUp";   glyph: "↗"; anchors.top: parent.top; anchors.right: parent.right }
-            Dir { op: "LeftDown";  glyph: "↙"; anchors.bottom: parent.bottom; anchors.left: parent.left }
-            Dir { op: "RightDown"; glyph: "↘"; anchors.bottom: parent.bottom; anchors.right: parent.right }
+            MouseArea {
+                id: dirArea
+                anchors.fill: parent
+                hoverEnabled: true
+                preventStealing: true
+                cursorShape: Qt.PointingHandCursor
+                onPressed: pad.move(parent.modelData.op)
+                onReleased: pad.stop()
+                onCanceled: pad.stop()
+            }
         }
+    }
 
-        // Zoom rocker
-        Row {
-            visible: pad.showZoom
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 8
-            component Zoom: Rectangle {
-                property string op: ""
-                property string glyph: ""
-                width: 46; height: 30; radius: 6
-                color: zpress.pressed ? Theme.accentDim : Theme.surface
-                border.color: Theme.border
-                Text { anchors.centerIn: parent; text: parent.glyph; color: Theme.text; font.pixelSize: 15 }
-                MouseArea {
-                    id: zpress
-                    anchors.fill: parent
-                    onPressed: pad.move(parent.op)
-                    onReleased: pad.stop()
-                    onCanceled: pad.stop()
-                }
-            }
-            Zoom { op: "ZoomDec"; glyph: "−" }
-            Zoom { op: "ZoomInc"; glyph: "+" }
+    Rectangle {
+        anchors.centerIn: parent
+        width: 54; height: 54
+        radius: width / 2
+        color: homeArea.pressed ? Theme.accentDim
+             : (homeArea.containsMouse && pad.showHome ? Theme.border : Theme.surface)
+        border.color: homeArea.containsMouse && pad.showHome ? Theme.accent : Theme.border
+        Text {
+            anchors.centerIn: parent
+            text: "⌂"
+            font.pixelSize: 22
+            color: pad.showHome ? Theme.text : Theme.textMuted
+            opacity: pad.showHome ? 1 : 0.35
         }
+        MouseArea {
+            id: homeArea
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: pad.showHome
+            cursorShape: Qt.PointingHandCursor
+            onClicked: pad.homeRequested()
+        }
+        ToolTip.visible: homeArea.containsMouse && pad.showHome
+        ToolTip.delay: 500
+        ToolTip.text: qsTr("Return to home")
     }
 }

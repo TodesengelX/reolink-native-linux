@@ -169,6 +169,9 @@ public:
     Q_INVOKABLE void fetchZoomFocus(int row);
     // what: "zoom" | "focus"; pos within GetZoomFocus's range.
     Q_INVOKABLE void ptzZoomFocusTo(int row, const QString &what, int pos);
+    // One-shot auto focus: zoom one step and back, which makes the camera run its
+    // own autofocus. Reports ptzCommandDone("AutoFocus").
+    Q_INVOKABLE void ptzAutoFocus(int row);
     // 3D positioning: pan, tilt and zoom so the box at (left, top), w x h, fills
     // the view; all fractions (0..1) of the frame of the stream being shown
     // (mainStream = HD). w = h = 0 centres the camera on (left, top).

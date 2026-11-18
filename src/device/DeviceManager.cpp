@@ -1206,6 +1206,44 @@ void DeviceManager::ptzZoomFocusTo(int row, const QString &what, int pos)
                   api::startZoomFocus(m_entries.at(row).channel, op, pos));
 }
 
+void DeviceManager::ptzAutoFocus(int row)
+{
+    auto client = clientFor(row);
+    if (!client) {
+        emit ptzCommandDone(row, QStringLiteral("AutoFocus"), false, tr("device not ready"));
+        return;
+    }
+    const int ch = m_entries.at(row).channel;
+    m_pending.addFuture(QtConcurrent::run([this, client, row, ch] {
+        // Through an RLN8-410 every autofocus command is refused (HTTP Get/
+        // SetAutoFocus, Baichuan 224/225: 405). The camera does refocus after
+        // any zoom move, landing back on the sharp position (verified: focus
+        // defocused to 300 returned to 678 after zoom 0 -> 1 -> 0), so trigger
+        // it with a one-step nudge and back.
+        QString error;
+        bool ok = false;
+        const api::CommandResult zf = getWithRetry(*client, QStringLiteral("GetZoomFocus"), ch);
+        const Json zoom = jsonObj(jsonObj(zf.value, "ZoomFocus"), "zoom");
+        const int pos = jsonInt(zoom, "pos", -1);
+        const int max = jsonInt(jsonObj(jsonObj(jsonObj(zf.range, "ZoomFocus"), "zoom"), "pos"), "max", pos + 1);
+        if (!zf.ok || pos < 0) {
+            error = tr("couldn't read the lens position");
+        } else {
+            const int nudge = pos < max ? pos + 1 : pos - 1;
+            ok = singleOk(client->call(Json::array({api::startZoomFocus(ch, QStringLiteral("ZoomPos"), nudge)})), &error);
+            if (ok) {
+                QThread::msleep(1200);
+                ok = singleOk(client->call(Json::array({api::startZoomFocus(ch, QStringLiteral("ZoomPos"), pos)})), &error);
+            }
+        }
+        if (!ok)
+            qCWarning(lcProto) << "PTZ auto focus failed:" << error;
+        QMetaObject::invokeMethod(
+            this, [this, row, ok, error] { emit ptzCommandDone(row, QStringLiteral("AutoFocus"), ok, error); },
+            Qt::QueuedConnection);
+    }));
+}
+
 void DeviceManager::ptz3D(int row, double left, double top, double w, double h, int speed,
                           bool mainStream)
 {
