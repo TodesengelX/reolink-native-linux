@@ -44,6 +44,14 @@ Item {
     // Some camera firmware closes /flv when HTTPS is enabled. After the first
     // FLV failure the page uses the native Baichuan sub stream for playback.
     property bool useBaichuan: false
+    // The single pane's picture is shown only while it belongs to the current
+    // camera and day: a paused or stopped session keeps its last frame (with
+    // no hint over it), but switching camera or day doesn't leave the old one
+    // on screen. Keyed on the player's state, which it always reports, rather
+    // than framesDecoded, which drops to 0 on stop() without notifying.
+    readonly property string _selKey: deviceRow + "/" + selYear + "-" + selMonth + "-" + selDay
+    property string _picKey: ""
+    readonly property bool hasPicture: _picKey !== "" && _picKey === _selKey
     onDeviceRowChanged: {
         useBaichuan = false; // that was the previous camera's firmware
         dayEvents = [];      // and those were its detections
@@ -829,7 +837,7 @@ Item {
                         id: video
                         anchors.fill: parent
                         fillMode: VideoOutput.PreserveAspectFit
-                        visible: player.framesDecoded > 0
+                        visible: page.hasPicture
                         orientation: page.camRotation
                         transform: [
                             Scale {
@@ -890,7 +898,9 @@ Item {
                 // Retry on connection error: NVRs are connection-limited and may
                 // momentarily refuse the playback stream.
                 StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true
-                               audioEnabled: page.audioOn && page.paneCount === 1 }
+                               audioEnabled: page.audioOn && page.paneCount === 1
+                               // Its first frame is on screen: the picture is this selection's.
+                               onStateChanged: if (state === StreamPlayer.Streaming) page._picKey = page._selKey }
 
                 // Event jump with no footage: show the event's snapshot instead,
                 // so you still see what triggered it.
@@ -992,6 +1002,8 @@ Item {
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
+                        // Not over a paused or stopped picture: the hint is for an empty view.
+                        visible: player.state === StreamPlayer.Error || !page.hasPicture
                         color: player.state === StreamPlayer.Error ? Theme.danger : Theme.textMuted
                         font.pixelSize: 12
                         text: player.state === StreamPlayer.Error ? player.errorString

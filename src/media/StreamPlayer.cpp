@@ -895,7 +895,9 @@ bool runSession(const std::shared_ptr<Session> &s)
                     postState(s, State::Streaming, QString());
                     qCInfo(lcMedia) << redacted(source) << "first frame delivered";
                 }
-                if (n % 100 == 0)
+                // The first frame too, so a framesDecoded > 0 binding shows the
+                // picture at once rather than after 100 frames.
+                if (n == 1 || n % 100 == 0)
                     postFramesTick(s);
             }
             if (out == converted)
