@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the project is pre-1.0, minor versions may still change behaviour.
 
-## [Unreleased]
+## [0.2.0] — 2026-11-18
 
 A large release: twenty-four community pull requests, a full PTZ panel, and
 audio. Thanks to everyone who sent code: gsoros, thelabcorner, iibaranov-IG,
