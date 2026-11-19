@@ -227,6 +227,9 @@ public:
     // reconnect. Returns false if there's no live session for `row` (caller should
     // then startBaichuanPlayback instead).
     Q_INVOKABLE bool seekBaichuanPlayback(int row, qint64 startEpoch);
+    // True while that seek is still waiting for its first frame (the picture
+    // still shows the old position).
+    Q_INVOKABLE bool baichuanPlaybackSeeking(int row) const;
 
     // Settings: fetch a batch of Get* commands (emits settingsLoaded with a map
     // of cmd -> value) and apply one Set* command (emits settingApplied).

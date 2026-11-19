@@ -2026,6 +2026,14 @@ bool DeviceManager::seekBaichuanPlayback(int row, qint64 startEpoch)
     return client && client->seek(baichuanPlaybackEpoch(row, startEpoch));
 }
 
+bool DeviceManager::baichuanPlaybackSeeking(int row) const
+{
+    if (row != m_playbackRow)
+        return false;
+    auto client = m_playbackClient.lock();
+    return client && client->seeking();
+}
+
 qint64 DeviceManager::baichuanPlaybackEpoch(int row, qint64 epoch) const
 {
     if (row < 0 || row >= m_entries.size())

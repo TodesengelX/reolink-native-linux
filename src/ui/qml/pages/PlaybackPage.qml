@@ -330,6 +330,11 @@ Item {
         interval: 1000; repeat: true
         running: player.state === StreamPlayer.Streaming || page.streamingPanes > 0
         onTriggered: {
+            // A jump in a Baichuan (HD) stream keeps the player streaming while
+            // the picture still shows the old spot: hold the playhead where it
+            // was clicked until the new spot's first frame arrives.
+            if (page.paneCount === 1 && Devices.baichuanPlaybackSeeking(page.deviceRow))
+                return;
             if (page.playheadSecs < 86399) {
                 // In 4-camera mode, only advance if at least half the assigned panes are streaming
                 // to prevent the timeline from drifting too far during heavy buffering.

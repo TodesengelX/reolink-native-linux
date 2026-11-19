@@ -307,6 +307,7 @@ bool BaichuanClient::seek(qint64 startEpoch)
     if (m_finished || m_abort.load())
         return false;
     m_seekEpoch = startEpoch;
+    m_seeking.store(true);
     return true;
 }
 
@@ -314,9 +315,26 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
 {
     BcMediaParser parser;
     bool started = false;
-    // After a seek, discard old in-flight frames until an I-frame at the new
-    // position (POSIX seconds); 0 = no seek pending.
-    qint64 seekTarget = 0;
+    // Seeking. Recorded playback arrives faster than real time, so when a seek
+    // is issued the socket can already hold seconds of the old position (11 MB,
+    // about ten seconds, on an RLN8-410). None of it may play, and a time check
+    // alone can't tell it apart on a short jump. The device answers each
+    // playback request with a FileInfoList reply on the stream's message number
+    // before streaming the new position, so everything ahead of that reply is
+    // old. A little old video can still trail the reply, so the first frame must
+    // also be an I-frame near the requested time. Devices that send no reply rely
+    // on the time check alone, and a seek that never matches stops waiting after
+    // a few seconds rather than hanging.
+    qint64 seekTarget = 0;          // requested POSIX seconds; 0 = no seek pending
+    bool repliesMark = false;       // this device answered the stream request with a reply
+    int repliesPending = 0;         // seeks whose reply hasn't arrived yet
+    QElapsedTimer seekClock;
+    constexpr qint64 kSeekGiveUpMs = 4000;
+    // Frame time minus requested time, learned from the first I-frame. It covers
+    // a device clock in another time zone; otherwise it is the second or two to
+    // the first I-frame.
+    qint64 clockOffset = 0;
+    bool offsetKnown = false;
     // Recorded playback is delivered faster than realtime; pace it to 1x from the
     // frame timestamps so it doesn't fast-forward. Live preview is not paced.
     const bool pace = m_p.startEpoch > 0;
@@ -332,12 +350,24 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
         if (!started) {
             if (!f.keyFrame)
                 return; // recorded playback opens mid-GOP; wait for the first I-frame
-            // On a seek, the connection still carries old-position frames briefly;
-            // drop them until an I-frame lands at the requested time.
-            if (seekTarget > 0 && f.time != 0 && qAbs(qint64(f.time) - seekTarget) > 120)
-                return;
+            if (seekTarget > 0) {
+                const bool gaveUp = seekClock.hasExpired(kSeekGiveUpMs);
+                if (repliesPending > 0 && !gaveUp)
+                    return; // still the old position
+                const qint64 off = qint64(f.time) - (seekTarget + clockOffset);
+                if (offsetKnown && f.time != 0 && (off < -6 || off > 10) && !gaveUp)
+                    return; // old video trailing the reply
+                if (gaveUp)
+                    qCWarning(lcProto) << m_p.host << "baichuan seek: no match after"
+                                       << kSeekGiveUpMs << "ms, playing what arrives";
+                seekTarget = 0;
+                repliesPending = 0;
+            } else if (!offsetKnown && f.time != 0 && m_p.startEpoch > 0) {
+                clockOffset = qint64(f.time) - m_p.startEpoch;
+                offsetKnown = true;
+            }
             started = true;
-            seekTarget = 0;
+            m_seeking.store(false);
         }
         if (pace && f.microseconds) {
             if (!clock.isValid()) {
@@ -391,6 +421,9 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
             parser.reset();
             started = false;
             seekTarget = seekTo; // discard until an I-frame at the new position
+            if (repliesMark)
+                ++repliesPending;
+            seekClock.start();
             clock.invalidate();
             firstMicros = 0;
             QMutexLocker lock(&m_mutex);
@@ -430,14 +463,27 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
         }
         // A refused stream request (preview cmd 3, playback cmd 143) gets an
         // error status and then nothing. End the stream so the player reports
-        // it, rather than waiting on "Connecting" for good.
-        if ((m.id == 3 || m.id == 143) && m.code >= 300) {
+        // it, rather than waiting on "Connecting" for good. Only a plain reply
+        // is a refusal: media can carry a status too. After a seek, the header
+        // that starts the next recording file arrives with status 331, and the
+        // video carries on after it.
+        if ((m.id == 3 || m.id == 143) && m.code >= 300 && m.payloadOffset == 0) {
             qCWarning(lcProto) << m_p.host << "baichuan stream: device refused cmd" << m.id
                                << "with status" << m.code;
             return;
         }
         if (m.msgNum != streamMsgNum)
             continue;
+        // A reply to the stream request (playback answers with a FileInfoList)
+        // carries no Extension and no media, so it must not reach the parser.
+        // It marks where a seek's new position begins.
+        if (m.payloadOffset == 0 && !m.body.isEmpty()
+            && bc::aesCfb(m.body.left(64), aesKey, true).startsWith("<?xml")) {
+            repliesMark = true;
+            if (repliesPending > 0)
+                --repliesPending;
+            continue;
+        }
         // FullAES: the Extension carries <encryptLen> — AES-decrypt that many bytes
         // of the payload, the remainder is plaintext.
         int encLen = 0;

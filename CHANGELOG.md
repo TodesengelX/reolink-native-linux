@@ -10,6 +10,12 @@ While the project is pre-1.0, minor versions may still change behaviour.
 
 ### Fixed
 
+- **Jumping around in HD playback is near-instant.** Clicking elsewhere on the
+  timeline kept playing the old spot for several seconds while the red bar
+  ran on ahead, because video the NVR had already sent was played out first.
+  The new spot now starts in about a third of a second, and the red bar waits
+  for it. After a jump, HD playback also no longer freezes and reconnects when
+  the NVR moves on to its next recording file.
 - **The network scan takes a couple of seconds again** instead of about 40.
   Since 0.2.0 it sent a slow HTTPS probe to every address on the subnet
   rather than first checking for the port every Reolink device listens on,

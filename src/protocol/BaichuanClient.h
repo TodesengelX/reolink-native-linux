@@ -59,6 +59,9 @@ public:
     // the by-time command on the same connection — no reconnect/re-login). Returns
     // false if the session has already ended (caller should start a fresh one).
     bool seek(qint64 startEpoch);
+    // True from seek() until the first frame of the new position is delivered,
+    // so the UI can hold the playhead instead of running ahead of the picture.
+    bool seeking() const { return m_seeking.load(); }
 
     // Blocking read of decoded Annex-B bytes (for an AVIOContext read callback).
     // Returns the number of bytes written, 0 on clean end, or <0 on abort/error.
@@ -85,6 +88,7 @@ private:
     QByteArray m_ring;        // decoded Annex-B awaiting the reader
     bool m_finished = false;  // worker done producing
     qint64 m_seekEpoch = 0;   // pending in-place seek target (0 = none)
+    std::atomic<bool> m_seeking{false};
     QString m_format;         // "h264"/"hevc", guarded by m_mutex
     bool m_started = false;
     QByteArray m_loginTail;   // socket bytes buffered past the login reply
