@@ -28,6 +28,9 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.2.1" date="2026-11-19">
+      <description><p>Jumping around in HD playback is near-instant: the new spot starts in about a third of a second instead of playing the old one for several seconds, and playback no longer freezes at the next recording file after a jump. The network scan takes a couple of seconds again instead of about 40. The playback timeline's time readout no longer covers the detection markers, and a paused picture no longer shows the "click a recording" hint.</p></description>
+    </release>
     <release version="0.2.0" date="2026-11-18">
       <description><p>A PTZ panel with 3D positioning (click to centre, drag a box to zoom), a joystick, zoom and focus with auto focus, preset picture cards, patrol, home position and AI tracking. Live and recorded audio. Detection markers on the playback timeline read from the device itself, with per-type filters. Baichuan-only cameras, spotlight and floodlight control, a 12-pane layout, event-inbox tidying, adding every discovered device at once, a German translation, and an on-screen exit from full screen for touchscreens. The Flatpak now bundles its own FFmpeg, so streams decode on every system.</p></description>
     </release>
