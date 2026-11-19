@@ -261,26 +261,33 @@ Rectangle {
         visible: root.position >= root.viewStart && root.position <= root.viewStart + root.visibleSpan
     }
 
-    // Hover time readout
+    // Time readout under the pointer. It sits in the bottom row with the hour
+    // labels: at the top it covered the detection markers you were aiming at
+    // (#38). While a button is held the hover handler stops getting moves, so
+    // it follows the press instead and shows the time you are dragging to.
     Rectangle {
         id: hoverTip
-        visible: hover.hovered
-        x: Math.min(Math.max(0, hover.point.position.x - width / 2), root.width - width)
-        y: 2
+        readonly property real pointerX: track.pressed ? track.mouseX : hover.point.position.x
+        visible: hover.hovered || track.pressed
+        x: Math.min(Math.max(0, pointerX - width / 2), root.width - width)
+        y: root.trackHeight - height - 1
         z: 5
         radius: 3
         color: "#cc000000"
         width: tipText.implicitWidth + 8
-        height: tipText.implicitHeight + 4
+        height: tipText.implicitHeight + 2
         Text {
             id: tipText
             anchors.centerIn: parent
             color: "white"
             font.pixelSize: 10
             text: {
+                // Scrubbing the playhead: where it is now.
+                if (track.pressed && track.mode === 1)
+                    return root.clock(track.lastSec);
                 // Show where a click will actually start: "▶ 14:32" when it
                 // snaps to a nearby recording's start.
-                var s = root.secForX(hover.point.position.x);
+                var s = root.secForX(hoverTip.pointerX);
                 var target = root.snapSec(s);
                 return target !== s ? "\u25B6 " + root.clock(target) : root.clock(s);
             }

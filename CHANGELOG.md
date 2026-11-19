@@ -18,6 +18,13 @@ While the project is pre-1.0, minor versions may still change behaviour.
   paused or stopped picture, and switching camera or day no longer leaves the
   previous picture on screen. The 4-camera panes show their picture from the
   first frame instead of after a few seconds of black.
+- The time readout on the playback timeline no longer covers the detection
+  markers you're pointing at: it now sits in the hour-label row under the
+  recordings. While you drag the playhead it follows along and shows where
+  you are, instead of staying where the drag started.
+  ([#38])
+
+[#38]: https://github.com/TodesengelX/reolink-native-linux/issues/38
 
 ## [0.2.0] — 2026-11-18
 
