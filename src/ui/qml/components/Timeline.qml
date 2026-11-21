@@ -49,6 +49,14 @@ Rectangle {
     signal seek(real seconds)
     signal commit(real seconds)
 
+    // Range selection for exporting a clip. While `selecting`, a press-drag on
+    // the track marks [selStart, selEnd] instead of seeking, and the shaded
+    // range's edges can be dragged. -1 = nothing selected.
+    property bool selecting: false
+    property real selStart: -1
+    property real selEnd: -1
+    readonly property bool hasSelection: selStart >= 0 && selEnd > selStart
+
     readonly property real visibleSpan: duration / zoom
     function xForSec(sec) { return (sec - viewStart) / visibleSpan * width; }
     function secForX(x) { return viewStart + x / width * visibleSpan; }
@@ -78,6 +86,11 @@ Rectangle {
     function snapSec(sec) {
         var s = segmentNear(sec, snapPx / width * visibleSpan);
         return s && !(sec >= s.start && sec <= s.end) ? s.start : sec;
+    }
+    function fullClock(sec) {
+        var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+        return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":"
+             + String(s).padStart(2, "0");
     }
     function clock(sec) {
         var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
@@ -250,6 +263,33 @@ Rectangle {
         }
     }
 
+    // Export range: shaded span with a grip at each edge.
+    Rectangle {
+        visible: root.selecting && root.hasSelection
+        x: Math.max(0, root.xForSec(root.selStart))
+        width: Math.max(1, Math.min(root.width, root.xForSec(root.selEnd)) - x)
+        y: 0
+        height: root.trackHeight
+        z: 4
+        color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.22)
+        border.color: Theme.accent
+        border.width: 1
+    }
+    Repeater {
+        model: root.selecting && root.hasSelection ? [root.selStart, root.selEnd] : []
+        Rectangle {
+            required property var modelData
+            x: root.xForSec(modelData) - width / 2
+            y: 0
+            width: 4
+            height: root.trackHeight
+            radius: 2
+            z: 7
+            color: Theme.accent
+            visible: modelData >= root.viewStart && modelData <= root.viewStart + root.visibleSpan
+        }
+    }
+
     // Playhead
     Rectangle {
         x: root.xForSec(root.position)
@@ -285,6 +325,11 @@ Rectangle {
                 // Scrubbing the playhead: where it is now.
                 if (track.pressed && track.mode === 1)
                     return root.clock(track.lastSec);
+                // Marking or adjusting the export range: where the edge is.
+                if (track.pressed && track.mode >= 3)
+                    return root.fullClock(track.lastSec);
+                if (root.selecting)
+                    return root.fullClock(root.secForX(hoverTip.pointerX));
                 // Show where a click will actually start: "▶ 14:32" when it
                 // snaps to a nearby recording's start.
                 var s = root.secForX(hoverTip.pointerX);
@@ -302,8 +347,10 @@ Rectangle {
         property real lastSec: 0
         property real pressX: 0
         property real pressViewStart: 0
-        // 0 = undecided (click seeks on release), 1 = scrub playhead, 2 = pan view
+        // 0 = undecided (click seeks on release), 1 = scrub playhead, 2 = pan view,
+        // 3 = mark a new range, 4 = drag the range start, 5 = drag the range end
         property int mode: 0
+        property real anchorSec: 0
         cursorShape: pressed && mode === 2 ? Qt.ClosedHandCursor
                     : (root.zoom > 1 ? Qt.OpenHandCursor : Qt.ArrowCursor)
         function secAt(x) { return Math.max(0, Math.min(root.duration, root.secForX(x))); }
@@ -313,6 +360,18 @@ Rectangle {
         onPressed: (m) => {
             pressX = m.x;
             pressViewStart = root.viewStart;
+            if (root.selecting) {
+                lastSec = Math.round(secAt(m.x));
+                if (root.hasSelection && Math.abs(m.x - root.xForSec(root.selStart)) <= 8)
+                    mode = 4;
+                else if (root.hasSelection && Math.abs(m.x - root.xForSec(root.selEnd)) <= 8)
+                    mode = 5;
+                else {
+                    mode = 3;
+                    anchorSec = lastSec;
+                }
+                return;
+            }
             // Grabbing the playhead scrubs it; dragging anywhere else pans the
             // zoomed view; a motionless press-release is a click-to-seek.
             mode = Math.abs(m.x - root.xForSec(root.position)) <= 8 ? 1 : 0;
@@ -321,6 +380,20 @@ Rectangle {
         onPositionChanged: (m) => {
             if (!(m.buttons & Qt.LeftButton))
                 return;
+            if (mode >= 3) {
+                lastSec = Math.round(secAt(m.x));
+                if (mode === 3) {
+                    if (Math.abs(m.x - pressX) > 4) {
+                        root.selStart = Math.min(anchorSec, lastSec);
+                        root.selEnd = Math.max(anchorSec, lastSec);
+                    }
+                } else if (mode === 4) {
+                    root.selStart = Math.min(lastSec, root.selEnd - 1);
+                } else {
+                    root.selEnd = Math.max(lastSec, root.selStart + 1);
+                }
+                return;
+            }
             if (mode === 0 && Math.abs(m.x - pressX) > 4)
                 mode = 2;
             if (mode === 1) {
@@ -332,6 +405,8 @@ Rectangle {
             }
         }
         onReleased: (m) => {
+            if (mode >= 3)
+                return; // range edits never seek
             if (mode === 1) {
                 root.commit(lastSec);
             } else if (mode === 0) { // plain click: seek there (snapped to a nearby recording)

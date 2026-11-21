@@ -145,6 +145,12 @@ void BaichuanClient::stop()
     m_cond.wakeAll();
 }
 
+bool BaichuanClient::finished()
+{
+    QMutexLocker lock(&m_mutex);
+    return m_finished;
+}
+
 QString BaichuanClient::ffmpegFormat()
 {
     QMutexLocker lock(&m_mutex);
@@ -370,7 +376,7 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
             started = true;
             m_seeking.store(false);
         }
-        if (pace && f.microseconds) {
+        if (pace && f.microseconds && m_speed.load() > 0) {
             // A speed change re-anchors at this frame so the picture doesn't jump.
             const double speed = m_speed.load();
             if (speed != pacedSpeed) {
@@ -393,7 +399,10 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
                     QThread::msleep(static_cast<unsigned long>(qMin<qint64>(wait, 50)));
             }
         }
-        pushAnnexB(f.annexB);
+        if (m_frameSink)
+            m_frameSink(f);
+        else
+            pushAnnexB(f.annexB);
     };
     if (m_audioSink) {
         parser.onAudio = [&](const QByteArray &adts) {

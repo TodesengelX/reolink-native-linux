@@ -211,6 +211,18 @@ public:
     // Save a main-stream clip covering [startEpoch, +durationSecs] into
     // ~/Videos/Reolink with a friendly name. Emits clipExported/clipExportFailed.
     Q_INVOKABLE void exportClip(int row, qint64 startEpoch, int durationSecs);
+    // Save [startEpoch, endEpoch) (up to a day) as one MP4 in ~/Videos/Reolink,
+    // pulled over Baichuan playback and stream-copied (no re-encode), across
+    // recording files. mainStream picks HD or SD. `folder` overrides the save
+    // location (empty = ~/Videos/Reolink). One export at a time; emits
+    // clipExportProgress while running, then clipExported or clipExportFailed.
+    // Returns false, emitting nothing, when an export is already running.
+    Q_INVOKABLE bool exportRange(int row, qint64 startEpoch, qint64 endEpoch, bool mainStream,
+                                 const QString &folder = QString());
+    // Where exports go when no folder is chosen.
+    Q_INVOKABLE QString defaultExportFolder() const;
+    // Stop the running export; what was saved so far is kept.
+    Q_INVOKABLE void cancelExport();
 
     // Native (Baichuan/TCP 9000) recorded playback: stream the recording from
     // startEpoch straight into `player` — realtime, frame-accurate, full HEVC main.
@@ -301,6 +313,7 @@ signals:
     void hdClipFailed(int row, const QString &error);
     void clipExported(int row, const QString &path);
     void clipExportFailed(int row, const QString &error);
+    void clipExportProgress(int row, double fraction);
     void settingsLoaded(int row, const QVariantMap &values);
     void ptzStateLoaded(int row, const QVariantMap &values);
     // Outcome of a PTZ write (preset save/delete, guard, patrol, tracking, 3D...).
@@ -407,6 +420,7 @@ private:
     void startBaichuan(int row, qint64 startEpoch, rl::StreamPlayer *player, bool mainStream);
     // A wall-clock epoch as Baichuan by-time playback (cmd 143) wants it for this row.
     qint64 baichuanPlaybackEpoch(int row, qint64 epoch) const;
+    std::shared_ptr<std::atomic<bool>> m_exportCancel; // set while an export runs
     void applyValidation(qint64 hostId, const Validation &v);
     void postValidation(qint64 hostId, const Validation &v); // marshals to GUI thread
     std::shared_ptr<ReolinkHttpClient> clientFor(int row);

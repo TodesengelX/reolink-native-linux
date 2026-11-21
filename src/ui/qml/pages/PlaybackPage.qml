@@ -1,6 +1,7 @@
 import QtCore
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtMultimedia
 import ReolinkApp
@@ -145,6 +146,8 @@ Item {
         id: pbStore
         category: "playback"
         property string gridArrangement: ""
+        // Where exported clips are saved ("" = the default, ~/Videos/Reolink).
+        property string exportFolder: ""
         // Detection kinds hidden on the timeline, comma-separated ("" = all shown).
         property string hiddenKinds: ""
         // Remember SD/HD across restarts: event jumps and Play use it.
@@ -538,11 +541,76 @@ Item {
     // Export a clip starting at the playhead (NVR downloads run below
     // realtime, so longer clips take a while — the button shows progress).
     function exportClip(secs) {
-        var epoch = new Date(page.selYear, page.selMonth - 1, page.selDay).getTime() / 1000
-                    + Math.floor(page.playheadSecs);
-        exportBtn.busy = true;
-        statusText.text = qsTr("Exporting clip…");
-        Devices.exportClip(page.deviceRow, epoch, secs);
+        var from = Math.floor(page.playheadSecs);
+        page.exportRange(from, Math.min(86400, from + secs), true);
+    }
+
+    // Export [fromSec, toSec) of the selected day (seconds since midnight).
+    // Stops playback first: the export takes its own Baichuan session and an
+    // NVR serves few of them at once.
+    function exportRange(fromSec, toSec, mainStream) {
+        if (toSec <= fromSec)
+            return;
+        if (exportBtn.busy) {
+            statusText.text = qsTr("An export is already running");
+            return;
+        }
+        var day = new Date(page.selYear, page.selMonth - 1, page.selDay).getTime() / 1000;
+        page._suppressResume = true;
+        player.stop();
+        exportBtn.progress = 0;
+        statusText.text = qsTr("Exporting %1 (%2)…").arg(page.spanText(toSec - fromSec))
+                                                   .arg(mainStream ? "HD" : "SD");
+        if (!Devices.exportRange(page.deviceRow, day + Math.floor(fromSec), day + Math.ceil(toSec),
+                                 mainStream, pbStore.exportFolder)) {
+            statusText.text = qsTr("An export is already running");
+            return;
+        }
+        // A request refused at once (bad range, device not ready) has already
+        // reported through clipExportFailed; only a started export is busy.
+        if (statusText.text.indexOf(qsTr("Export failed")) !== 0)
+            exportBtn.busy = true;
+    }
+
+    // Save location for exports, chosen once and remembered.
+    readonly property string exportFolderShown: pbStore.exportFolder !== ""
+        ? pbStore.exportFolder : Devices.defaultExportFolder()
+    function shortPath(p) {
+        var home = StandardPaths.writableLocation(StandardPaths.HomeLocation).toString()
+                   .replace(/^file:\/\//, "");
+        return p.indexOf(home) === 0 ? "~" + p.slice(home.length) : p;
+    }
+    FolderDialog {
+        id: exportFolderDialog
+        title: qsTr("Save exported clips to")
+        currentFolder: "file://" + page.exportFolderShown
+        onAccepted: pbStore.exportFolder = decodeURIComponent(selectedFolder.toString()
+                                                              .replace(/^file:\/\//, ""))
+    }
+
+    // Range mode: pick the clip on the timeline, like the official client.
+    property bool clipMode: false
+    property bool clipHd: true
+    function startClipMode() {
+        clipHd = page.hdMode;
+        if (!timeline.hasSelection) {
+            var from = Math.floor(page.playheadSecs);
+            timeline.selStart = Math.min(from, 86400 - 300);
+            timeline.selEnd = timeline.selStart + 300;
+        }
+        clipMode = true;
+    }
+    function hms(sec) {
+        var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+        return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":"
+             + String(s).padStart(2, "0");
+    }
+    function spanText(secs) {
+        secs = Math.round(secs);
+        var h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
+        if (h > 0) return h + " h " + m + " min";
+        if (m > 0) return s > 0 ? m + " min " + s + " s" : m + " min";
+        return s + " s";
     }
 
     function openAt(hostId, channel, timestamp) {
@@ -573,14 +641,15 @@ Item {
     Connections {
         target: Devices
         function onClipExported(row, path) {
-            if (row !== page.deviceRow) return;
             exportBtn.busy = false;
             statusText.text = qsTr("Clip saved: %1").arg(path);
         }
         function onClipExportFailed(row, error) {
-            if (row !== page.deviceRow) return;
             exportBtn.busy = false;
             statusText.text = qsTr("Export failed: %1").arg(error);
+        }
+        function onClipExportProgress(row, fraction) {
+            exportBtn.progress = fraction;
         }
         function onRecordingsFound(row, segments) {
             if (page.paneCount === 4) {
@@ -1124,8 +1193,63 @@ Item {
                 position: page.playheadSecs
                 events: page.shownEvents
                 shownKinds: page.shownKinds
+                selecting: page.clipMode
                 onSeek: (seconds) => page.playheadSecs = seconds  // move playhead only
                 onCommit: (seconds) => page.playAt(seconds)       // start playback on release
+            }
+
+            // Export range bar: shown while picking a clip on the timeline.
+            Rectangle {
+                Layout.fillWidth: true
+                visible: page.clipMode && page.paneCount === 1
+                implicitHeight: 34
+                radius: Theme.radius
+                color: Theme.surface
+                border.color: Theme.accent
+                component BarBtn: Rectangle {
+                    property string label: ""
+                    property bool on: false
+                    property bool enabledBtn: true
+                    signal clicked()
+                    width: bbText.implicitWidth + 18; height: 26; radius: Theme.radius
+                    color: on ? Theme.accent : (bbHover.hovered && enabledBtn ? Theme.surfaceAlt : Theme.surface)
+                    border.color: on ? Theme.accent : Theme.border
+                    opacity: enabledBtn ? 1 : 0.45
+                    Text { id: bbText; anchors.centerIn: parent; text: parent.label
+                           color: parent.on ? "white" : Theme.text; font.pixelSize: 12 }
+                    HoverHandler { id: bbHover }
+                    TapHandler { onTapped: if (parent.enabledBtn) parent.clicked() }
+                }
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 6
+                    spacing: 6
+                    Text {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        color: Theme.text
+                        font.pixelSize: 12
+                        text: timeline.hasSelection
+                              ? qsTr("Clip %1 \u2013 %2  \u00B7  %3   (drag across the timeline, or drag an edge)")
+                                    .arg(page.hms(timeline.selStart)).arg(page.hms(timeline.selEnd))
+                                    .arg(page.spanText(timeline.selEnd - timeline.selStart))
+                              : qsTr("Drag across the timeline to pick the clip")
+                    }
+                    BarBtn { label: qsTr("Save to: %1").arg(page.shortPath(page.exportFolderShown))
+                             onClicked: exportFolderDialog.open() }
+                    BarBtn { label: "HD"; on: page.clipHd; onClicked: page.clipHd = true }
+                    BarBtn { label: "SD"; on: !page.clipHd; onClicked: page.clipHd = false }
+                    BarBtn {
+                        label: qsTr("Save clip")
+                        enabledBtn: timeline.hasSelection && !exportBtn.busy
+                        onClicked: {
+                            page.exportRange(timeline.selStart, timeline.selEnd, page.clipHd);
+                            page.clipMode = false;
+                        }
+                    }
+                    BarBtn { label: qsTr("Cancel"); onClicked: page.clipMode = false }
+                }
             }
 
             RowLayout {
@@ -1212,6 +1336,7 @@ Item {
                     id: exportBtn
                     visible: page.paneCount === 1
                     property bool busy: false
+                    property real progress: 0
                     width: expRow.implicitWidth + 18; height: 30; radius: Theme.radius
                     color: expHover.hovered && !busy ? Theme.surfaceAlt : Theme.surface
                     border.color: Theme.border
@@ -1222,20 +1347,30 @@ Item {
                         BusyIndicator { visible: exportBtn.busy; running: visible
                                         width: 14; height: 14
                                         anchors.verticalCenter: parent.verticalCenter }
-                        Text { text: exportBtn.busy ? qsTr("Exporting…") : qsTr("Export clip")
+                        Text { text: exportBtn.busy
+                                     ? qsTr("Exporting %1%  \u2715").arg(Math.round(exportBtn.progress * 100))
+                                     : qsTr("Export clip")
                                color: Theme.text; font.pixelSize: 12
                                anchors.verticalCenter: parent.verticalCenter }
                         Text { visible: !exportBtn.busy; text: "\u25be"; color: Theme.textMuted
                                font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
                     }
                     HoverHandler { id: expHover }
-                    TapHandler { onTapped: if (!exportBtn.busy) exportMenu.popup() }
+                    // While busy, a click cancels; what was saved so far is kept.
+                    TapHandler { onTapped: exportBtn.busy ? Devices.cancelExport() : exportMenu.popup() }
                     ThemedMenu {
                         id: exportMenu
                         ThemedMenuItem { text: qsTr("15 seconds"); onTriggered: page.exportClip(15) }
                         ThemedMenuItem { text: qsTr("30 seconds"); onTriggered: page.exportClip(30) }
                         ThemedMenuItem { text: qsTr("1 minute");  onTriggered: page.exportClip(60) }
                         ThemedMenuItem { text: qsTr("2 minutes"); onTriggered: page.exportClip(120) }
+                        ThemedMenuItem { text: qsTr("5 minutes"); onTriggered: page.exportClip(300) }
+                        ThemedMenuItem { text: qsTr("10 minutes"); onTriggered: page.exportClip(600) }
+                        ThemedMenuSeparator {}
+                        ThemedMenuItem { text: qsTr("Select range\u2026"); onTriggered: page.startClipMode() }
+                        ThemedMenuSeparator {}
+                        ThemedMenuItem { text: qsTr("Save to: %1\u2026").arg(page.shortPath(page.exportFolderShown))
+                                         onTriggered: exportFolderDialog.open() }
                     }
                 }
                 Item { Layout.fillWidth: true }
