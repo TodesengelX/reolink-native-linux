@@ -2,6 +2,7 @@
 
 #include "core/Log.h"
 #include "core/Paths.h"
+#include "media/ClipExporter.h"
 #include "media/StreamPlayer.h"
 #include "protocol/BaichuanClient.h"
 #include "protocol/BaichuanControl.h"
@@ -127,6 +128,7 @@ DeviceManager::DeviceManager(Database *db, CredentialStore *credentials, QObject
 
 DeviceManager::~DeviceManager()
 {
+    cancelExport(); // don't hold app exit for a long export; the file is closed properly
     m_pending.waitForFinished();
 }
 
@@ -1898,65 +1900,94 @@ void DeviceManager::requestHdClip(int row, qint64 startEpoch, int durationSecs)
 
 void DeviceManager::exportClip(int row, qint64 startEpoch, int durationSecs)
 {
-    auto client = clientFor(row);
-    if (!client || row < 0 || row >= m_entries.size() || startEpoch <= 0) {
-        emit clipExportFailed(row, tr("device not ready"));
-        return;
+    // Over Baichuan rather than the web server's cmd=Download: Download saves a
+    // single recording file (a longer clip came back cut at the file boundary)
+    // and some firmware drops the HTTPS request.
+    exportRange(row, startEpoch, startEpoch + qBound(2, durationSecs, 86400), true);
+}
+
+QString DeviceManager::defaultExportFolder() const
+{
+    return Paths::recordingsDir();
+}
+
+bool DeviceManager::exportRange(int row, qint64 startEpoch, qint64 endEpoch, bool mainStream,
+                                const QString &folder)
+{
+    if (row < 0 || row >= m_entries.size() || startEpoch <= 0 || endEpoch <= startEpoch) {
+        emit clipExportFailed(row, tr("nothing to export"));
+        return true;
     }
+    if (m_exportCancel)
+        return false;
     const Entry &e = m_entries.at(row);
-    const int ch = e.channel;
-    const QString host = e.rec.addr;
-    const int port = e.rec.port;
-    const bool https = e.rec.https;
+    if (e.rec.kind == QLatin1String("stream") || !e.primed) {
+        emit clipExportFailed(row, tr("device not ready"));
+        return true;
+    }
+    endEpoch = qMin(endEpoch, startEpoch + 86400);
+
+    ClipExporter::Request req;
+    req.params.host = e.rec.addr;
+    req.params.port = 9000;
+    req.params.username = e.rec.username;
+    req.params.password = e.password;
+    req.params.channel = e.channel;
+    req.params.uid = e.uid;
+    req.params.mainStream = mainStream;
+    req.params.startEpoch = baichuanPlaybackEpoch(row, startEpoch);
+    req.startEpoch = startEpoch;
+    req.endEpoch = endEpoch;
+    req.declaredSize = mainStream ? e.mainSize : e.subSize;
+
     const QString safe = QString(e.chanName.isEmpty() ? e.rec.name : e.chanName)
                              .replace(QRegularExpression(QStringLiteral("[^\\w-]")),
                                       QStringLiteral("_"));
     const QDateTime start = QDateTime::fromSecsSinceEpoch(startEpoch);
-    const QDateTime end = start.addSecs(qBound(2, durationSecs, 300));
-    const QString startStamp = start.toString(QStringLiteral("yyyyMMddHHmmss"));
-
-    m_pending.addFuture(QtConcurrent::run([this, client, ch, row, host, port, https, start, end,
-                                           startStamp, safe] {
-        QString error;
-        QString saved;
-        const api::BatchResult b =
-            client->call(Json::array({api::nvrDownloadBody(ch, start, end, QStringLiteral("main"))}));
-        if (b.transportOk && !b.results.isEmpty() && b.results.first().ok) {
-            const QVector<api::DownloadFile> files = api::parseNvrDownload(b.results.first().value);
-            api::DownloadFile pick;
-            for (const api::DownloadFile &f : files)
-                if (f.fileName.contains(startStamp)) { pick = f; break; }
-            if (pick.fileName.isEmpty())
-                for (const api::DownloadFile &f : files)
-                    if (f.size > pick.size)
-                        pick = f;
-            if (pick.fileName.isEmpty()) {
-                error = tr("no recording covers this moment");
-            } else {
-                const QString url =
-                    api::downloadUrl(host, port, https, pick.fileName, client->token());
-                const QString path = Paths::recordingsDir() + u'/' + safe + u'_'
-                                     + start.toString(QStringLiteral("yyyyMMdd_hhmmss"))
-                                     + QStringLiteral(".mp4");
-                QString dlErr;
-                if (client->downloadToFile(url, path, 300, &dlErr)) // NVR downloads are slow
-                    saved = path;
-                else
-                    error = dlErr.isEmpty() ? tr("download failed") : dlErr;
-            }
-        } else {
-            error = b.error.isEmpty() ? tr("clip request failed") : b.error;
+    const QDateTime end = QDateTime::fromSecsSinceEpoch(endEpoch);
+    QString dir = folder.trimmed();
+    if (dir.startsWith(QLatin1String("~/")))
+        dir = QDir::homePath() + dir.mid(1);
+    if (dir.isEmpty() || !QDir().mkpath(dir) || !QFileInfo(dir).isWritable()) {
+        if (!dir.isEmpty()) {
+            emit clipExportFailed(row, tr("can't write to %1").arg(dir));
+            return true;
         }
+        dir = Paths::recordingsDir();
+    }
+    const QString base = dir + u'/' + safe + u'_'
+                         + start.toString(QStringLiteral("yyyyMMdd_HHmmss")) + u'-'
+                         + end.toString(QStringLiteral("HHmmss"))
+                         + (mainStream ? QString() : QStringLiteral("_SD"));
+    req.path = base + QStringLiteral(".mp4");
+    for (int i = 2; QFile::exists(req.path); ++i)
+        req.path = base + QStringLiteral("_%1.mp4").arg(i);
+
+    auto cancel = std::make_shared<std::atomic<bool>>(false);
+    m_exportCancel = cancel;
+    m_pending.addFuture(QtConcurrent::run([this, row, req, cancel] {
+        const ClipExporter::Result r = ClipExporter::run(req, *cancel, [this, row](double f) {
+            QMetaObject::invokeMethod(
+                this, [this, row, f] { emit clipExportProgress(row, f); }, Qt::QueuedConnection);
+        });
         QMetaObject::invokeMethod(
             this,
-            [this, row, saved, error] {
-                if (!saved.isEmpty())
-                    emit clipExported(row, saved);
+            [this, row, r, path = req.path] {
+                m_exportCancel.reset();
+                if (r.ok)
+                    emit clipExported(row, path);
                 else
-                    emit clipExportFailed(row, error);
+                    emit clipExportFailed(row, r.error);
             },
             Qt::QueuedConnection);
     }));
+    return true;
+}
+
+void DeviceManager::cancelExport()
+{
+    if (m_exportCancel)
+        m_exportCancel->store(true);
 }
 
 void DeviceManager::startBaichuan(int row, qint64 startEpoch, StreamPlayer *player,
@@ -2002,6 +2033,13 @@ void DeviceManager::startBaichuan(int row, qint64 startEpoch, StreamPlayer *play
         [client](unsigned char *buf, int size) { return client->read(buf, size); },
         format,
         [client] { client->stop(); });
+    if (startEpoch > 0) {
+        std::weak_ptr<BaichuanClient> weak = client;
+        player->setSpeedListener([weak](double speed) {
+            if (auto c = weak.lock())
+                c->setSpeed(speed);
+        });
+    }
     player->start();
 }
 

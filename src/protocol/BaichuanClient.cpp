@@ -145,6 +145,12 @@ void BaichuanClient::stop()
     m_cond.wakeAll();
 }
 
+bool BaichuanClient::finished()
+{
+    QMutexLocker lock(&m_mutex);
+    return m_finished;
+}
+
 QString BaichuanClient::ffmpegFormat()
 {
     QMutexLocker lock(&m_mutex);
@@ -335,11 +341,12 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
     // the first I-frame.
     qint64 clockOffset = 0;
     bool offsetKnown = false;
-    // Recorded playback is delivered faster than realtime; pace it to 1x from the
-    // frame timestamps so it doesn't fast-forward. Live preview is not paced.
+    // Recorded playback is delivered faster than realtime; pace it to the chosen
+    // speed (1x by default) from the frame timestamps. Live preview is not paced.
     const bool pace = m_p.startEpoch > 0;
     QElapsedTimer clock;
     quint32 firstMicros = 0;
+    double pacedSpeed = m_speed.load();
     parser.onVideo = [&](const BcMediaParser::VideoFrame &f) {
         if (f.codec != BcMediaParser::Codec::Unknown) {
             QMutexLocker lock(&m_mutex);
@@ -369,12 +376,19 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
             started = true;
             m_seeking.store(false);
         }
-        if (pace && f.microseconds) {
+        if (pace && f.microseconds && m_speed.load() > 0) {
+            // A speed change re-anchors at this frame so the picture doesn't jump.
+            const double speed = m_speed.load();
+            if (speed != pacedSpeed) {
+                clock.invalidate();
+                pacedSpeed = speed;
+            }
             if (!clock.isValid()) {
                 clock.start();
                 firstMicros = f.microseconds;
             }
-            const qint64 targetMs = (qint64(f.microseconds) - qint64(firstMicros)) / 1000;
+            const qint64 targetMs =
+                qint64(((qint64(f.microseconds) - qint64(firstMicros)) / 1000) / speed);
             const qint64 elapsed = clock.elapsed();
             if (targetMs < 0 || targetMs - elapsed > 10000) {
                 clock.restart(); // timestamp discontinuity/seek — rebase
@@ -385,7 +399,10 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
                     QThread::msleep(static_cast<unsigned long>(qMin<qint64>(wait, 50)));
             }
         }
-        pushAnnexB(f.annexB);
+        if (m_frameSink)
+            m_frameSink(f);
+        else
+            pushAnnexB(f.annexB);
     };
     if (m_audioSink) {
         parser.onAudio = [&](const QByteArray &adts) {
