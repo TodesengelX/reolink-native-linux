@@ -205,6 +205,7 @@ bool BaichuanControl::open()
     }
     const QString nonce = QString::fromUtf8(nonceXml.mid(a + 7, z - a - 7));
     m_aesKey = bc::aesKey(nonce, m_p.password);
+    m_cipher = bc::cipherFromNonceStatus(nonceMsg.status);
 
     // Step 2: modern login (XOR body, but the modern 0x6414 header).
     const QByteArray user = bc::modernHash(m_p.username, nonce);
@@ -232,20 +233,20 @@ bool BaichuanControl::open()
     return true;
 }
 
-// Decrypt a reply body. Settings replies are usually a single AES-CFB segment
+// Decrypt a reply body. Settings replies are usually a single encrypted segment
 // (the config XML); some carry two independently-encrypted segments split at
 // payload_offset. Try the whole body first, fall back to the split, sanity-checked
 // on a leading XML declaration.
-static QByteArray decryptReply(const Msg &m, const QByteArray &key)
+static QByteArray decryptReply(const Msg &m, bc::Cipher cipher, const QByteArray &key)
 {
     if (m.body.isEmpty())
         return {};
-    const QByteArray whole = bc::aesCfb(m.body, key, /*decrypt=*/true);
+    const QByteArray whole = bc::open(cipher, m.body, key, m.chId);
     if (whole.contains("<?xml") || whole.contains("<body"))
         return whole;
     if (m.payloadOffset > 0 && m.payloadOffset < static_cast<quint32>(m.body.size())) {
-        const QByteArray s1 = bc::aesCfb(m.body.left(m.payloadOffset), key, true);
-        const QByteArray s2 = bc::aesCfb(m.body.mid(m.payloadOffset), key, true);
+        const QByteArray s1 = bc::open(cipher, m.body.left(m.payloadOffset), key, m.chId);
+        const QByteArray s2 = bc::open(cipher, m.body.mid(m.payloadOffset), key, m.chId);
         return s1 + s2;
     }
     return whole;
@@ -265,9 +266,9 @@ QByteArray BaichuanControl::transactReply(quint32 requestCmd, quint32 responseCm
         return {};
     const quint8 chId = channel < 0 ? 250 : static_cast<quint8>(channel + 1);
     const QByteArray ext = channel < 0 ? QByteArray() : channelExtension(channel);
-    const QByteArray encExt = ext.isEmpty() ? QByteArray() : bc::aesCfb(ext, m_aesKey, false);
+    const QByteArray encExt = ext.isEmpty() ? QByteArray() : bc::seal(m_cipher, ext, m_aesKey, chId);
     const QByteArray encBody =
-        bodyXml.isEmpty() ? QByteArray() : bc::aesCfb(bodyXml, m_aesKey, false);
+        bodyXml.isEmpty() ? QByteArray() : bc::seal(m_cipher, bodyXml, m_aesKey, chId);
     const quint32 messId = (++m_messId) & 0xFFFFFF;
 
     m_sock->write(modernMessage(requestCmd, chId, messId, encExt, encBody));
@@ -278,7 +279,7 @@ QByteArray BaichuanControl::transactReply(quint32 requestCmd, quint32 responseCm
         return {};
     if (statusOut)
         *statusOut = reply.status;
-    return decryptReply(reply, m_aesKey);
+    return decryptReply(reply, m_cipher, m_aesKey);
 }
 
 QByteArray BaichuanControl::transactReplyAny(quint32 requestCmd,
@@ -290,8 +291,8 @@ QByteArray BaichuanControl::transactReplyAny(quint32 requestCmd,
         return {};
     const quint8 chId = channel < 0 ? 250 : static_cast<quint8>(channel + 1);
     const QByteArray ext = channel < 0 ? QByteArray() : channelExtension(channel);
-    const QByteArray encExt = ext.isEmpty() ? QByteArray() : bc::aesCfb(ext, m_aesKey, false);
-    const QByteArray encBody = bodyXml.isEmpty() ? QByteArray() : bc::aesCfb(bodyXml, m_aesKey, false);
+    const QByteArray encExt = ext.isEmpty() ? QByteArray() : bc::seal(m_cipher, ext, m_aesKey, chId);
+    const QByteArray encBody = bodyXml.isEmpty() ? QByteArray() : bc::seal(m_cipher, bodyXml, m_aesKey, chId);
     const quint32 messId = (++m_messId) & 0xFFFFFF;
     m_sock->write(modernMessage(requestCmd, chId, messId, encExt, encBody));
     m_sock->flush();
@@ -302,7 +303,7 @@ QByteArray BaichuanControl::transactReplyAny(quint32 requestCmd,
         *statusOut = reply.status;
     if (matchedCmd)
         *matchedCmd = reply.cmdId;
-    return decryptReply(reply, m_aesKey);
+    return decryptReply(reply, m_cipher, m_aesKey);
 }
 
 QByteArray BaichuanControl::get(quint32 cmdId, int channel, quint16 *statusOut)
