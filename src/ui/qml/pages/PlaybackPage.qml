@@ -44,6 +44,9 @@ Item {
     // Some camera firmware closes /flv when HTTPS is enabled. After the first
     // FLV failure the page uses the native Baichuan sub stream for playback.
     property bool useBaichuan: false
+    // Recorded-playback speed, like the official client's 1x..16x.
+    readonly property var playSpeeds: [1, 2, 4, 8, 10, 16]
+    property real playSpeed: 1
     // The single pane's picture is shown only while it belongs to the current
     // camera and day: a paused or stopped session keeps its last frame (with
     // no hint over it), but switching camera or day doesn't leave the old one
@@ -342,7 +345,7 @@ Item {
                 for (var i = 0; i < 4; i++) if (page.gridRows[i] >= 0) activeAssigned++;
 
                 if (page.paneCount === 1 || page.streamingPanes >= Math.max(1, activeAssigned / 2)) {
-                    page.playheadSecs += 1;
+                    page.playheadSecs = Math.min(86399, page.playheadSecs + page.playSpeed);
                 }
             }
         }
@@ -903,7 +906,9 @@ Item {
                 // Retry on connection error: NVRs are connection-limited and may
                 // momentarily refuse the playback stream.
                 StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true
-                               audioEnabled: page.audioOn && page.paneCount === 1
+                               speed: page.playSpeed
+                               // Sound only at 1x: sped-up audio is noise and overruns the buffer.
+                               audioEnabled: page.audioOn && page.paneCount === 1 && page.playSpeed === 1
                                // Its first frame is on screen: the picture is this selection's.
                                onStateChanged: if (state === StreamPlayer.Streaming) page._picKey = page._selKey }
 
@@ -1062,6 +1067,7 @@ Item {
                         required property int rotationOverride
                         readonly property int slot: page.gridRows.indexOf(index)
                         readonly property bool isMax: page.maximizedRow === index
+                        speed: page.playSpeed
                         visible: slot >= 0
                         width: isMax ? gridBox.width : gridBox.cw
                         height: isMax ? gridBox.height : gridBox.ch
@@ -1175,6 +1181,30 @@ Item {
                            ? qsTr("This recording has no audio")
                            : qsTr("Mute")
                     onActivated: page.audioOn = !page.audioOn
+                }
+                // Playback speed: 1x, 2x, 4x, 8x, 10x, 16x. Sound plays at 1x only.
+                Ctl {
+                    id: speedCtl
+                    width: 46
+                    glyph: page.playSpeed + "\u00D7"
+                    tip: page.playSpeed === 1 ? qsTr("Playback speed")
+                                              : qsTr("Playback speed (sound off above 1\u00D7)")
+                    onActivated: speedMenu.popup(speedCtl, 0, -speedMenu.implicitHeight)
+                    Menu {
+                        id: speedMenu
+                        Instantiator {
+                            model: page.playSpeeds
+                            delegate: MenuItem {
+                                required property var modelData
+                                text: modelData + "\u00D7"
+                                checkable: true
+                                checked: page.playSpeed === modelData
+                                onTriggered: page.playSpeed = modelData
+                            }
+                            onObjectAdded: (index, object) => speedMenu.insertItem(index, object)
+                            onObjectRemoved: (index, object) => speedMenu.removeItem(object)
+                        }
+                    }
                 }
                 // Export: save a main-stream MP4 of the moment at the playhead.
                 // Single-pane only — it targets THE camera, and grid mode has four.

@@ -822,6 +822,7 @@ bool runSession(const std::shared_ptr<Session> &s)
     qint64 lastGoodFrameUs = av_gettime_relative();
     qint64 playbackStartUs = 0;
     qint64 firstPtsUs = AV_NOPTS_VALUE;
+    double pacedSpeed = 1.0; // speed the current pacing anchor was taken at
 
     // Drain one decoded frame at a time; shared by the normal and flush paths.
     auto receiveFrames = [&]() {
@@ -878,11 +879,16 @@ bool runSession(const std::shared_ptr<Session> &s)
             if (!live && decoded->pts != AV_NOPTS_VALUE) {
                 const qint64 ptsUs =
                     av_rescale_q(decoded->pts, stream->time_base, AVRational{1, 1000000});
-                if (firstPtsUs == static_cast<qint64>(AV_NOPTS_VALUE) || ptsUs < firstPtsUs) {
+                // A speed change re-anchors at this frame so the picture doesn't jump.
+                const double speed = s->speed.load();
+                if (firstPtsUs == static_cast<qint64>(AV_NOPTS_VALUE) || ptsUs < firstPtsUs
+                    || speed != pacedSpeed) {
                     firstPtsUs = ptsUs;
                     playbackStartUs = av_gettime_relative();
+                    pacedSpeed = speed;
                 }
-                const qint64 waitUs = (playbackStartUs + (ptsUs - firstPtsUs)) - av_gettime_relative();
+                const qint64 waitUs = (playbackStartUs + qint64((ptsUs - firstPtsUs) / speed))
+                                      - av_gettime_relative();
                 if (waitUs > 0 && waitUs < 2000000)
                     abortableSleepUs(s.get(), waitUs);
             }
@@ -1194,6 +1200,7 @@ void StreamPlayer::setSource(const QString &source)
     m_pendingReader = nullptr; // URL source supersedes any packet source
     m_pendingFormat.clear();
     m_pendingStop = nullptr;
+    m_speedListener = nullptr;
     m_source = source;
     emit sourceChanged();
 }
@@ -1213,6 +1220,7 @@ void StreamPlayer::setPacketSource(std::function<int(unsigned char *, int)> read
     m_pendingReader = std::move(reader);
     m_pendingFormat = format;
     m_pendingStop = std::move(onStop);
+    m_speedListener = nullptr;
     m_source.clear();
     emit sourceChanged();
 }
@@ -1267,6 +1275,26 @@ void StreamPlayer::setRetryOnError(bool v)
     emit retryOnErrorChanged();
 }
 
+void StreamPlayer::setSpeed(double speed)
+{
+    speed = qBound(0.25, speed, 64.0);
+    if (qFuzzyCompare(m_speed, speed))
+        return;
+    m_speed = speed;
+    if (m_session)
+        m_session->speed.store(speed);
+    if (m_speedListener)
+        m_speedListener(speed);
+    emit speedChanged();
+}
+
+void StreamPlayer::setSpeedListener(std::function<void(double)> listener)
+{
+    m_speedListener = std::move(listener);
+    if (m_speedListener)
+        m_speedListener(m_speed);
+}
+
 void StreamPlayer::start()
 {
     if (m_source.isEmpty() && !m_pendingReader)
@@ -1281,6 +1309,7 @@ void StreamPlayer::start()
     s->expectedSize = m_expectedSize;
     s->loop.store(m_loop);
     s->retryOnError.store(m_retryOnError);
+    s->speed.store(m_speed);
     if (!m_audioRing)
         m_audioRing = std::make_shared<AudioRing>(chooseAudioFormat());
     s->audioRing = m_audioRing;
