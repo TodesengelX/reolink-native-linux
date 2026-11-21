@@ -59,7 +59,13 @@ Item {
     // Not for NVR channels; see PlaybackPane.flvFallbackAllowed().
     function flvFallbackAllowed() {
         var c = Devices.cameraInfo(page.deviceRow);
-        return !!c && c.kind !== "nvr";
+        if (!c)
+            return false;
+        // The single pane is the only playback stream, so an NVR whose /flv is
+        // refused (some firmware closes it over HTTPS) can take its one Baichuan
+        // session. The 4-pane grid keeps NVRs on FLV: there the panes would all
+        // fight over that one slot (f9096e0).
+        return c.kind !== "nvr" || page.paneCount === 1;
     }
 
     // ---- Synced multi-camera playback ---------------------------------------
