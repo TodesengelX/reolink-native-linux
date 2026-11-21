@@ -75,4 +75,36 @@ QByteArray aesCfb(const QByteArray &in, const QByteArray &key, bool decrypt)
     return out;
 }
 
+Cipher cipherFromNonceStatus(quint16 status)
+{
+    switch (status & 0xFF) {
+    case 0x00:
+        return Cipher::None;
+    case 0x01:
+        return Cipher::Xor;
+    default:
+        return Cipher::Aes;
+    }
+}
+
+QByteArray seal(Cipher cipher, const QByteArray &in, const QByteArray &key, quint8 xorOffset)
+{
+    switch (cipher) {
+    case Cipher::None:
+        return in;
+    case Cipher::Xor:
+        return xorCrypt(in, xorOffset);
+    case Cipher::Aes:
+        break;
+    }
+    return aesCfb(in, key, false);
+}
+
+QByteArray open(Cipher cipher, const QByteArray &in, const QByteArray &key, quint8 xorOffset)
+{
+    if (cipher == Cipher::Aes)
+        return aesCfb(in, key, true);
+    return seal(cipher, in, key, xorOffset); // XOR is its own inverse
+}
+
 } // namespace rl::bc

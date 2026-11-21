@@ -1,5 +1,6 @@
 #pragma once
 
+#include "protocol/BcCrypto.h"
 #include "protocol/ReolinkApi.h"
 
 #include <QByteArray>
@@ -134,6 +135,7 @@ private:
     Params m_p;
     std::unique_ptr<QTcpSocket> m_sock;
     QByteArray m_aesKey;
+    bc::Cipher m_cipher = bc::Cipher::Aes; // what the device chose at login
     QByteArray m_netBuf;      // socket bytes buffered past the last parsed reply
     quint32 m_messId = 0;     // per-connection RPC counter
     FailureKind m_lastFailure = FailureKind::None;

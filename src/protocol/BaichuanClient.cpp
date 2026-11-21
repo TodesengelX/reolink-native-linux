@@ -213,7 +213,8 @@ bool BaichuanClient::connectAndLogin(QTcpSocket &sock, QByteArray &aesKey)
         return false;
     };
 
-    // Step 1: legacy-upgrade requesting AES (this firmware refuses BCEncrypt).
+    // Step 1: legacy-upgrade requesting AES. Most firmware agrees; older firmware
+    // answers with BCEncrypt instead, and the session then uses that (m_cipher).
     // The login handshake is connection-level, ALWAYS channel 0 — the NVR rejects
     // a login framed with a camera channel. The camera is selected later by the
     // stream request (header channel byte + <channelId> in its XML).
@@ -229,6 +230,7 @@ bool BaichuanClient::connectAndLogin(QTcpSocket &sock, QByteArray &aesKey)
         return false;
     const QString nonce = QString::fromUtf8(nonceXml.mid(a + 7, z - a - 7));
     aesKey = bc::aesKey(nonce, m_p.password);
+    m_cipher = bc::cipherFromNonceStatus(nonceMsg.code);
 
     // Step 2: modern login (XOR body — msg_id 1 is always XOR).
     const QByteArray user = bc::modernHash(m_p.username, nonce);
@@ -261,7 +263,7 @@ bool BaichuanClient::startStream(QTcpSocket &sock, const QByteArray &aesKey)
             "<channelId>" + QByteArray::number(m_p.channel) + "</channelId>\n<handle>" +
             QByteArray::number(m_p.mainStream ? 0 : 256) + "</handle>\n<streamType>" +
             streamName.toUtf8() + "</streamType>\n</Preview></body>\n";
-        sock.write(frame(3, m_p.channel, streamByte, 20, 0, 0x6414, bc::aesCfb(preview, aesKey, false)));
+        sock.write(frame(3, m_p.channel, streamByte, 20, 0, 0x6414, bc::seal(m_cipher, preview, aesKey, m_p.channel)));
         sock.flush();
         m_streamTail = netBuf;
         return true;
@@ -295,7 +297,7 @@ void BaichuanClient::sendPlayback(QTcpSocket &sock, const QByteArray &aesKey, qi
         "<streamType>" + streamName + "</streamType>\n"
         + timeXml(QStringLiteral("startTime"), start) + "\n"
         + timeXml(QStringLiteral("endTime"), dayEnd) + "\n</FileInfo>\n</FileInfoList>\n</body>\n";
-    sock.write(frame(143, m_p.channel, streamByte, 20, 0, 0x6414, bc::aesCfb(byTime, aesKey, false)));
+    sock.write(frame(143, m_p.channel, streamByte, 20, 0, 0x6414, bc::seal(m_cipher, byTime, aesKey, m_p.channel)));
     sock.flush();
 }
 
@@ -478,17 +480,18 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
         // carries no Extension and no media, so it must not reach the parser.
         // It marks where a seek's new position begins.
         if (m.payloadOffset == 0 && !m.body.isEmpty()
-            && bc::aesCfb(m.body.left(64), aesKey, true).startsWith("<?xml")) {
+            && bc::open(m_cipher, m.body.left(64), aesKey, m.channel).startsWith("<?xml")) {
             repliesMark = true;
             if (repliesPending > 0)
                 --repliesPending;
             continue;
         }
         // FullAES: the Extension carries <encryptLen> — AES-decrypt that many bytes
-        // of the payload, the remainder is plaintext.
+        // of the payload, the remainder is plaintext. Under BCEncrypt only the
+        // Extension is encrypted and the media is plain.
         int encLen = 0;
         if (m.payloadOffset > 0) {
-            const QByteArray ext = bc::aesCfb(m.body.left(m.payloadOffset), aesKey, true);
+            const QByteArray ext = bc::open(m_cipher, m.body.left(m.payloadOffset), aesKey, m.channel);
             const int p = ext.indexOf("<encryptLen>");
             if (p >= 0) {
                 const int q = ext.indexOf("</encryptLen>", p);
@@ -496,7 +499,7 @@ void BaichuanClient::pumpMedia(QTcpSocket &sock, const QByteArray &aesKey, quint
             }
         }
         const QByteArray payload = m.body.mid(m.payloadOffset);
-        const QByteArray media = encLen > 0
+        const QByteArray media = encLen > 0 && m_cipher == bc::Cipher::Aes
             ? bc::aesCfb(payload.left(encLen), aesKey, true) + payload.mid(encLen)
             : payload;
         parser.append(media);

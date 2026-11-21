@@ -30,4 +30,16 @@ QByteArray aesKey(const QString &nonce, const QString &password);
 // control bodies and, under FullAES, the media payload.
 QByteArray aesCfb(const QByteArray &in, const QByteArray &key, bool decrypt);
 
+// The body encryption a device chose for the session, from the status of its
+// nonce reply (0xDD00 none, 0xDD01 BCEncrypt, 0xDD02 AES). We ask for AES, but
+// older firmware (e.g. an RLC-410S) only offers BCEncrypt and answers an
+// AES-encrypted request with 400.
+enum class Cipher { None, Xor, Aes };
+Cipher cipherFromNonceStatus(quint16 status);
+
+// Encrypt/decrypt a body under the session's cipher. `xorOffset` is the
+// message header's channel_id byte; `key` is the AES key (unused otherwise).
+QByteArray seal(Cipher cipher, const QByteArray &in, const QByteArray &key, quint8 xorOffset);
+QByteArray open(Cipher cipher, const QByteArray &in, const QByteArray &key, quint8 xorOffset);
+
 } // namespace rl::bc

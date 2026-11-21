@@ -1,6 +1,7 @@
 #pragma once
 
 #include "media/BcMediaParser.h"
+#include "protocol/BcCrypto.h"
 
 #include <QByteArray>
 #include <QMutex>
@@ -93,6 +94,7 @@ private:
     bool m_started = false;
     QByteArray m_loginTail;   // socket bytes buffered past the login reply
     QByteArray m_streamTail;  // socket bytes buffered past the stream-start reply
+    bc::Cipher m_cipher = bc::Cipher::Aes; // what the device chose at login
 };
 
 } // namespace rl

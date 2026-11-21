@@ -875,6 +875,24 @@ private slots:
         QCOMPARE(bc::aesCfb(ct, key, /*decrypt=*/true), pt);        // decrypt round-trips
     }
 
+    void bcNegotiatedCipher()
+    {
+        // The nonce reply's status says which cipher the device picked. An
+        // RLC-410S answers 0xDD01 (BCEncrypt), an RLC-420 0xDD02 (AES).
+        QCOMPARE(bc::cipherFromNonceStatus(0xDD00), bc::Cipher::None);
+        QCOMPARE(bc::cipherFromNonceStatus(0xDD01), bc::Cipher::Xor);
+        QCOMPARE(bc::cipherFromNonceStatus(0xDD02), bc::Cipher::Aes);
+
+        const QByteArray key = bc::aesKey(QStringLiteral("9E6D1FCB9E69846D"),
+                                          QStringLiteral("123456"));
+        const QByteArray xml = QByteArrayLiteral("<?xml version=\"1.0\" ?><body><Preview/></body>");
+        QCOMPARE(bc::seal(bc::Cipher::None, xml, key, 0), xml);
+        QCOMPARE(bc::seal(bc::Cipher::Xor, xml, key, 3), bc::xorCrypt(xml, 3));
+        QCOMPARE(bc::seal(bc::Cipher::Aes, xml, key, 3), bc::aesCfb(xml, key, false));
+        for (bc::Cipher c : {bc::Cipher::None, bc::Cipher::Xor, bc::Cipher::Aes})
+            QCOMPARE(bc::open(c, bc::seal(c, xml, key, 3), key, 3), xml);
+    }
+
     void bcMediaParser()
     {
         // Info V1 (32 bytes): sets declared size. Then an H.264 I-frame carrying a
