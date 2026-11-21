@@ -2002,6 +2002,13 @@ void DeviceManager::startBaichuan(int row, qint64 startEpoch, StreamPlayer *play
         [client](unsigned char *buf, int size) { return client->read(buf, size); },
         format,
         [client] { client->stop(); });
+    if (startEpoch > 0) {
+        std::weak_ptr<BaichuanClient> weak = client;
+        player->setSpeedListener([weak](double speed) {
+            if (auto c = weak.lock())
+                c->setSpeed(speed);
+        });
+    }
     player->start();
 }
 

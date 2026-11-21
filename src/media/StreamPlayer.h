@@ -46,6 +46,8 @@ class StreamPlayer : public QObject
     Q_PROPERTY(qint64 framesDecoded READ framesDecoded NOTIFY framesDecodedChanged)
     Q_PROPERTY(bool loop READ loop WRITE setLoop NOTIFY loopChanged)
     Q_PROPERTY(bool retryOnError READ retryOnError WRITE setRetryOnError NOTIFY retryOnErrorChanged)
+    // Recorded-playback speed multiplier (1 = real time). Live sources ignore it.
+    Q_PROPERTY(double speed READ speed WRITE setSpeed NOTIFY speedChanged)
     Q_PROPERTY(bool recording READ recording NOTIFY recordingChanged)
     // Play the stream's audio track (if it has one). Off by default; the
     // track is still demuxed but not decoded while off.
@@ -74,6 +76,9 @@ public:
         // Retry on connection error even for non-live sources (playback FLV on a
         // connection-limited NVR often needs a couple of attempts).
         std::atomic<bool> retryOnError{false};
+
+        // Playback speed for file pacing (1 = real time).
+        std::atomic<double> speed{1.0};
 
         // Recording taps this same demux session (DESIGN §5.5): no second stream.
         std::atomic<bool> recordRequested{false};
@@ -131,6 +136,13 @@ public:
     bool retryOnError() const { return m_retryOnError; }
     void setRetryOnError(bool v);
 
+    double speed() const { return m_speed; }
+    void setSpeed(double speed);
+    // A packet source paces itself (native Baichuan): it is told the speed
+    // here, now and on every change. Cleared by setSource()/setPacketSource().
+    // Not a QML API.
+    void setSpeedListener(std::function<void(double)> listener);
+
     bool audioEnabled() const { return m_audioEnabled; }
     void setAudioEnabled(bool on);
     bool hasAudio() const { return m_hasAudio; }
@@ -164,6 +176,7 @@ signals:
     void framesDecodedChanged();
     void loopChanged();
     void retryOnErrorChanged();
+    void speedChanged();
     void recordingChanged();
     void audioEnabledChanged();
     void hasAudioChanged();
@@ -186,6 +199,8 @@ private:
     QString m_errorString;
     bool m_recording = false;
     bool m_retryOnError = false;
+    double m_speed = 1.0;
+    std::function<void(double)> m_speedListener;
     bool m_audioEnabled = false;
     bool m_hasAudio = false;
     std::shared_ptr<AudioRing> m_audioRing; // created on first start()

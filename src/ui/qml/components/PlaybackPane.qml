@@ -54,6 +54,7 @@ Rectangle {
     // pane at a time is the constraint, not a style choice.
     property bool showHdToggle: false
     property bool audioOn: false // this pane is the one being listened to
+    property real speed: 1       // recorded-playback speed, set by the page
     property bool hdActive: false
     // HTTP-FLV is unavailable over HTTPS on some camera firmware (the server
     // closes the TLS connection on /flv). Once it fails, use Baichuan for the
@@ -190,7 +191,8 @@ Rectangle {
     // Retry on connection error: NVRs are connection-limited and may
     // momentarily refuse a playback stream while others are opening.
     StreamPlayer { id: player; videoSink: video.videoSink; retryOnError: true
-                   audioEnabled: root.audioOn }
+                   speed: root.speed
+                   audioEnabled: root.audioOn && root.speed === 1 }
     // If FLV never gets past Connecting (some firmware accepts TLS and then
     // stalls), do not leave the pane spinning forever: fall back to Baichuan.
     Timer {
